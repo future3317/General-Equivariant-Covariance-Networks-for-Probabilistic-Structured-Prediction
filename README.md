@@ -36,7 +36,9 @@ The library is organized into four layers:
 | `gecn/spd_maps/` | Structure-preserving maps from symmetric operators to SPD matrices. |
 | `gecn/distributions/` | Gaussian, Student-t, and robust-surrogate losses. |
 | `gecn/models/` | Backbone, mean/covariance heads, and `StructuredProbabilisticPredictor`. |
-| `tests/` | Unit tests for representations, equivariance, SPD maps, distributions, and integration. |
+| `gecn/scripts/` | Training scripts for dielectric tensor and elasticity tensor tasks. |
+| `gecn/experiments/` | Synthetic covariance-recovery experiment. |
+| `tests/` | Unit tests for representations, equivariance, SPD maps, distributions, tensor conversions, synthetic experiment, and integration. |
 | `equivariant_network.py` | **Legacy** ICML `EquivariantUncertaintyNetwork` (rank-2, 6×6 KM). |
 | `train.py` | **Legacy** ICML training script. |
 | `stable_loss_implementation.py` | **Legacy** ICML loss with anisotropic eigenvalue jitter. |
@@ -79,6 +81,54 @@ The library is organized into four layers:
        distribution=GaussianNLL(),
    )
    ```
+
+## Training scripts
+
+Three end-to-end scripts are provided under `gecn/scripts/` and `gecn/experiments/`.
+They use the new `gecn` architecture and are independent of the legacy root-level
+files.
+
+### Dielectric tensor (`0e + 2e` output, full-rank covariance)
+
+```bash
+python gecn/scripts/train_dielectric.py \
+  --data_dir data/mp_dielectric \
+  --save_dir checkpoints_gecn_dielectric \
+  --hidden_dim 32 --lmax 2 --num_layers 2 \
+  --num_epochs 100 --device cuda
+```
+
+The script predicts the dielectric tensor in log-Kelvin-Mandel / `0e + 2e` irrep
+space using `MatrixExponentialMap` + `GaussianNLL`, and reports physical-space
+MAE by mapping predictions back through the matrix exponential.
+
+### Elasticity tensor (rank-4 output, low-rank covariance)
+
+```bash
+python gecn/scripts/train_elasticity.py \
+  --data_dir data/mp_elastic \
+  --save_dir checkpoints_gecn_elasticity \
+  --hidden_dim 48 --lmax 4 --num_layers 2 --rank 8 \
+  --num_epochs 100 --device cuda
+```
+
+This uses the 21D elasticity-tensor output with a
+`LowRankPlusIsotropicMap(rank=8)` covariance, suitable for the high-dimensional
+rank-4 target.
+
+### Synthetic covariance recovery
+
+```bash
+python gecn/experiments/synthetic_covariance_recovery.py \
+  --output_irreps "0e + 2e" \
+  --num_train 2000 --num_test 500 \
+  --num_epochs 200 --device cuda
+```
+
+A controlled experiment where a ground-truth covariance field
+`S(x) = exp(A(x))` is generated from a fixed linear map and the model is trained
+to recover it. Supported output representations include `"1o"`, `"0e + 2e"`,
+and other `O(3)` irreps.
 
 ## Notes for reviewers
 
