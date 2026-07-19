@@ -1,10 +1,16 @@
-"""ModelNet40 inertia tensor dataset adapter for the GECN framework.
+"""ModelNet40 point-cloud dataset adapter for the GECN framework.
 
 Loads precomputed point clouds and inertia tensors from the ICML cache and
 converts each sample into a PyG ``Data`` object compatible with the existing
 ``EquivariantBackbone``. Point clouds are turned into k-NN graphs; edge
 spherical harmonics, radial basis functions, and cutoff weights are computed
 on the fly.
+
+Supports two targets:
+
+* ``'inertia'``: the 3x3 inertia tensor of the point cloud (precomputed).
+* ``'shape_covariance'``: the 3x3 shape covariance / second-moment tensor
+  computed on the fly from the centered point cloud.
 """
 
 from __future__ import annotations
@@ -88,9 +94,23 @@ def _compute_edge_features(
     }
 
 
+def _shape_covariance_voigt(points: np.ndarray) -> np.ndarray:
+    """Return the 6D Voigt vector of the shape covariance tensor.
+
+    S = (1/N) sum_k (p_k - mu) (p_k - mu)^T.
+    """
+    centered = points - points.mean(axis=0)
+    S = (centered.T @ centered) / len(points)
+    S = 0.5 * (S + S.T)
+    return np.array([
+        S[0, 0], S[1, 1], S[2, 2],
+        S[1, 2], S[0, 2], S[0, 1],
+    ], dtype=np.float32)
+
+
 def _point_cloud_to_data(
     points: np.ndarray,
-    inertia_voigt: np.ndarray,
+    target_voigt: np.ndarray,
     label: int,
     stats: dict[str, np.ndarray],
     num_points: int,
@@ -99,7 +119,7 @@ def _point_cloud_to_data(
     num_basis: int,
     lmax: int,
 ) -> Data:
-    """Convert a single point cloud + inertia tensor to a PyG Data object."""
+    """Convert a single point cloud + symmetric tensor target to a PyG Data object."""
     points = points[:num_points]
     pos = torch.from_numpy(points).float()
 
@@ -113,12 +133,12 @@ def _point_cloud_to_data(
     # Constant atomic type for all points -> single learnable embedding vector.
     z = torch.zeros(pos.shape[0], dtype=torch.long)
 
-    # Normalize inertia in Voigt space, then convert to 0e+2e irrep coefficients.
+    # Normalize target in Voigt space, then convert to 0e+2e irrep coefficients.
     mean = torch.from_numpy(stats["mean"]).float()
     std = torch.from_numpy(stats["std"]).float()
-    inertia_voigt_t = torch.from_numpy(inertia_voigt).float()
-    inertia_voigt_norm = (inertia_voigt_t - mean) / std
-    y_irreps = voigt_to_irreps(inertia_voigt_norm).unsqueeze(0)
+    target_voigt_t = torch.from_numpy(target_voigt).float()
+    target_voigt_norm = (target_voigt_t - mean) / std
+    y_irreps = voigt_to_irreps(target_voigt_norm).unsqueeze(0)
 
     data = Data(
         pos=pos,
@@ -138,17 +158,23 @@ def _point_cloud_to_data(
 
 
 class ModelNet40InertiaDataset(Dataset):
-    """ModelNet40 point-cloud dataset with inertia-tensor targets.
+    """ModelNet40 point-cloud dataset with symmetric rank-2 tensor targets.
 
     The precomputed cache is expected to contain ``train``, ``test`` and
     ``stats`` dictionaries, where each split has ``points`` (N, P, 3),
     ``inertia`` (N, 6) in Voigt notation, and ``labels`` (N,).
+
+    Args:
+        target_type: ``'inertia'`` uses the precomputed inertia tensor;
+            ``'shape_covariance'`` computes the second-moment tensor from the
+            point cloud on the fly.
     """
 
     def __init__(
         self,
         cache_path: str = DEFAULT_CACHE_PATH,
         split: str = "train",
+        target_type: str = "inertia",
         num_points: int = 1024,
         num_neighbors: int = 16,
         max_radius: float = 2.0,
@@ -157,9 +183,14 @@ class ModelNet40InertiaDataset(Dataset):
     ):
         if split not in {"train", "test"}:
             raise ValueError(f"split must be 'train' or 'test', got {split}")
+        if target_type not in {"inertia", "shape_covariance"}:
+            raise ValueError(
+                f"target_type must be 'inertia' or 'shape_covariance', got {target_type}"
+            )
 
         self.cache_path = cache_path
         self.split = split
+        self.target_type = target_type
         self.num_points = num_points
         self.num_neighbors = num_neighbors
         self.max_radius = max_radius
@@ -171,9 +202,35 @@ class ModelNet40InertiaDataset(Dataset):
 
         self._data = self._load_cache(cache_path)
         self.points = self._data[split]["points"]
-        self.inertia = self._data[split]["inertia"]
         self.labels = self._data[split]["labels"]
-        self.stats = self._data["stats"]
+
+        if target_type == "inertia":
+            self.targets_voigt = self._data[split]["inertia"]
+            self.stats = self._data["stats"]
+        else:
+            # Compute shape-covariance targets and statistics from the training split.
+            self.targets_voigt = np.stack(
+                [_shape_covariance_voigt(p) for p in self.points],
+                axis=0,
+            )
+            if split == "train":
+                self.stats = {
+                    "mean": self.targets_voigt.mean(axis=0),
+                    "std": self.targets_voigt.std(axis=0),
+                }
+            else:
+                # Reuse training statistics computed from the full training set.
+                train_targets = np.stack(
+                    [_shape_covariance_voigt(p) for p in self._data["train"]["points"]],
+                    axis=0,
+                )
+                self.stats = {
+                    "mean": train_targets.mean(axis=0),
+                    "std": train_targets.std(axis=0),
+                }
+
+        # Guard against zero std.
+        self.stats["std"] = np.maximum(self.stats["std"], 1e-8)
 
     @staticmethod
     def _load_cache(cache_path: str) -> dict[str, Any]:
@@ -189,7 +246,7 @@ class ModelNet40InertiaDataset(Dataset):
     def __getitem__(self, idx: int) -> Data:
         return _point_cloud_to_data(
             self.points[idx],
-            self.inertia[idx],
+            self.targets_voigt[idx],
             int(self.labels[idx]),
             self.stats,
             self.num_points,
@@ -202,6 +259,7 @@ class ModelNet40InertiaDataset(Dataset):
 
 def get_modelnet40_inertia_loaders(
     cache_path: str = DEFAULT_CACHE_PATH,
+    target_type: str = "inertia",
     batch_size: int = 16,
     num_points: int = 1024,
     num_neighbors: int = 16,
@@ -215,7 +273,7 @@ def get_modelnet40_inertia_loaders(
     val_frac: float = 0.1,
     seed: int = 42,
 ):
-    """Create train/val/test PyG data loaders for ModelNet40 inertia.
+    """Create train/val/test PyG data loaders for ModelNet40.
 
     The original cache only has ``train`` and ``test`` splits. A validation
     set is carved out of the training split using ``val_frac``.
@@ -223,6 +281,7 @@ def get_modelnet40_inertia_loaders(
     full_train = ModelNet40InertiaDataset(
         cache_path=cache_path,
         split="train",
+        target_type=target_type,
         num_points=num_points,
         num_neighbors=num_neighbors,
         max_radius=max_radius,
@@ -232,6 +291,7 @@ def get_modelnet40_inertia_loaders(
     test_dataset = ModelNet40InertiaDataset(
         cache_path=cache_path,
         split="test",
+        target_type=target_type,
         num_points=num_points,
         num_neighbors=num_neighbors,
         max_radius=max_radius,

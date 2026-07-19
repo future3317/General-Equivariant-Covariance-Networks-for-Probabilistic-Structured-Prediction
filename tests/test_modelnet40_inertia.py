@@ -2,6 +2,7 @@
 
 import os
 
+import numpy as np
 import pytest
 import torch
 from e3nn import o3
@@ -10,8 +11,10 @@ from data.modelnet40_inertia_dataset import (
     ModelNet40InertiaDataset,
     _compute_edge_features,
     _point_cloud_to_data,
+    _shape_covariance_voigt,
     DEFAULT_CACHE_PATH,
 )
+from data.tensor_conversions import voigt_to_irreps
 from models import (
     EquivariantBackbone,
     EquivariantMeanHead,
@@ -160,6 +163,56 @@ def test_model_equivariance_under_point_cloud_rotation():
     D = output_spec.representation_matrix(R)
     err = torch.norm(mu_rot - mu @ D.T, dim=-1).max().item()
     assert err < 1e-4
+
+
+def test_shape_covariance_dataset_loads():
+    ds = ModelNet40InertiaDataset(
+        split="train", target_type="shape_covariance", num_points=128, num_neighbors=8
+    )
+    assert len(ds) > 0
+    data = ds[0]
+    assert data.y_irreps.shape == (1, 6)
+    assert torch.isfinite(data.y_irreps).all()
+
+
+def test_shape_covariance_rotation_equivariance():
+    """Shape covariance target transforms as a rank-2 tensor under rotation.
+
+    The test uses unnormalized targets because per-component standardization
+    does not commute with rotations. The underlying tensor transformation is
+    still equivariant.
+    """
+    ds = ModelNet40InertiaDataset(
+        split="train", target_type="shape_covariance", num_points=128, num_neighbors=8
+    )
+    data = ds[0]
+    R = torch.tensor([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
+
+    # Use the raw (unnormalized) shape covariance to avoid standardization bias.
+    S_voigt = _shape_covariance_voigt(data.pos.numpy())
+    y = voigt_to_irreps(torch.from_numpy(S_voigt).float().unsqueeze(0)).squeeze(0)
+
+    pos_rot = data.pos @ R.T
+    S_rot_voigt = _shape_covariance_voigt(pos_rot.numpy())
+    y_rot_expected = voigt_to_irreps(
+        torch.from_numpy(S_rot_voigt).float().unsqueeze(0)
+    ).squeeze(0)
+
+    output_spec = O3IrrepsSpec("0e + 2e")
+    D = output_spec.representation_matrix(R)
+    y_rot_pred = D @ y
+    assert torch.allclose(y_rot_pred, y_rot_expected, atol=1e-4)
+
+
+def test_shape_covariance_computation():
+    """Manual shape covariance matches the helper for a random point cloud."""
+    points = np.random.randn(64, 3).astype(np.float32)
+    centered = points - points.mean(axis=0)
+    S = (centered.T @ centered) / len(points)
+    expected = np.array([
+        S[0, 0], S[1, 1], S[2, 2], S[1, 2], S[0, 2], S[0, 1]
+    ], dtype=np.float32)
+    assert np.allclose(_shape_covariance_voigt(points), expected, atol=1e-5)
 
 
 def _rotate_data(data, R):

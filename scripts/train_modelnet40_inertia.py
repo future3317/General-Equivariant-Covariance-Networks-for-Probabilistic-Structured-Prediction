@@ -117,7 +117,8 @@ def validate(model, dataloader, device, non_blocking: bool = False):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cache_path", default="data/modelnet40/cache/modelnet40_inertia_dataset.pkl")
-    parser.add_argument("--save_dir", default="checkpoints_modelnet40_inertia")
+    parser.add_argument("--target_type", default="inertia", choices=["inertia", "shape_covariance"])
+    parser.add_argument("--save_dir", default=None)
     parser.add_argument("--hidden_dim", type=int, default=32)
     parser.add_argument("--lmax", type=int, default=2)
     parser.add_argument("--num_layers", type=int, default=2)
@@ -139,15 +140,19 @@ def main():
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
 
+    if args.save_dir is None:
+        args.save_dir = f"checkpoints_modelnet40_{args.target_type}"
+
     logger, experiment_name = setup_logger(args.save_dir)
     logger.info("=" * 60)
-    logger.info("GECN ModelNet40 inertia training")
+    logger.info(f"GECN ModelNet40 {args.target_type} training")
     logger.info("=" * 60)
     for k, v in vars(args).items():
         logger.info(f"  {k}: {v}")
 
     train_loader, val_loader, test_loader = get_modelnet40_inertia_loaders(
         cache_path=args.cache_path,
+        target_type=args.target_type,
         batch_size=args.batch_size,
         num_points=args.num_points,
         num_neighbors=args.num_neighbors,
