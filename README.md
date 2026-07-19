@@ -39,9 +39,10 @@ The library is organized into four layers:
 | `gecn/scripts/` | Training scripts for dielectric tensor and elasticity tensor tasks. |
 | `gecn/experiments/` | Synthetic covariance-recovery experiment. |
 | `tests/` | Unit tests for representations, equivariance, SPD maps, distributions, tensor conversions, synthetic experiment, and integration. |
-| `equivariant_network.py` | **Legacy** ICML `EquivariantUncertaintyNetwork` (rank-2, 6×6 KM). |
-| `train.py` | **Legacy** ICML training script. |
-| `stable_loss_implementation.py` | **Legacy** ICML loss with anisotropic eigenvalue jitter. |
+| `voigt_utils.py` | Voigt / Kelvin-Mandel utilities used by tensor conversions. |
+| `matrix_log_transform.py` | Matrix log/exp utilities used by the dielectric pipeline. |
+| `atom_features.py` | Atom feature builder used by the data loaders. |
+| `dielectric_data_loader.py` | Precomputed-graph dielectric loader wrapped by `gecn/data/dielectric_dataset.py`. |
 
 ## Quick start
 
@@ -132,6 +133,6 @@ and other `O(3)` irreps.
 
 ## Notes for reviewers
 
-- The new `gecn/` package removes the anisotropic eigenvalue jitter, random-noise fallbacks, and "Multivariate Laplace NLL" claims present in the legacy files.
+- The `gecn/` package separates representation theory, SPD maps, and probabilistic losses. It avoids anisotropic eigenvalue jitter, random-noise fallbacks, and improper likelihood claims.
 - The code currently provides a full `O3IrrepsSpec` implementation; the abstract `OrthogonalRepresentationSpec` interface leaves room for other compact groups.
 - All SPD maps are tested for positive definiteness, finite gradients, and (for the full predictor) `O(3)` equivariance.
