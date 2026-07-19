@@ -40,10 +40,50 @@ class LowRankPlusIsotropicMap(SPDMap):
         return sigma2[..., None, None] * eye + torch.matmul(L, L.transpose(-1, -2))
 
     def logdet(self, params: torch.Tensor) -> torch.Tensor:
-        S = self.forward(params)
-        return torch.logdet(S)
+        """Compute logdet(S) using the matrix determinant lemma.
+
+        For :math:`S = \\sigma^2 I + L L^\\top`, let
+        :math:`M = I_r + L^\\top L / \\sigma^2`. Then
+        :math:`\\log\\det S = d\\log\\sigma^2 + \\log\\det M`.
+        """
+        *batch, _ = params.shape
+        L_flat = params[..., :-1]
+        log_sigma2 = params[..., -1]
+        L = L_flat.reshape(*batch, self.dim, self.rank)
+        sigma2 = torch.nn.functional.softplus(log_sigma2) + self.min_sigma2
+
+        # M = I_r + L^T L / sigma^2
+        LT_L = torch.matmul(L.transpose(-1, -2), L)
+        eye_r = torch.eye(self.rank, device=params.device, dtype=params.dtype)
+        M = eye_r + LT_L / sigma2[..., None, None]
+        return self.dim * torch.log(sigma2) + torch.logdet(M)
 
     def precision_action(self, params: torch.Tensor, residual: torch.Tensor) -> torch.Tensor:
-        S = self.forward(params)
-        x = torch.linalg.solve(S, residual.unsqueeze(-1))
-        return torch.sum(residual * x.squeeze(-1), dim=-1)
+        """Compute r^T S^{-1} r using the Woodbury identity.
+
+        For :math:`S = \\sigma^2 I + L L^\\top`,
+
+        .. math::
+
+            S^{-1} r = \\frac{r}{\\sigma^2}
+                - \\frac{L M^{-1} (L^\\top r)}{\\sigma^4},
+
+        where :math:`M = I_r + L^\\top L / \\sigma^2`.
+        """
+        *batch, _ = params.shape
+        L_flat = params[..., :-1]
+        log_sigma2 = params[..., -1]
+        L = L_flat.reshape(*batch, self.dim, self.rank)
+        sigma2 = torch.nn.functional.softplus(log_sigma2) + self.min_sigma2
+
+        LT_r = torch.matmul(L.transpose(-1, -2), residual.unsqueeze(-1))
+        LT_L = torch.matmul(L.transpose(-1, -2), L)
+        eye_r = torch.eye(self.rank, device=params.device, dtype=params.dtype)
+        M = eye_r + LT_L / sigma2[..., None, None]
+        M_inv_LT_r = torch.linalg.solve(M, LT_r)
+
+        S_inv_r = (
+            residual / sigma2[..., None]
+            - torch.matmul(L, M_inv_LT_r).squeeze(-1) / (sigma2[..., None] ** 2)
+        )
+        return torch.sum(residual * S_inv_r, dim=-1)
