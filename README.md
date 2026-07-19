@@ -2,62 +2,86 @@
 
 Core implementation for the TNNLS manuscript *General Equivariant Covariance Networks for Probabilistic Structured Prediction*.
 
-## What this codebase implements
+This repository is being refactored into a clean, modular library (`gecn/`) that separates representation theory, SPD maps, and probabilistic losses. The original ICML conference-code files remain in the repository root for reference but are now considered legacy.
 
-1. **Equivariant SPD distributions on compact group representations**
-   - `equivariant_network.py`: `EquivariantUncertaintyNetwork` builds an equivariant symmetric operator `A(X)` and maps it to an SPD covariance via `Σ = exp(A)`.
+## Architecture
 
-2. **Automated covariance representation construction**
-   - `equivariant_network.py`: uses `e3nn.CartesianTensor("ijkl=jikl=ijlk=klij")` to construct the symmetric rank-4 covariance tensor basis and the Clebsch–Gordan/Cartesian-to-Kelvin–Mandel change of basis.
+The library is organized into four layers:
 
-3. **Spectral SPD parameterizations**
-   - `equivariant_network.py` (matrix exponential head).
-   - `stable_loss_implementation.py` (eigenvalue-based spectral map for the loss).
+1. **Output representations** (`gecn/representations/`)
+   - `O3IrrepsSpec`: finite-dimensional orthogonal `O(3)` representations via `e3nn` irreps.
+   - `O3SymmetricOperatorBasis`: automatic construction of `Sym²(V)` using `e3nn.o3.ReducedTensorProducts("ij=ji", ...)`.
 
-4. **Equivariant probabilistic learning**
-   - `stable_loss_implementation.py`: stable Log-Euclidean Mahalanobis loss with Gaussian / Laplace options and condition-number control.
-   - `train.py`: end-to-end training loop with auxiliary MSE warmup and temperature scaling.
+2. **Equivariant symmetric operators** (`gecn/models/covariance_head.py`)
+   - `O3EquivariantSymmetricOperatorHead`: predicts the coefficients of `A(x) ∈ Sym(V)`.
+   - `O3EquivariantLowRankCovarianceHead`: predicts a low-rank-plus-isotropic structured parameterization.
+
+3. **SPD maps** (`gecn/spd_maps/`)
+   - `MatrixExponentialMap`: `S = exp(A)` (default, bijective).
+   - `SpectralSoftplusMap`: spectral softplus with Löwner divided-difference autograd.
+   - `SquarePlusIdentityMap`: `S = A² + εI`.
+   - `PrecisionExponentialMap`: `S = exp(-B)` (log-precision coordinate).
+   - `LowRankPlusIsotropicMap`: `S = σ²I + LLᵀ`.
+
+4. **Probabilistic losses** (`gecn/distributions/`)
+   - `GaussianNLL`: proper multivariate Gaussian negative log-likelihood.
+   - `StudentTNLL`: proper multivariate Student-t negative log-likelihood with explicit scale/covariance distinction.
+   - `RobustSurrogateLoss`: LE-ESO-like robust surrogate, explicitly **not** claimed as a likelihood.
 
 ## File guide
 
-| File | Purpose |
+| Path | Purpose |
 |------|---------|
-| `equivariant_network.py` | Equivariant message-passing backbone, mean head, and matrix-exponential covariance head. |
-| `train.py` | Main training script for dielectric tensor prediction. |
-| `dielectric_data_loader.py` | Fast loader for **precomputed** PyG graphs. |
-| `dielectric_data_loader_precomputed.py` | On-the-fly graph construction from raw `.pkl` files. |
-| `preprocess_edges_full.py` | Preprocessing pipeline that builds and saves precomputed graphs. |
-| `stable_loss_implementation.py` | Numerically stable loss: eigen-decomposition, eigenvalue clamping, Laplace/Gaussian NLL, condition-number regularization. |
-| `voigt_utils.py` | Conversions between tensor, Voigt, and Kelvin–Mandel representations; equivariant rotation matrices. |
-| `matrix_log_transform.py` | Matrix logarithm/exponential transforms for dielectric tensors. |
-| `isotropic_utils.py` | Isotropic component handling and denormalization. |
-| `atom_features.py` | 49-dimensional atom feature generation. |
-| `test_equivariance.py` | Standalone equivariance and baseline tests. |
+| `gecn/representations/` | Orthogonal representation specs and `Sym²(V)` basis construction. |
+| `gecn/spd_maps/` | Structure-preserving maps from symmetric operators to SPD matrices. |
+| `gecn/distributions/` | Gaussian, Student-t, and robust-surrogate losses. |
+| `gecn/models/` | Backbone, mean/covariance heads, and `StructuredProbabilisticPredictor`. |
+| `tests/` | Unit tests for representations, equivariance, SPD maps, distributions, and integration. |
+| `equivariant_network.py` | **Legacy** ICML `EquivariantUncertaintyNetwork` (rank-2, 6×6 KM). |
+| `train.py` | **Legacy** ICML training script. |
+| `stable_loss_implementation.py` | **Legacy** ICML loss with anisotropic eigenvalue jitter. |
 
 ## Quick start
 
-1. Install dependencies:
+1. Install in editable mode:
    ```bash
-   pip install -r requirements.txt
+   pip install -e .
    ```
 
-2. Prepare precomputed graphs (run once):
+2. Run the test suite:
    ```bash
-   python preprocess_edges_full.py --data_dir data/mp_dielectric --output_dir data/mp_dielectric
+   python -m pytest tests/ -v
    ```
 
-3. Train:
-   ```bash
-   python train.py --data_dir data/mp_dielectric --save_dir checkpoints
-   ```
+3. Build a predictor programmatically:
+   ```python
+   from gecn import (
+       O3IrrepsSpec, MatrixExponentialMap, GaussianNLL,
+       EquivariantBackbone, EquivariantMeanHead,
+       O3EquivariantSymmetricOperatorHead, StructuredProbabilisticPredictor,
+   )
 
-4. Test equivariance:
-   ```bash
-   python test_equivariance.py --checkpoint checkpoints/best.pt
+   output_spec = O3IrrepsSpec("0e + 2e")  # symmetric rank-2 output
+   backbone = EquivariantBackbone(
+       hidden_dim=16, lmax=2, num_layers=2,
+       atom_feature_dim=49, num_basis=8,
+   )
+   mean_head = EquivariantMeanHead(backbone.irreps_out, output_spec.irreps, pool=True)
+   cov_head = O3EquivariantSymmetricOperatorHead(
+       backbone.irreps_out, output_spec, pool=True,
+   )
+   model = StructuredProbabilisticPredictor(
+       backbone=backbone,
+       output_spec=output_spec,
+       mean_head=mean_head,
+       covariance_head=cov_head,
+       spd_map=MatrixExponentialMap(),
+       distribution=GaussianNLL(),
+   )
    ```
 
 ## Notes for reviewers
 
-- The implementation currently targets **symmetric rank-2 tensor** outputs (e.g., dielectric tensors) under `O(3)`.
-- The covariance head is written so that the same spectral-map / Cartesian-tensor machinery generalizes to other compact groups and tensor orders; extending it requires only the appropriate irrep decomposition and `CartesianTensor` symmetry string.
-- `stable_loss_implementation.py` still contains an eigenvalue jitter term used for numerical stability during `torch.linalg.eigh`. This is a pragmatic training detail and does not affect the equivariance of the forward covariance construction.
+- The new `gecn/` package removes the anisotropic eigenvalue jitter, random-noise fallbacks, and "Multivariate Laplace NLL" claims present in the legacy files.
+- The code currently provides a full `O3IrrepsSpec` implementation; the abstract `OrthogonalRepresentationSpec` interface leaves room for other compact groups.
+- All SPD maps are tested for positive definiteness, finite gradients, and (for the full predictor) `O(3)` equivariance.
