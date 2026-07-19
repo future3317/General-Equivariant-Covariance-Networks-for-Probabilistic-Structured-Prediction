@@ -58,9 +58,12 @@ class ElasticityIrrepsDataset(Dataset):
         max_radius: float = 5.0,
         num_neighbors: int = 20,
         train_stats: tuple[np.ndarray, np.ndarray] | None = None,
+        lmax: int | None = None,
     ):
         self.max_radius = max_radius
         self.num_neighbors = num_neighbors
+        self.lmax = lmax
+        self._edge_sh_dim = o3.Irreps.spherical_harmonics(lmax).dim if lmax is not None else None
 
         with open(data_path, "rb") as f:
             df = pickle.load(f)
@@ -104,11 +107,15 @@ class ElasticityIrrepsDataset(Dataset):
         )
 
         target_21d = torch.tensor(self.target_21d_norm[idx], dtype=torch.float32)
-        target_irreps = elasticity_21d_to_irreps(target_21d.unsqueeze(0)).squeeze(0)
+        target_irreps = elasticity_21d_to_irreps(target_21d.unsqueeze(0))
 
         data = self._build_graph(structure, atom_features)
-        data.y = target_21d
+        if self._edge_sh_dim is not None and data.edge_sh.shape[-1] != self._edge_sh_dim:
+            data.edge_sh = data.edge_sh[..., : self._edge_sh_dim]
+
+        data.y = target_21d.unsqueeze(0)
         data.y_irreps = target_irreps
+        data.y_km = target_21d.unsqueeze(0)
         return data
 
     def _build_graph(self, structure, atom_features):
@@ -162,20 +169,23 @@ def get_elasticity_irreps_loaders(
     persistent_workers: bool = False,
     pin_memory: bool = False,
     prefetch_factor: int | None = None,
+    lmax: int | None = None,
 ):
     """Create PyG data loaders for irrep-space elasticity targets."""
     train_path = f"{data_dir}/train.pkl"
     val_path = f"{data_dir}/val.pkl"
     test_path = f"{data_dir}/test.pkl"
 
-    train_dataset = ElasticityIrrepsDataset(train_path, "train", max_radius=max_radius)
+    train_dataset = ElasticityIrrepsDataset(
+        train_path, "train", max_radius=max_radius, lmax=lmax
+    )
     train_stats = (train_dataset.mean_21d, train_dataset.std_21d)
 
     val_dataset = ElasticityIrrepsDataset(
-        val_path, "val", max_radius=max_radius, train_stats=train_stats
+        val_path, "val", max_radius=max_radius, train_stats=train_stats, lmax=lmax
     )
     test_dataset = ElasticityIrrepsDataset(
-        test_path, "test", max_radius=max_radius, train_stats=train_stats
+        test_path, "test", max_radius=max_radius, train_stats=train_stats, lmax=lmax
     )
 
     if train_subset is not None and train_subset < len(train_dataset):
