@@ -26,11 +26,11 @@ checkpoints_elasticity/
 checkpoints_no_detach/
 elasticity_checkpoints/
 figures/
+figure_scripts/
 visualizations/
-!figure_scripts/visualizations/
-figure_scripts/visualizations/*.png
-figure_scripts/visualizations/*.pdf
 output/
+ICML/
+pc_autoencoder-master/
 *.png
 *.pdf
 *.jpg
@@ -39,6 +39,12 @@ output/
 *.json
 *.log
 *.out
+
+.claude/
+audit_results/
+elasticity_rebuttal_results/
+elasticity_results/
+equivariance_results/
 
 # IDE
 .vscode/
