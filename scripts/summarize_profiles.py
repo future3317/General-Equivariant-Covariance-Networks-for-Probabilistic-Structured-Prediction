@@ -103,6 +103,7 @@ def main():
         "backward_ms",
         "grad_clip_ms",
         "optimizer_ms",
+        "steady_total_time_ms",
         "peak_cuda_memory_mb",
         "tp_weight_numel",
         "num_parameters",
