@@ -25,9 +25,6 @@ from gecn import (
     O3EquivariantSymmetricOperatorHead,
     StructuredProbabilisticPredictor,
 )
-from gecn.data.tensor_conversions import irreps_to_matrix_exp_voigt
-
-
 class SyntheticBackbone(nn.Module):
     """Fake backbone that embeds an input vector to hidden_irreps.
 
