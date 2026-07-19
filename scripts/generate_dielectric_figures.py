@@ -85,7 +85,7 @@ def collect_predictions(model, dataloader, device):
         batch = batch.to(device)
         if batch.edge_index is None or batch.edge_index.numel() == 0:
             continue
-        result = model(batch)
+        result = model(batch, return_scale=True)
         all_mu.append(result["mu"].cpu())
         all_scale.append(result["scale"].cpu())
         all_y_irreps.append(batch.y_irreps.cpu())

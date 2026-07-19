@@ -25,8 +25,8 @@ class StudentTNLL(StructuredDistributionLoss):
 
     .. math::
 
-        \\mathcal L_t = \\log\\Gamma\\!\\left(\\frac{\\nu+d}{2}\\right)
-        - \\log\\Gamma\\!\\left(\\frac{\\nu}{2}\\right)
+        \\mathcal L_t = -\\log\\Gamma\\!\\left(\\frac{\\nu+d}{2}\\right)
+        + \\log\\Gamma\\!\\left(\\frac{\\nu}{2}\\right)
         + \\frac d2 \\log(\\nu\\pi)
         + \\frac12 \\log\\det S
         + \\frac{\\nu+d}{2} \\log\\!\\left(1 + \\frac{q}{\\nu}\\right),

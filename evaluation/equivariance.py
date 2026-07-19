@@ -75,8 +75,8 @@ def mean_equivariance_error(
     rho_R = output_spec.representation_matrix(R)
 
     with torch.no_grad():
-        mu = model(data)["mu"]
-        mu_rot = model(data_rot)["mu"]
+        mu = model(data, return_scale=False)["mu"]
+        mu_rot = model(data_rot, return_scale=False)["mu"]
         mu_rot_expected = mu @ rho_R.T
 
     err = torch.norm(mu_rot - mu_rot_expected, dim=-1)
@@ -99,8 +99,8 @@ def scale_equivariance_error(
     rho_R = output_spec.representation_matrix(R)
 
     with torch.no_grad():
-        S = model(data)["scale"]
-        S_rot = model(data_rot)["scale"]
+        S = model(data, return_scale=True)["scale"]
+        S_rot = model(data_rot, return_scale=True)["scale"]
         S_rot_expected = rho_R @ S @ rho_R.T
 
     err = torch.norm(S_rot - S_rot_expected, dim=(-2, -1))

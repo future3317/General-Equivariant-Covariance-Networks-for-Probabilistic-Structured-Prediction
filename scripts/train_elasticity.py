@@ -52,8 +52,8 @@ def unnormalize_21d(pred_norm: torch.Tensor, mean: torch.Tensor, std: torch.Tens
 
 def train_epoch(model, dataloader, optimizer, device, warmup_mse_weight: float = 0.0):
     model.train()
-    total_loss = 0.0
-    num_batches = 0
+    total_loss = torch.tensor(0.0, device=device)
+    num_samples = 0
 
     for batch in tqdm(dataloader, desc="Training", leave=False):
         batch = batch.to(device)
@@ -61,7 +61,7 @@ def train_epoch(model, dataloader, optimizer, device, warmup_mse_weight: float =
             continue
 
         optimizer.zero_grad(set_to_none=True)
-        result = model(batch, target=batch.y_irreps)
+        result = model(batch, target=batch.y_irreps, return_scale=False)
         loss = result["loss"]
 
         if warmup_mse_weight > 0.0:
@@ -72,36 +72,41 @@ def train_epoch(model, dataloader, optimizer, device, warmup_mse_weight: float =
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
 
-        total_loss += loss.item()
-        num_batches += 1
+        batch_size = batch.y_irreps.shape[0]
+        total_loss += loss.detach() * batch_size
+        num_samples += batch_size
 
-    return total_loss / max(num_batches, 1)
+    return (total_loss / max(num_samples, 1)).item()
 
 
 @torch.inference_mode()
 def validate(model, dataloader, device, mean_21d, std_21d):
     model.eval()
     total_loss = 0.0
-    total_mae = 0.0
-    num_batches = 0
+    total_abs = 0.0
+    num_loss_samples = 0
+    num_mae_samples = 0
 
     for batch in tqdm(dataloader, desc="Validation", leave=False):
         batch = batch.to(device)
         if batch.edge_index is None or batch.edge_index.numel() == 0:
             continue
 
-        result = model(batch, target=batch.y_irreps)
+        result = model(batch, target=batch.y_irreps, return_scale=False)
+        batch_size = batch.y_irreps.shape[0]
+        total_loss += result["loss"].item() * batch_size
+        num_loss_samples += batch_size
+
         pred_21d_norm = irreps_to_elasticity_21d(result["mu"])
         pred_21d = unnormalize_21d(pred_21d_norm, mean_21d, std_21d)
         target_21d = unnormalize_21d(batch.y, mean_21d, std_21d)
 
-        total_loss += result["loss"].item()
-        total_mae += torch.mean(torch.abs(pred_21d - target_21d)).item()
-        num_batches += 1
+        total_abs += torch.sum(torch.abs(pred_21d - target_21d)).item()
+        num_mae_samples += batch_size * pred_21d.shape[-1]
 
     return {
-        "loss": total_loss / max(num_batches, 1),
-        "mae": total_mae / max(num_batches, 1),
+        "loss": total_loss / max(num_loss_samples, 1),
+        "mae": total_abs / max(num_mae_samples, 1),
     }
 
 

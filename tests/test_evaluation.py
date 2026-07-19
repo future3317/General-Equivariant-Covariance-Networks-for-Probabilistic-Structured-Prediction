@@ -100,6 +100,18 @@ def test_whitened_residual_covariance_identity_case():
     assert trace.item() < 1e-4
 
 
+def test_whitened_residual_covariance_well_specified():
+    # For identity scale and unit-Gaussian residuals, the trace should be close to d.
+    torch.manual_seed(0)
+    d = 6
+    batch = 2000
+    mu = torch.zeros(batch, d)
+    target = torch.randn(batch, d)
+    S = torch.eye(d).unsqueeze(0).expand(batch, d, d)
+    trace = whitened_residual_covariance(mu, target, S)
+    assert trace.item() == pytest.approx(float(d), rel=0.1)
+
+
 def test_calibration_error():
     mu, target, S = _make_gaussian_data(batch=1000, d=6)
     cal = calibration_error(mu, target, S)

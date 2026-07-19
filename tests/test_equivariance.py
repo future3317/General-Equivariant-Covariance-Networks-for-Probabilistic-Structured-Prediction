@@ -123,8 +123,8 @@ def test_predictor_equivariance(output_irreps):
     data_rot = _rotate_data(data, R)
 
     with torch.no_grad():
-        out = model(data)
-        out_rot = model(data_rot)
+        out = model(data, return_scale=True)
+        out_rot = model(data_rot, return_scale=True)
 
     rho_R = output_spec.representation_matrix(R)
     mu_pred = out["mu"]

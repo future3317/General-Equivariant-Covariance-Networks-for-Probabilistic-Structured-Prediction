@@ -18,7 +18,7 @@ from distributions import GaussianNLL
 from models import (
     EquivariantBackbone,
     EquivariantMeanHead,
-    O3EquivariantSymmetricOperatorHead,
+    O3QuadraticSymmetricOperatorHead,
     StructuredProbabilisticPredictor,
 )
 from data.dielectric_dataset import get_dielectric_irreps_loaders
@@ -65,8 +65,8 @@ def log_mae(pred_irreps: torch.Tensor, target_km: torch.Tensor) -> torch.Tensor:
 
 def train_epoch(model, dataloader, optimizer, device, distribution, warmup_mse_weight: float = 0.0):
     model.train()
-    total_loss = 0.0
-    num_batches = 0
+    total_loss = torch.tensor(0.0, device=device)
+    num_samples = 0
 
     for batch in tqdm(dataloader, desc="Training", leave=False):
         batch = batch.to(device)
@@ -75,7 +75,7 @@ def train_epoch(model, dataloader, optimizer, device, distribution, warmup_mse_w
 
         optimizer.zero_grad(set_to_none=True)
 
-        result = model(batch, target=batch.y_irreps)
+        result = model(batch, target=batch.y_irreps, return_scale=False)
         loss = result["loss"]
 
         if warmup_mse_weight > 0.0:
@@ -86,35 +86,40 @@ def train_epoch(model, dataloader, optimizer, device, distribution, warmup_mse_w
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
 
-        total_loss += loss.item()
-        num_batches += 1
+        batch_size = batch.y_irreps.shape[0]
+        total_loss += loss.detach() * batch_size
+        num_samples += batch_size
 
-    return total_loss / max(num_batches, 1)
+    return (total_loss / max(num_samples, 1)).item()
 
 
 @torch.inference_mode()
 def validate(model, dataloader, device):
     model.eval()
     total_loss = 0.0
-    total_phys_mae = 0.0
-    total_log_mae = 0.0
-    num_batches = 0
+    total_phys_abs = 0.0
+    total_log_abs = 0.0
+    num_loss_samples = 0
+    num_mae_elements = 0
 
     for batch in tqdm(dataloader, desc="Validation", leave=False):
         batch = batch.to(device)
         if batch.edge_index is None or batch.edge_index.numel() == 0:
             continue
 
-        result = model(batch, target=batch.y_irreps)
-        total_loss += result["loss"].item()
-        total_phys_mae += physical_mae(result["mu"], batch.y_km).item()
-        total_log_mae += log_mae(result["mu"], batch.y_km).item()
-        num_batches += 1
+        result = model(batch, target=batch.y_irreps, return_scale=False)
+        batch_size = batch.y_irreps.shape[0]
+        total_loss += result["loss"].item() * batch_size
+        num_loss_samples += batch_size
+
+        total_phys_abs += physical_mae(result["mu"], batch.y_km).item() * batch_size
+        total_log_abs += log_mae(result["mu"], batch.y_km).item() * batch_size
+        num_mae_elements += batch_size
 
     return {
-        "loss": total_loss / max(num_batches, 1),
-        "phys_mae": total_phys_mae / max(num_batches, 1),
-        "log_mae": total_log_mae / max(num_batches, 1),
+        "loss": total_loss / max(num_loss_samples, 1),
+        "phys_mae": total_phys_abs / max(num_mae_elements, 1),
+        "log_mae": total_log_abs / max(num_mae_elements, 1),
     }
 
 
@@ -158,7 +163,7 @@ def main():
         num_basis=args.num_basis,
     )
     mean_head = EquivariantMeanHead(backbone.irreps_out, output_spec.irreps, pool=True)
-    cov_head = O3EquivariantSymmetricOperatorHead(backbone.irreps_out, output_spec, pool=True)
+    cov_head = O3QuadraticSymmetricOperatorHead(backbone.irreps_out, output_spec, pool=True)
 
     model = StructuredProbabilisticPredictor(
         backbone=backbone,

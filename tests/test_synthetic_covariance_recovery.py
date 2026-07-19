@@ -2,8 +2,11 @@
 
 import pytest
 import torch
+from e3nn import o3
 
 from experiments.synthetic_covariance_recovery import (
+    DEFAULT_INPUT_IRREPS,
+    EquivariantTeacher,
     SyntheticBackbone,
     SyntheticDataset,
     _make_data_object,
@@ -22,7 +25,9 @@ from models import (
 @pytest.mark.parametrize("output_irreps", ["1o", "0e + 2e"])
 def test_synthetic_dataset_generates_spd(output_irreps):
     """Generated covariance matrices must be strictly SPD and finite."""
-    ds = SyntheticDataset(output_irreps, num_samples=32, input_dim=8, seed=0)
+    output_spec = O3IrrepsSpec(output_irreps)
+    teacher = EquivariantTeacher(DEFAULT_INPUT_IRREPS, output_spec)
+    ds = SyntheticDataset(output_irreps, num_samples=32, teacher=teacher, seed=0)
     x, y, mu, A, S = ds.generate()
 
     assert torch.isfinite(x).all()
@@ -39,7 +44,8 @@ def test_synthetic_dataset_generates_spd(output_irreps):
 def test_synthetic_model_forward_backward(output_irreps):
     """The full predictor can be built and trained for one step."""
     output_spec = O3IrrepsSpec(output_irreps)
-    backbone = SyntheticBackbone(input_dim=8, hidden_irreps="16x0e + 8x1o + 4x2e")
+    input_irreps = o3.Irreps("16x0e + 8x1o + 4x2e")
+    backbone = SyntheticBackbone(input_irreps=input_irreps, hidden_irreps="16x0e + 8x1o + 4x2e")
     mean_head = EquivariantMeanHead(backbone.irreps_out, output_spec.irreps, pool=True)
     cov_head = O3EquivariantSymmetricOperatorHead(backbone.irreps_out, output_spec, pool=True)
 
@@ -52,11 +58,12 @@ def test_synthetic_model_forward_backward(output_irreps):
         distribution=GaussianNLL(),
     )
 
-    ds = SyntheticDataset(output_irreps, num_samples=16, input_dim=8, seed=1)
+    teacher = EquivariantTeacher(input_irreps, output_spec)
+    ds = SyntheticDataset(output_irreps, num_samples=16, teacher=teacher, seed=1)
     x, y, mu_true, A_true, S_true = ds.generate()
     data = _make_data_object(x)
 
-    result = model(data, target=y)
+    result = model(data, target=y, return_scale=True)
     assert "loss" in result
     assert "mu" in result
     assert "scale" in result
@@ -73,7 +80,9 @@ def test_synthetic_model_forward_backward(output_irreps):
 @pytest.mark.parametrize("output_irreps", ["1o", "0e + 2e"])
 def test_evaluate_metrics_finite(output_irreps):
     """Evaluation metrics must all be finite."""
-    ds = SyntheticDataset(output_irreps, num_samples=16, input_dim=8, seed=2)
+    output_spec = O3IrrepsSpec(output_irreps)
+    teacher = EquivariantTeacher(DEFAULT_INPUT_IRREPS, output_spec)
+    ds = SyntheticDataset(output_irreps, num_samples=16, teacher=teacher, seed=2)
     x, y, mu_true, A_true, S_true = ds.generate()
 
     # Use the ground truth as predictions for a sanity check.
@@ -81,3 +90,45 @@ def test_evaluate_metrics_finite(output_irreps):
     for name, value in metrics.items():
         assert isinstance(value, float), name
         assert torch.isfinite(torch.tensor(value)), name
+
+
+def test_synthetic_teacher_equivariance():
+    """Teacher's A and S must transform equivariantly under O(3)."""
+    output_spec = O3IrrepsSpec("0e + 2e")
+    teacher = EquivariantTeacher(DEFAULT_INPUT_IRREPS, output_spec)
+
+    x = teacher.input_irreps.randn(16, -1)
+    R = torch.tensor([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
+
+    rho_in = teacher.input_irreps.D_from_matrix(R)
+    x_rot = (rho_in @ x.unsqueeze(-1)).squeeze(-1)
+
+    with torch.no_grad():
+        mu, A, S = teacher(x)
+        mu_rot, A_rot, S_rot = teacher(x_rot)
+
+    rho_out = output_spec.representation_matrix(R)
+
+    mu_err = torch.norm(mu_rot - mu @ rho_out.T, dim=-1).max().item()
+    A_err = torch.norm(A_rot - rho_out @ A @ rho_out.T, dim=(-2, -1)).max().item()
+    S_err = torch.norm(S_rot - rho_out @ S @ rho_out.T, dim=(-2, -1)).max().item()
+
+    assert mu_err < 1e-5
+    assert A_err < 1e-5
+    assert S_err < 1e-5
+
+
+def test_synthetic_shared_teacher():
+    """Train and test datasets with different seeds must share the same teacher."""
+    output_spec = O3IrrepsSpec("0e + 2e")
+    teacher = EquivariantTeacher(DEFAULT_INPUT_IRREPS, output_spec)
+    ds_train = SyntheticDataset("0e + 2e", num_samples=16, teacher=teacher, seed=0)
+    ds_test = SyntheticDataset("0e + 2e", num_samples=16, teacher=teacher, seed=1)
+
+    assert ds_train.teacher is ds_test.teacher
+
+    x_train, y_train, mu_train, A_train, S_train = ds_train.generate()
+    x_test, y_test, mu_test, A_test, S_test = ds_test.generate()
+
+    # Different seeds -> different input samples.
+    assert not torch.allclose(x_train, x_test)

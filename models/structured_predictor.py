@@ -53,31 +53,37 @@ class StructuredProbabilisticPredictor(torch.nn.Module):
         self,
         data,
         target: torch.Tensor | None = None,
+        return_scale: bool = False,
     ) -> Dict[str, torch.Tensor]:
         """Forward pass.
 
         Args:
             data: PyG-like data object.
             target: Optional target values in the output representation space.
+            return_scale: If True, explicitly compute and return the SPD scale
+                matrix. Training only needs the parameterization and can avoid
+                this extra matrix exponential.
 
         Returns:
-            Dictionary containing ``mu``, ``params``, ``scale`` and, if
-            ``target`` is provided, ``loss`` and ``components``.
+            Dictionary containing ``mu`` and ``params``, plus ``scale`` when
+            ``return_scale=True`` and ``loss``/``components`` when ``target`` is
+            provided.
         """
         node_features, batch = self.backbone(data)
         mu = self.mean_head(node_features, batch)
         params = self.covariance_head(node_features, batch)
-        scale = self.spd_map(params)
 
         result: Dict[str, torch.Tensor] = {
             "mu": mu,
             "params": params,
-            "scale": scale,
         }
 
         if target is not None:
             loss, components = self.distribution(mu, params, target, self.spd_map)
             result["loss"] = loss
             result["components"] = components
+
+        if return_scale:
+            result["scale"] = self.spd_map(params)
 
         return result

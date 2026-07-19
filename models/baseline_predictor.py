@@ -51,6 +51,7 @@ class BaselineProbabilisticPredictor(torch.nn.Module):
         self,
         data,
         target: torch.Tensor | None = None,
+        return_scale: bool = True,
     ) -> Dict[str, torch.Tensor]:
         node_features, batch = self.backbone(data)
         head_output = self.baseline_head(node_features, batch)
@@ -64,9 +65,9 @@ class BaselineProbabilisticPredictor(torch.nn.Module):
         result: Dict[str, torch.Tensor] = {"mu": mu}
 
         if params is not None and self.spd_map is not None:
-            scale = self.spd_map(params)
             result["params"] = params
-            result["scale"] = scale
+            if return_scale:
+                result["scale"] = self.spd_map(params)
 
             if target is not None and self.distribution is not None:
                 loss, components = self.distribution(mu, params, target, self.spd_map)

@@ -187,10 +187,12 @@ def whitened_residual_covariance(
 ) -> Tensor:
     """Covariance of whitened residuals.
 
-    For a well-calibrated Gaussian, this should be close to the identity matrix.
-    Returns the mean trace of the residual covariance (scalar).
+    Computes :math:`z = L^{-1} r` where :math:`S = L L^\\top`, then returns
+    the trace of the empirical covariance of :math:`z`. For a well-calibrated
+    Gaussian, this should be close to the dimension of the output space.
     """
     residual = target - pred
-    x = torch.linalg.solve(scale, residual.unsqueeze(-1)).squeeze(-1)
-    whitened = torch.matmul(x.unsqueeze(-1), x.unsqueeze(-2))
+    L = torch.linalg.cholesky(scale)
+    z = torch.linalg.solve_triangular(L, residual.unsqueeze(-1), upper=False).squeeze(-1)
+    whitened = torch.matmul(z.unsqueeze(-1), z.unsqueeze(-2))
     return torch.trace(whitened.mean(dim=0))
