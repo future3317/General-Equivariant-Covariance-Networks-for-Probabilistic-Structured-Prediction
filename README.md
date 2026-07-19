@@ -28,6 +28,16 @@ The library is organized into four layers:
    - `StudentTNLL`: proper multivariate Student-t negative log-likelihood with explicit scale/covariance distinction.
    - `RobustSurrogateLoss`: LE-ESO-like robust surrogate, explicitly **not** claimed as a likelihood.
 
+5. **Baselines** (`models/baselines.py`)
+   - `DeterministicHead`: mean-only baseline.
+   - `IsotropicCovarianceHead`: isotropic Gaussian covariance.
+   - `IrrepBlockDiagonalCovarianceHead`: one variance per irrep block.
+
+6. **Evaluation** (`evaluation/`)
+   - `metrics.py`: MAE, RMSE, :math:`R^2`, coverage, NLL, Energy Score, covariance error.
+   - `calibration.py`: calibration error, Q-Q data, sharpness.
+   - `equivariance.py`: numerical equivariance error under random rotations.
+
 ## File guide
 
 | Path | Purpose |
@@ -35,10 +45,11 @@ The library is organized into four layers:
 | `representations/` | Orthogonal representation specs and `Sym²(V)` basis construction. |
 | `spd_maps/` | Structure-preserving maps from symmetric operators to SPD matrices. |
 | `distributions/` | Gaussian, Student-t, and robust-surrogate losses. |
-| `models/` | Backbone, mean/covariance heads, and `StructuredProbabilisticPredictor`. |
+| `models/` | Backbone, mean/covariance heads, structured predictor, and baseline heads. |
 | `scripts/` | Training scripts for dielectric tensor and elasticity tensor tasks. |
 | `experiments/` | Synthetic covariance-recovery experiment. |
-| `tests/` | Unit tests for representations, equivariance, SPD maps, distributions, tensor conversions, synthetic experiment, and integration. |
+| `evaluation/` | Metrics, calibration diagnostics, and equivariance validators. |
+| `tests/` | Unit tests for representations, equivariance, SPD maps, distributions, baselines, evaluation, tensor conversions, and synthetic experiment. |
 | `voigt_utils.py` | Voigt / Kelvin-Mandel utilities used by tensor conversions. |
 | `matrix_log_transform.py` | Matrix log/exp utilities used by the dielectric pipeline. |
 | `atom_features.py` | Atom feature builder used by the data loaders. |

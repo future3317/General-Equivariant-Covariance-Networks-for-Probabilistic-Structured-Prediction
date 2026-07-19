@@ -7,6 +7,12 @@ from models.covariance_head import (
     O3EquivariantLowRankCovarianceHead,
 )
 from models.structured_predictor import StructuredProbabilisticPredictor
+from models.baselines import (
+    DeterministicHead,
+    IsotropicCovarianceHead,
+    IrrepBlockDiagonalCovarianceHead,
+)
+from models.baseline_predictor import BaselineProbabilisticPredictor
 
 __all__ = [
     "EquivariantBackbone",
@@ -14,4 +20,8 @@ __all__ = [
     "O3EquivariantSymmetricOperatorHead",
     "O3EquivariantLowRankCovarianceHead",
     "StructuredProbabilisticPredictor",
+    "DeterministicHead",
+    "IsotropicCovarianceHead",
+    "IrrepBlockDiagonalCovarianceHead",
+    "BaselineProbabilisticPredictor",
 ]

@@ -6,6 +6,8 @@ from spd_maps.matrix_softplus import SpectralSoftplusMap
 from spd_maps.square_plus_identity import SquarePlusIdentityMap
 from spd_maps.precision_exp import PrecisionExponentialMap
 from spd_maps.low_rank import LowRankPlusIsotropicMap
+from spd_maps.isotropic import IsotropicMap
+from spd_maps.irrep_block_diag import IrrepBlockDiagonalMap
 
 __all__ = [
     "SPDMap",
@@ -14,4 +16,6 @@ __all__ = [
     "SquarePlusIdentityMap",
     "PrecisionExponentialMap",
     "LowRankPlusIsotropicMap",
+    "IsotropicMap",
+    "IrrepBlockDiagonalMap",
 ]

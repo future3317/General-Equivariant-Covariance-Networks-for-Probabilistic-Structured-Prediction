@@ -1,0 +1,196 @@
+"""Evaluation metrics for probabilistic structured prediction.
+
+All functions operate on torch tensors and assume predictions and targets are
+in the same output representation space. Covariance/scale matrices are assumed
+SPD and are passed as the ``scale`` argument.
+"""
+
+from __future__ import annotations
+
+import torch
+from torch import Tensor
+
+
+def mean_absolute_error(pred: Tensor, target: Tensor) -> Tensor:
+    """Mean absolute error, averaged over batch and feature dimensions."""
+    return torch.mean(torch.abs(pred - target))
+
+
+def root_mean_squared_error(pred: Tensor, target: Tensor) -> Tensor:
+    """Root mean squared error."""
+    return torch.sqrt(torch.mean((pred - target) ** 2))
+
+
+def r2_score(pred: Tensor, target: Tensor, dim: int = 0) -> Tensor:
+    """Coefficient of determination :math:`R^2` along a dimension.
+
+    Args:
+        pred: Predictions of shape ``(..., d)``.
+        target: Targets of the same shape.
+        dim: Dimension along which to compute per-feature variance.
+
+    Returns:
+        Per-feature :math:`R^2` of shape ``(d,)``.
+    """
+    ss_res = torch.sum((target - pred) ** 2, dim=dim)
+    ss_tot = torch.sum((target - target.mean(dim=dim, keepdim=True)) ** 2, dim=dim)
+    return 1.0 - ss_res / (ss_tot + 1e-12)
+
+
+def mean_r2_score(pred: Tensor, target: Tensor) -> Tensor:
+    """Mean :math:`R^2` over the last (feature) dimension."""
+    return r2_score(pred, target, dim=0).mean()
+
+
+def mahalanobis_distance_squared(
+    residual: Tensor,
+    scale: Tensor,
+) -> Tensor:
+    """Squared Mahalanobis distance :math:`r^T S^{-1} r`.
+
+    Args:
+        residual: ``(..., d)``.
+        scale: SPD matrices ``(..., d, d)``.
+
+    Returns:
+        Squared distances ``(...)``.
+    """
+    # Solve S x = r, then compute r^T x.
+    x = torch.linalg.solve(scale, residual.unsqueeze(-1))
+    return torch.sum(residual * x.squeeze(-1), dim=-1)
+
+
+def empirical_coverage(
+    pred: Tensor,
+    target: Tensor,
+    scale: Tensor,
+    levels: list[float] | None = None,
+) -> dict[str, float]:
+    """Empirical coverage of confidence ellipsoids at specified levels.
+
+    Args:
+        pred: Mean predictions ``(N, d)``.
+        target: Targets ``(N, d)``.
+        scale: SPD scale matrices ``(N, d, d)``.
+        levels: List of confidence levels. Defaults to ``[0.5, 0.8, 0.9, 0.95]``.
+
+    Returns:
+        Dictionary mapping ``coverage_XX`` to empirical coverage fractions.
+    """
+    if levels is None:
+        levels = [0.5, 0.8, 0.9, 0.95]
+
+    from scipy.stats import chi2
+
+    d = pred.shape[-1]
+    residual = target - pred
+    maha2 = mahalanobis_distance_squared(residual, scale)
+
+    result = {}
+    for level in levels:
+        threshold = chi2.ppf(level, df=float(d))
+        result[f"coverage_{int(level * 100):02d}"] = (maha2 < threshold).float().mean().item()
+    return result
+
+
+def negative_log_likelihood_gaussian(
+    pred: Tensor,
+    target: Tensor,
+    scale: Tensor,
+) -> Tensor:
+    """Gaussian negative log-likelihood for a batch.
+
+    Args:
+        pred: Mean predictions ``(N, d)``.
+        target: Targets ``(N, d)``.
+        scale: SPD covariance matrices ``(N, d, d)``.
+
+    Returns:
+        Mean NLL over the batch.
+    """
+    d = pred.shape[-1]
+    residual = target - pred
+    maha2 = mahalanobis_distance_squared(residual, scale)
+    logdet = torch.logdet(scale)
+    import math
+    nll = 0.5 * d * math.log(2.0 * math.pi) + 0.5 * logdet + 0.5 * maha2
+    return nll.mean()
+
+
+def energy_score(
+    pred: Tensor,
+    scale: Tensor,
+    target: Tensor,
+    num_samples: int = 50,
+) -> Tensor:
+    """Energy Score for multivariate Gaussian predictions.
+
+    Samples from :math:`N(\\mu, S)` and approximates:
+
+    .. math::
+
+        ES = \\mathbb E_{Y \\sim p} \\|Y - y_{\\text{true}}\\|
+             - \\frac12 \\mathbb E_{Y, Y' \\sim p} \\|Y - Y'\\|.
+
+    Args:
+        pred: Mean predictions ``(N, d)``.
+        scale: SPD covariance matrices ``(N, d, d)``.
+        target: Targets ``(N, d)``.
+        num_samples: Number of samples drawn per prediction.
+
+    Returns:
+        Mean Energy Score over the batch.
+    """
+    *batch, d = pred.shape
+    pred_flat = pred.reshape(-1, d)
+    scale_flat = scale.reshape(-1, d, d)
+    target_flat = target.reshape(-1, d)
+
+    # S = L L^T
+    L = torch.linalg.cholesky(scale_flat)
+    eps = torch.randn(pred_flat.shape[0], num_samples, d, device=pred.device, dtype=pred.dtype)
+    samples = pred_flat.unsqueeze(1) + torch.einsum("bij,bnj->bni", L, eps)
+
+    # E ||Y - y_true||
+    term1 = torch.norm(samples - target_flat.unsqueeze(1), dim=-1).mean(dim=1)
+
+    # E ||Y - Y'||
+    term2 = torch.norm(samples.unsqueeze(2) - samples.unsqueeze(1), dim=-1).mean(dim=(1, 2))
+
+    score = term1 - 0.5 * term2
+    return score.mean()
+
+
+def covariance_relative_error(pred_scale: Tensor, true_scale: Tensor) -> Tensor:
+    """Relative Frobenius error between predicted and true covariance matrices."""
+    diff_norm = torch.norm(pred_scale - true_scale, dim=(-2, -1))
+    true_norm = torch.norm(true_scale, dim=(-2, -1))
+    return (diff_norm / (true_norm + 1e-12)).mean()
+
+
+def log_euclidean_error(pred_A: Tensor, true_A: Tensor) -> Tensor:
+    """Frobenius norm error in the log-domain parameterization."""
+    return torch.norm(pred_A - true_A, dim=(-2, -1)).mean()
+
+
+def eigenvalue_error(pred_scale: Tensor, true_scale: Tensor) -> Tensor:
+    """Mean absolute eigenvalue error."""
+    pred_eig = torch.linalg.eigvalsh(pred_scale)
+    true_eig = torch.linalg.eigvalsh(true_scale)
+    return torch.mean(torch.abs(pred_eig - true_eig))
+
+
+def whitened_residual_covariance(
+    pred: Tensor,
+    target: Tensor,
+    scale: Tensor,
+) -> Tensor:
+    """Covariance of whitened residuals.
+
+    For a well-calibrated Gaussian, this should be close to the identity matrix.
+    Returns the mean trace of the residual covariance (scalar).
+    """
+    residual = target - pred
+    x = torch.linalg.solve(scale, residual.unsqueeze(-1)).squeeze(-1)
+    whitened = torch.matmul(x.unsqueeze(-1), x.unsqueeze(-2))
+    return torch.trace(whitened.mean(dim=0))
