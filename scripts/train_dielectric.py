@@ -210,6 +210,8 @@ def main():
     test_metrics = validate(model, test_loader, args.device)
     logger.info(f"Test: loss={test_metrics['loss']:.4f}, phys_mae={test_metrics['phys_mae']:.4f}, log_mae={test_metrics['log_mae']:.4f}")
 
+    with open(os.path.join(args.save_dir, "args.json"), "w") as f:
+        json.dump(vars(args), f, indent=2)
     with open(os.path.join(args.save_dir, "history.json"), "w") as f:
         json.dump(history, f, indent=2)
     with open(os.path.join(args.save_dir, "test_metrics.json"), "w") as f:
