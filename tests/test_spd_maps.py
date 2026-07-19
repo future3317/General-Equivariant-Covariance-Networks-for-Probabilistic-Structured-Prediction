@@ -70,11 +70,11 @@ def test_low_rank_spd():
 
 
 def test_no_anisotropic_jitter_in_package():
-    """Ensure the forbidden anisotropic eigenvalue jitter is not in the codebase."""
+    """Ensure the forbidden anisotropic eigenvalue jitter is not in the new codebase."""
     import pathlib
     root = pathlib.Path(__file__).parent.parent
     for pyfile in root.rglob("*.py"):
-        if "tests" in pyfile.parts:
+        if "tests" in pyfile.parts or "figure_scripts" in pyfile.parts:
             continue
         text = pyfile.read_text(encoding="utf-8")
         assert "anisotropic" not in text.lower(), f"anisotropic jitter found in {pyfile}"

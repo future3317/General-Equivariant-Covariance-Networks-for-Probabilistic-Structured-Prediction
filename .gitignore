@@ -27,6 +27,9 @@ checkpoints_no_detach/
 elasticity_checkpoints/
 figures/
 visualizations/
+!figure_scripts/visualizations/
+figure_scripts/visualizations/*.png
+figure_scripts/visualizations/*.pdf
 output/
 *.png
 *.pdf
