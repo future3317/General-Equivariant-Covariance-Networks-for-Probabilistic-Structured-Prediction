@@ -26,6 +26,7 @@ from distributions import GaussianNLL
 from models import (
     EquivariantMeanHead,
     O3EquivariantSymmetricOperatorHead,
+    O3QuadraticSymmetricOperatorHead,
     StructuredProbabilisticPredictor,
 )
 from models.backbone import EquivariantActivation
@@ -63,6 +64,52 @@ class SyntheticBackbone(nn.Module):
         return x, batch
 
 
+class EquivariantQuadraticTeacherOperator(nn.Module):
+    """Frozen quadratic equivariant operator teacher.
+
+    Produces :math:`\\operatorname{Sym}^2(V)` coefficients through a linear
+    branch plus an ``o3.TensorSquare`` branch. This allows the teacher to
+    generate high-:math:`\\ell` covariance components (e.g. ``4e`` for
+    ``V = 0e + 2e``) even when the input representation only contains
+    :math:`\\ell \\le 2`.
+    """
+
+    def __init__(
+        self,
+        input_irreps: o3.Irreps,
+        output_spec: O3IrrepsSpec,
+        bottleneck_irreps: o3.Irreps = "16x0e + 8x1o + 8x2e",
+        A_scale: float = 0.3,
+    ):
+        super().__init__()
+        self.input_irreps = o3.Irreps(input_irreps)
+        self.output_spec = output_spec
+        self.operator_basis = output_spec.symmetric_square()
+        self.bottleneck_irreps = o3.Irreps(bottleneck_irreps)
+
+        self.pre = o3.Linear(self.input_irreps, self.bottleneck_irreps)
+        self.linear = o3.Linear(
+            self.bottleneck_irreps, self.operator_basis.operator_irreps
+        )
+        self.square = o3.TensorSquare(
+            self.bottleneck_irreps,
+            irreps_out=self.operator_basis.operator_irreps,
+        )
+
+        with torch.no_grad():
+            self.linear.weight.mul_(A_scale)
+            self.square.weight.mul_(A_scale)
+
+        for p in self.parameters():
+            p.requires_grad = False
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        z = self.pre(x)
+        coeff = self.linear(z) + self.square(z)
+        A = self.operator_basis.assemble(coeff)
+        return 0.5 * (A + A.transpose(-1, -2))
+
+
 class EquivariantTeacher(nn.Module):
     """Frozen equivariant teacher that generates mean and log-covariance."""
 
@@ -72,20 +119,29 @@ class EquivariantTeacher(nn.Module):
         output_spec: O3IrrepsSpec,
         A_scale: float = 0.3,
         mu_scale: float = 0.5,
+        use_quadratic_operator: bool = True,
     ):
         super().__init__()
         self.input_irreps = o3.Irreps(input_irreps)
         self.output_spec = output_spec
-        self.operator_basis = output_spec.symmetric_square()
+        self.use_quadratic_operator = use_quadratic_operator
 
         self.mean_map = o3.Linear(self.input_irreps, output_spec.irreps)
-        self.operator_map = o3.Linear(
-            self.input_irreps, self.operator_basis.operator_irreps
-        )
+
+        if use_quadratic_operator:
+            self.operator = EquivariantQuadraticTeacherOperator(
+                self.input_irreps, output_spec, A_scale=A_scale
+            )
+        else:
+            self.operator_basis = output_spec.symmetric_square()
+            self.operator_map = o3.Linear(
+                self.input_irreps, self.operator_basis.operator_irreps
+            )
+            with torch.no_grad():
+                self.operator_map.weight.mul_(A_scale)
 
         # Scale initial weights so eigenvalues stay moderate after matrix_exp.
         with torch.no_grad():
-            self.operator_map.weight.mul_(A_scale)
             self.mean_map.weight.mul_(mu_scale)
 
         # Freeze teacher.
@@ -94,9 +150,12 @@ class EquivariantTeacher(nn.Module):
 
     def forward(self, x: torch.Tensor):
         mu = self.mean_map(x)
-        A_coeff = self.operator_map(x)
-        A = self.operator_basis.assemble(A_coeff)
-        A = 0.5 * (A + A.transpose(-1, -2))
+        if self.use_quadratic_operator:
+            A = self.operator(x)
+        else:
+            A_coeff = self.operator_map(x)
+            A = self.operator_basis.assemble(A_coeff)
+            A = 0.5 * (A + A.transpose(-1, -2))
         S = torch.linalg.matrix_exp(A)
         return mu, A, S
 
@@ -211,6 +270,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output_irreps", default="0e + 2e", help="e.g. '1o', '0e + 2e', '0e + 2e + 2o'")
     parser.add_argument("--input_irreps", default=DEFAULT_INPUT_IRREPS)
+    parser.add_argument("--use_quadratic_teacher", action="store_true", default=True)
     parser.add_argument("--num_train", type=int, default=2000)
     parser.add_argument("--num_test", type=int, default=500)
     parser.add_argument("--hidden_irreps", default="32x0e + 16x1o + 8x2e")
@@ -229,11 +289,13 @@ def main():
     input_irreps = o3.Irreps(args.input_irreps)
 
     # Single frozen teacher shared by train and test.
-    teacher = EquivariantTeacher(input_irreps, output_spec).to(args.device)
+    teacher = EquivariantTeacher(
+        input_irreps, output_spec, use_quadratic_operator=args.use_quadratic_teacher
+    ).to(args.device)
 
     backbone = SyntheticBackbone(input_irreps, args.hidden_irreps)
     mean_head = EquivariantMeanHead(backbone.hidden_irreps, output_spec.irreps, pool=True)
-    cov_head = O3EquivariantSymmetricOperatorHead(backbone.hidden_irreps, output_spec, pool=True)
+    cov_head = O3QuadraticSymmetricOperatorHead(backbone.hidden_irreps, output_spec, pool=True)
 
     model = StructuredProbabilisticPredictor(
         backbone=backbone,
