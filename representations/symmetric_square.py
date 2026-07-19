@@ -5,7 +5,7 @@ from __future__ import annotations
 import torch
 from e3nn import o3
 
-from gecn.representations.base import SymmetricSquareSpec
+from representations.base import SymmetricSquareSpec
 
 
 def symmetric_square_irreps(output_irreps: o3.Irreps) -> o3.Irreps:

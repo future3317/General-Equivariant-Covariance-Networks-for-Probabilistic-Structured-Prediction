@@ -2,7 +2,7 @@
 
 import torch
 
-from gecn.spd_maps.base import SPDMap, symmetrize
+from spd_maps.base import SPDMap, symmetrize
 
 
 class PrecisionExponentialMap(SPDMap):

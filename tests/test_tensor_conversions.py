@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from gecn.data.tensor_conversions import (
+from data.tensor_conversions import (
     km_to_irreps,
     irreps_to_km,
     voigt_to_irreps,
@@ -76,7 +76,7 @@ def test_elasticity_21d_irreps_round_trip():
 
 def test_elasticity_irreps_major_symmetry():
     """The reconstructed 21D vector must build a major-symmetric 6x6 Voigt matrix."""
-    from gecn.data.tensor_conversions import elasticity_21d_to_voigt6x6
+    from data.tensor_conversions import elasticity_21d_to_voigt6x6
 
     vec21 = torch.randn(4, 21)
     C6 = elasticity_21d_to_voigt6x6(vec21)

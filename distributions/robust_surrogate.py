@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Dict, Tuple
 import torch
 
-from gecn.distributions.base import StructuredDistributionLoss
-from gecn.spd_maps.base import SPDMap
+from distributions.base import StructuredDistributionLoss
+from spd_maps.base import SPDMap
 
 
 class RobustSurrogateLoss(StructuredDistributionLoss):

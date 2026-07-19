@@ -6,7 +6,7 @@ import abc
 from typing import Dict, Tuple
 import torch
 
-from gecn.spd_maps.base import SPDMap
+from spd_maps.base import SPDMap
 
 
 class StructuredDistributionLoss(abc.ABC):

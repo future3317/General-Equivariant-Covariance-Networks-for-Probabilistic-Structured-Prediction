@@ -2,7 +2,7 @@
 
 import torch
 
-from gecn.spd_maps.base import SPDMap
+from spd_maps.base import SPDMap
 
 
 class LowRankPlusIsotropicMap(SPDMap):

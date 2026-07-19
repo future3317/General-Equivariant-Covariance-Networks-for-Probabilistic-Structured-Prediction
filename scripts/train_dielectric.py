@@ -1,4 +1,4 @@
-"""Train the gecn model on dielectric tensor prediction."""
+"""Train the equivariant covariance model on dielectric tensor prediction."""
 
 from __future__ import annotations
 
@@ -12,24 +12,24 @@ import torch
 import torch.optim as optim
 from tqdm import tqdm
 
-from gecn import (
-    O3IrrepsSpec,
-    MatrixExponentialMap,
-    GaussianNLL,
+from representations import O3IrrepsSpec
+from spd_maps import MatrixExponentialMap
+from distributions import GaussianNLL
+from models import (
     EquivariantBackbone,
     EquivariantMeanHead,
     O3EquivariantSymmetricOperatorHead,
     StructuredProbabilisticPredictor,
 )
-from gecn.data.dielectric_dataset import get_dielectric_irreps_loaders
-from gecn.data.tensor_conversions import irreps_to_km, irreps_to_matrix_exp_voigt
+from data.dielectric_dataset import get_dielectric_irreps_loaders
+from data.tensor_conversions import irreps_to_km, irreps_to_matrix_exp_voigt
 from voigt_utils import kelvin_mandel_to_voigt
 from matrix_log_transform import matrix_exponential_transform
 
 
 def setup_logger(save_dir: str, experiment_name: str | None = None):
     if experiment_name is None:
-        experiment_name = f"gecn_dielectric_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        experiment_name = f"dielectric_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     os.makedirs(save_dir, exist_ok=True)
     log_file = os.path.join(save_dir, f"{experiment_name}.log")
 
@@ -121,7 +121,7 @@ def validate(model, dataloader, device):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_dir", default="data/mp_dielectric")
-    parser.add_argument("--save_dir", default="checkpoints_gecn_dielectric")
+    parser.add_argument("--save_dir", default="checkpoints_dielectric")
     parser.add_argument("--hidden_dim", type=int, default=32)
     parser.add_argument("--lmax", type=int, default=2)
     parser.add_argument("--num_layers", type=int, default=2)

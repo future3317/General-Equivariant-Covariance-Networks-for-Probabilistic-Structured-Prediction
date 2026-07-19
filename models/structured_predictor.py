@@ -5,15 +5,15 @@ from __future__ import annotations
 from typing import Dict
 import torch
 
-from gecn.distributions.base import StructuredDistributionLoss
-from gecn.models.backbone import EquivariantBackbone
-from gecn.models.mean_head import EquivariantMeanHead
-from gecn.models.covariance_head import (
+from distributions.base import StructuredDistributionLoss
+from models.backbone import EquivariantBackbone
+from models.mean_head import EquivariantMeanHead
+from models.covariance_head import (
     O3EquivariantSymmetricOperatorHead,
     O3EquivariantLowRankCovarianceHead,
 )
-from gecn.representations import O3IrrepsSpec
-from gecn.spd_maps.base import SPDMap
+from representations import O3IrrepsSpec
+from spd_maps.base import SPDMap
 
 
 class StructuredProbabilisticPredictor(torch.nn.Module):

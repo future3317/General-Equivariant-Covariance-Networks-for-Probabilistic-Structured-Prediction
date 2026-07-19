@@ -5,8 +5,8 @@ import pytest
 import torch
 from torch.distributions import MultivariateNormal
 
-from gecn.spd_maps import MatrixExponentialMap
-from gecn.distributions import GaussianNLL, StudentTNLL
+from spd_maps import MatrixExponentialMap
+from distributions import GaussianNLL, StudentTNLL
 
 
 def _make_test_tensors(batch=8, d=6, dtype=torch.float32):

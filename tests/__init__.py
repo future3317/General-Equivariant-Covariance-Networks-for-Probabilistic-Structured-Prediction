@@ -1,1 +1,1 @@
-"""Unit tests for gecn."""
+"""Unit tests for the equivariant covariance network implementation."""

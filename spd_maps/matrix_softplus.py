@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import torch
 
-from gecn.spd_maps.base import SPDMap, symmetrize
+from spd_maps.base import SPDMap, symmetrize
 
 
 class _SpectralMapFunction(torch.autograd.Function):

@@ -5,8 +5,8 @@ from __future__ import annotations
 import torch
 from e3nn import o3
 
-from gecn.representations.base import OrthogonalRepresentationSpec
-from gecn.representations.symmetric_square import O3SymmetricOperatorBasis
+from representations.base import OrthogonalRepresentationSpec
+from representations.symmetric_square import O3SymmetricOperatorBasis
 
 
 class O3IrrepsSpec(OrthogonalRepresentationSpec):

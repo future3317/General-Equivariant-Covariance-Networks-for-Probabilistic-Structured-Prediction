@@ -6,7 +6,7 @@ import torch
 from e3nn import o3
 from torch_scatter import scatter
 
-from gecn.representations import O3IrrepsSpec, O3SymmetricOperatorBasis
+from representations import O3IrrepsSpec, O3SymmetricOperatorBasis
 
 
 class O3EquivariantSymmetricOperatorHead(torch.nn.Module):

@@ -3,16 +3,16 @@
 import pytest
 import torch
 
-from gecn.experiments.synthetic_covariance_recovery import (
+from experiments.synthetic_covariance_recovery import (
     SyntheticBackbone,
     SyntheticDataset,
     _make_data_object,
     evaluate,
 )
-from gecn import (
-    O3IrrepsSpec,
-    MatrixExponentialMap,
-    GaussianNLL,
+from representations import O3IrrepsSpec
+from spd_maps import MatrixExponentialMap
+from distributions import GaussianNLL
+from models import (
     EquivariantMeanHead,
     O3EquivariantSymmetricOperatorHead,
     StructuredProbabilisticPredictor,

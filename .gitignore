@@ -13,12 +13,16 @@ build/
 .ipynb_checkpoints/
 
 # Data & artifacts
-data/
+data/*
+!data/__init__.py
+!data/*.py
 *.pkl
 *.pt
 *.pth
 *.ckpt
 checkpoints/
+checkpoints_dielectric/
+checkpoints_elasticity/
 checkpoints_no_detach/
 elasticity_checkpoints/
 figures/

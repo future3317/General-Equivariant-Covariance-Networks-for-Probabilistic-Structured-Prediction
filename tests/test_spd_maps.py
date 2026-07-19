@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from gecn.spd_maps import (
+from spd_maps import (
     MatrixExponentialMap,
     SpectralSoftplusMap,
     SquarePlusIdentityMap,
@@ -70,12 +70,12 @@ def test_low_rank_spd():
 
 
 def test_no_anisotropic_jitter_in_package():
-    """Ensure the forbidden anisotropic eigenvalue jitter is not in gecn/."""
-    import gecn
-    import inspect
+    """Ensure the forbidden anisotropic eigenvalue jitter is not in the codebase."""
     import pathlib
-    root = pathlib.Path(inspect.getfile(gecn)).parent
+    root = pathlib.Path(__file__).parent.parent
     for pyfile in root.rglob("*.py"):
+        if "tests" in pyfile.parts:
+            continue
         text = pyfile.read_text(encoding="utf-8")
         assert "anisotropic" not in text.lower(), f"anisotropic jitter found in {pyfile}"
         assert "safe_eigh" not in text, f"safe_eigh found in {pyfile}"

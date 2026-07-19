@@ -4,7 +4,7 @@ setup(
     name="gecn",
     version="0.1.0",
     description="General Equivariant Covariance Networks for Probabilistic Structured Prediction",
-    packages=find_packages(),
+    packages=find_packages(exclude=["tests", "tests.*"]),
     python_requires=">=3.9",
     install_requires=[
         "torch>=2.0.0",

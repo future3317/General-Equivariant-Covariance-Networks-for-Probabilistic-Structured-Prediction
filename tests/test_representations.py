@@ -2,7 +2,7 @@
 
 import pytest
 import torch
-from gecn.representations import (
+from representations import (
     O3SymmetricOperatorBasis,
     rank2_symmetric_irreps,
     rank4_elasticity_irreps,

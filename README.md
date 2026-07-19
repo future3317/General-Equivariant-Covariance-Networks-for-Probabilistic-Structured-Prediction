@@ -2,28 +2,28 @@
 
 Core implementation for the TNNLS manuscript *General Equivariant Covariance Networks for Probabilistic Structured Prediction*.
 
-This repository is being refactored into a clean, modular library (`gecn/`) that separates representation theory, SPD maps, and probabilistic losses. The original ICML conference-code files remain in the repository root for reference but are now considered legacy.
+This repository contains a clean, modular implementation that separates representation theory, SPD maps, and probabilistic losses across top-level modules.
 
 ## Architecture
 
 The library is organized into four layers:
 
-1. **Output representations** (`gecn/representations/`)
+1. **Output representations** (`representations/`)
    - `O3IrrepsSpec`: finite-dimensional orthogonal `O(3)` representations via `e3nn` irreps.
    - `O3SymmetricOperatorBasis`: automatic construction of `Sym²(V)` using `e3nn.o3.ReducedTensorProducts("ij=ji", ...)`.
 
-2. **Equivariant symmetric operators** (`gecn/models/covariance_head.py`)
+2. **Equivariant symmetric operators** (`models/covariance_head.py`)
    - `O3EquivariantSymmetricOperatorHead`: predicts the coefficients of `A(x) ∈ Sym(V)`.
    - `O3EquivariantLowRankCovarianceHead`: predicts a low-rank-plus-isotropic structured parameterization.
 
-3. **SPD maps** (`gecn/spd_maps/`)
+3. **SPD maps** (`spd_maps/`)
    - `MatrixExponentialMap`: `S = exp(A)` (default, bijective).
    - `SpectralSoftplusMap`: spectral softplus with Löwner divided-difference autograd.
    - `SquarePlusIdentityMap`: `S = A² + εI`.
    - `PrecisionExponentialMap`: `S = exp(-B)` (log-precision coordinate).
    - `LowRankPlusIsotropicMap`: `S = σ²I + LLᵀ`.
 
-4. **Probabilistic losses** (`gecn/distributions/`)
+4. **Probabilistic losses** (`distributions/`)
    - `GaussianNLL`: proper multivariate Gaussian negative log-likelihood.
    - `StudentTNLL`: proper multivariate Student-t negative log-likelihood with explicit scale/covariance distinction.
    - `RobustSurrogateLoss`: LE-ESO-like robust surrogate, explicitly **not** claimed as a likelihood.
@@ -32,17 +32,17 @@ The library is organized into four layers:
 
 | Path | Purpose |
 |------|---------|
-| `gecn/representations/` | Orthogonal representation specs and `Sym²(V)` basis construction. |
-| `gecn/spd_maps/` | Structure-preserving maps from symmetric operators to SPD matrices. |
-| `gecn/distributions/` | Gaussian, Student-t, and robust-surrogate losses. |
-| `gecn/models/` | Backbone, mean/covariance heads, and `StructuredProbabilisticPredictor`. |
-| `gecn/scripts/` | Training scripts for dielectric tensor and elasticity tensor tasks. |
-| `gecn/experiments/` | Synthetic covariance-recovery experiment. |
+| `representations/` | Orthogonal representation specs and `Sym²(V)` basis construction. |
+| `spd_maps/` | Structure-preserving maps from symmetric operators to SPD matrices. |
+| `distributions/` | Gaussian, Student-t, and robust-surrogate losses. |
+| `models/` | Backbone, mean/covariance heads, and `StructuredProbabilisticPredictor`. |
+| `scripts/` | Training scripts for dielectric tensor and elasticity tensor tasks. |
+| `experiments/` | Synthetic covariance-recovery experiment. |
 | `tests/` | Unit tests for representations, equivariance, SPD maps, distributions, tensor conversions, synthetic experiment, and integration. |
 | `voigt_utils.py` | Voigt / Kelvin-Mandel utilities used by tensor conversions. |
 | `matrix_log_transform.py` | Matrix log/exp utilities used by the dielectric pipeline. |
 | `atom_features.py` | Atom feature builder used by the data loaders. |
-| `dielectric_data_loader.py` | Precomputed-graph dielectric loader wrapped by `gecn/data/dielectric_dataset.py`. |
+| `dielectric_data_loader.py` | Precomputed-graph dielectric loader wrapped by `data/dielectric_dataset.py`. |
 
 ## Quick start
 
@@ -58,8 +58,10 @@ The library is organized into four layers:
 
 3. Build a predictor programmatically:
    ```python
-   from gecn import (
-       O3IrrepsSpec, MatrixExponentialMap, GaussianNLL,
+   from representations import O3IrrepsSpec
+   from spd_maps import MatrixExponentialMap
+   from distributions import GaussianNLL
+   from models import (
        EquivariantBackbone, EquivariantMeanHead,
        O3EquivariantSymmetricOperatorHead, StructuredProbabilisticPredictor,
    )
@@ -85,16 +87,14 @@ The library is organized into four layers:
 
 ## Training scripts
 
-Three end-to-end scripts are provided under `gecn/scripts/` and `gecn/experiments/`.
-They use the new `gecn` architecture and are independent of the legacy root-level
-files.
+Three end-to-end scripts are provided under `scripts/` and `experiments/`.
 
 ### Dielectric tensor (`0e + 2e` output, full-rank covariance)
 
 ```bash
-python gecn/scripts/train_dielectric.py \
+python scripts/train_dielectric.py \
   --data_dir data/mp_dielectric \
-  --save_dir checkpoints_gecn_dielectric \
+  --save_dir checkpoints_dielectric \
   --hidden_dim 32 --lmax 2 --num_layers 2 \
   --num_epochs 100 --device cuda
 ```
@@ -106,9 +106,9 @@ MAE by mapping predictions back through the matrix exponential.
 ### Elasticity tensor (rank-4 output, low-rank covariance)
 
 ```bash
-python gecn/scripts/train_elasticity.py \
+python scripts/train_elasticity.py \
   --data_dir data/mp_elastic \
-  --save_dir checkpoints_gecn_elasticity \
+  --save_dir checkpoints_elasticity \
   --hidden_dim 48 --lmax 4 --num_layers 2 --rank 8 \
   --num_epochs 100 --device cuda
 ```
@@ -120,7 +120,7 @@ rank-4 target.
 ### Synthetic covariance recovery
 
 ```bash
-python gecn/experiments/synthetic_covariance_recovery.py \
+python experiments/synthetic_covariance_recovery.py \
   --output_irreps "0e + 2e" \
   --num_train 2000 --num_test 500 \
   --num_epochs 200 --device cuda
@@ -133,6 +133,6 @@ and other `O(3)` irreps.
 
 ## Notes for reviewers
 
-- The `gecn/` package separates representation theory, SPD maps, and probabilistic losses. It avoids anisotropic eigenvalue jitter, random-noise fallbacks, and improper likelihood claims.
+- The top-level modules separate representation theory, SPD maps, and probabilistic losses. They avoid anisotropic eigenvalue jitter, random-noise fallbacks, and improper likelihood claims.
 - The code currently provides a full `O3IrrepsSpec` implementation; the abstract `OrthogonalRepresentationSpec` interface leaves room for other compact groups.
 - All SPD maps are tested for positive definiteness, finite gradients, and (for the full predictor) `O(3)` equivariance.

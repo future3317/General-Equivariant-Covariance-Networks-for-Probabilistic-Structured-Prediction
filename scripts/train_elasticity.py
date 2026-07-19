@@ -1,4 +1,4 @@
-"""Train the gecn model on elasticity tensor prediction with low-rank covariance."""
+"""Train the equivariant covariance model on elasticity tensor prediction with low-rank covariance."""
 
 from __future__ import annotations
 
@@ -12,23 +12,22 @@ import torch
 import torch.optim as optim
 from tqdm import tqdm
 
-from gecn import (
-    O3IrrepsSpec,
-    LowRankPlusIsotropicMap,
-    GaussianNLL,
+from representations import O3IrrepsSpec, rank4_elasticity_irreps
+from spd_maps import LowRankPlusIsotropicMap
+from distributions import GaussianNLL
+from models import (
     EquivariantBackbone,
     EquivariantMeanHead,
     O3EquivariantLowRankCovarianceHead,
     StructuredProbabilisticPredictor,
-    rank4_elasticity_irreps,
 )
-from gecn.data.elasticity_dataset import get_elasticity_irreps_loaders
-from gecn.data.tensor_conversions import irreps_to_elasticity_21d
+from data.elasticity_dataset import get_elasticity_irreps_loaders
+from data.tensor_conversions import irreps_to_elasticity_21d
 
 
 def setup_logger(save_dir: str, experiment_name: str | None = None):
     if experiment_name is None:
-        experiment_name = f"gecn_elasticity_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        experiment_name = f"elasticity_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     os.makedirs(save_dir, exist_ok=True)
     log_file = os.path.join(save_dir, f"{experiment_name}.log")
 
@@ -109,7 +108,7 @@ def validate(model, dataloader, device, mean_21d, std_21d):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_dir", default="data/mp_elastic")
-    parser.add_argument("--save_dir", default="checkpoints_gecn_elasticity")
+    parser.add_argument("--save_dir", default="checkpoints_elasticity")
     parser.add_argument("--hidden_dim", type=int, default=48)
     parser.add_argument("--lmax", type=int, default=4)
     parser.add_argument("--num_layers", type=int, default=2)
