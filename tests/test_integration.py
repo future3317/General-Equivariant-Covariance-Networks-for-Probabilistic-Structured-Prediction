@@ -38,6 +38,7 @@ def _make_data(num_graphs=2, num_nodes=6):
     batch = torch.arange(num_graphs).repeat_interleave(num_nodes)
     return Data(
         node_features=torch.randn(num_graphs * num_nodes, 49),
+        z=torch.randint(1, 100, (num_graphs * num_nodes,)),
         edge_index=edge_index,
         edge_sh=edge_sh,
         edge_rbf=edge_rbf,
@@ -113,3 +114,28 @@ def test_vector_output_forward_backward():
     assert result["mu"].shape == (2, 3)
     assert result["scale"].shape == (2, 3, 3)
     result["loss"].backward()
+
+
+def test_learnable_atom_features_forward_backward():
+    output_spec = O3IrrepsSpec("1o")
+    backbone = EquivariantBackbone(
+        hidden_dim=16, lmax=2, num_layers=1, atom_feature_dim=49, num_basis=8,
+        atom_features="learnable",
+    )
+    mean_head = EquivariantMeanHead(backbone.irreps_out, output_spec.irreps, pool=True)
+    cov_head = O3EquivariantSymmetricOperatorHead(backbone.irreps_out, output_spec, pool=True)
+    model = StructuredProbabilisticPredictor(
+        backbone=backbone,
+        output_spec=output_spec,
+        mean_head=mean_head,
+        covariance_head=cov_head,
+        spd_map=MatrixExponentialMap(),
+        distribution=GaussianNLL(),
+    )
+    data = _make_data()
+    target = torch.randn(2, output_spec.dim)
+    result = model(data, target, return_scale=True)
+    assert result["mu"].shape == (2, 3)
+    assert result["scale"].shape == (2, 3, 3)
+    result["loss"].backward()
+    assert backbone.atom_embedding.weight.grad is not None

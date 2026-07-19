@@ -63,13 +63,13 @@ def log_mae(pred_irreps: torch.Tensor, target_km: torch.Tensor) -> torch.Tensor:
     return torch.mean(torch.abs(pred_km - target_km))
 
 
-def train_epoch(model, dataloader, optimizer, device, distribution, warmup_mse_weight: float = 0.0):
+def train_epoch(model, dataloader, optimizer, device, distribution, warmup_mse_weight: float = 0.0, non_blocking: bool = False):
     model.train()
     total_loss = torch.tensor(0.0, device=device)
     num_samples = 0
 
     for batch in tqdm(dataloader, desc="Training", leave=False):
-        batch = batch.to(device)
+        batch = batch.to(device, non_blocking=non_blocking)
         if batch.edge_index is None or batch.edge_index.numel() == 0:
             continue
 
@@ -94,7 +94,7 @@ def train_epoch(model, dataloader, optimizer, device, distribution, warmup_mse_w
 
 
 @torch.inference_mode()
-def validate(model, dataloader, device):
+def validate(model, dataloader, device, non_blocking: bool = False):
     model.eval()
     total_loss = 0.0
     total_phys_abs = 0.0
@@ -103,7 +103,7 @@ def validate(model, dataloader, device):
     num_mae_elements = 0
 
     for batch in tqdm(dataloader, desc="Validation", leave=False):
-        batch = batch.to(device)
+        batch = batch.to(device, non_blocking=non_blocking)
         if batch.edge_index is None or batch.edge_index.numel() == 0:
             continue
 
@@ -138,6 +138,11 @@ def main():
     parser.add_argument("--patience", type=int, default=15)
     parser.add_argument("--warmup_epochs", type=int, default=3)
     parser.add_argument("--train_subset", type=int, default=None)
+    parser.add_argument("--num_workers", type=int, default=0)
+    parser.add_argument("--persistent_workers", action="store_true")
+    parser.add_argument("--pin_memory", action="store_true")
+    parser.add_argument("--prefetch_factor", type=int, default=None)
+    parser.add_argument("--atom_features", default="manual", choices=["manual", "learnable"])
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
 
@@ -152,6 +157,10 @@ def main():
         data_dir=args.data_dir,
         batch_size=args.batch_size,
         train_subset=args.train_subset,
+        num_workers=args.num_workers,
+        persistent_workers=args.persistent_workers,
+        pin_memory=args.pin_memory,
+        prefetch_factor=args.prefetch_factor,
     )
 
     output_spec = O3IrrepsSpec("0e + 2e")
@@ -161,6 +170,7 @@ def main():
         num_layers=args.num_layers,
         atom_feature_dim=49,
         num_basis=args.num_basis,
+        atom_features=args.atom_features,
     )
     mean_head = EquivariantMeanHead(backbone.irreps_out, output_spec.irreps, pool=True)
     cov_head = O3QuadraticSymmetricOperatorHead(backbone.irreps_out, output_spec, pool=True)
@@ -184,10 +194,14 @@ def main():
     patience_counter = 0
     history = []
 
+    non_blocking = args.pin_memory and args.device.startswith("cuda")
     for epoch in range(args.num_epochs):
         warmup_mse = 0.1 if epoch < args.warmup_epochs else 0.0
-        train_loss = train_epoch(model, train_loader, optimizer, args.device, GaussianNLL(), warmup_mse)
-        val_metrics = validate(model, val_loader, args.device)
+        train_loss = train_epoch(
+            model, train_loader, optimizer, args.device, GaussianNLL(), warmup_mse,
+            non_blocking=non_blocking,
+        )
+        val_metrics = validate(model, val_loader, args.device, non_blocking=non_blocking)
         scheduler.step(val_metrics["loss"])
 
         logger.info(
@@ -212,7 +226,7 @@ def main():
 
     # Test on best model.
     model.load_state_dict(torch.load(os.path.join(args.save_dir, "best_model.pt"), map_location=args.device))
-    test_metrics = validate(model, test_loader, args.device)
+    test_metrics = validate(model, test_loader, args.device, non_blocking=non_blocking)
     logger.info(f"Test: loss={test_metrics['loss']:.4f}, phys_mae={test_metrics['phys_mae']:.4f}, log_mae={test_metrics['log_mae']:.4f}")
 
     with open(os.path.join(args.save_dir, "args.json"), "w") as f:

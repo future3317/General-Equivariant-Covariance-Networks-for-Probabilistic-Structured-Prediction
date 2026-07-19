@@ -149,16 +149,23 @@ class EquivariantBackbone(torch.nn.Module):
         lmax: int = 2,
         num_layers: int = 2,
         atom_feature_dim: int = 49,
+        atom_features: str = "manual",
     ):
         super().__init__()
         self.max_radius = max_radius
         self.num_basis = num_basis
         self.lmax = lmax
         self.atom_feature_dim = atom_feature_dim
+        self.atom_features = atom_features
 
         self.irreps_sh = o3.Irreps.spherical_harmonics(lmax)
-        irreps_embedded = f"{atom_feature_dim}x0e"
         irreps_node_hidden = self._build_hidden_irreps(hidden_dim, lmax)
+
+        if atom_features == "learnable":
+            self.atom_embedding = torch.nn.Embedding(119, atom_feature_dim)
+            irreps_embedded = f"{atom_feature_dim}x0e"
+        else:
+            irreps_embedded = f"{atom_feature_dim}x0e"
 
         self.layers = torch.nn.ModuleList()
         current_irreps = irreps_embedded
@@ -190,10 +197,15 @@ class EquivariantBackbone(torch.nn.Module):
         return o3.Irreps(irreps_list).simplify()
 
     def forward(self, data) -> tuple[torch.Tensor, torch.Tensor]:
-        node_feats = data.node_features
-        assert node_feats.shape[-1] == self.atom_feature_dim, (
-            f"node_features dim {node_feats.shape[-1]} != expected {self.atom_feature_dim}"
-        )
+        if self.atom_features == "learnable":
+            if not hasattr(data, "z"):
+                raise ValueError("learnable atom_features requires data.z (atomic numbers)")
+            node_feats = self.atom_embedding(data.z)
+        else:
+            node_feats = data.node_features
+            assert node_feats.shape[-1] == self.atom_feature_dim, (
+                f"node_features dim {node_feats.shape[-1]} != expected {self.atom_feature_dim}"
+            )
         batch = data.batch
         edge_src = data.edge_index[0]
         edge_dst = data.edge_index[1]

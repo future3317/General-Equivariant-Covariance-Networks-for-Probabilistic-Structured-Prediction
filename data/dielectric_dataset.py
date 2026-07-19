@@ -55,6 +55,10 @@ def get_dielectric_irreps_loaders(
     data_dir: str = "data/mp_dielectric",
     batch_size: int = 32,
     train_subset: int | None = None,
+    num_workers: int = 0,
+    persistent_workers: bool = False,
+    pin_memory: bool = False,
+    prefetch_factor: int | None = None,
 ):
     """Create PyG data loaders with irrep-space dielectric targets."""
     train_dataset = DielectricIrrepsDataset(data_dir, "train")
@@ -66,7 +70,13 @@ def get_dielectric_irreps_loaders(
         indices = random.sample(range(len(train_dataset)), train_subset)
         train_dataset = torch.utils.data.Subset(train_dataset, indices)
 
-    loader_kwargs = {"num_workers": 0, "persistent_workers": False, "pin_memory": False}
+    loader_kwargs: dict = {
+        "num_workers": num_workers,
+        "persistent_workers": persistent_workers if num_workers > 0 else False,
+        "pin_memory": pin_memory,
+    }
+    if num_workers > 0 and prefetch_factor is not None:
+        loader_kwargs["prefetch_factor"] = prefetch_factor
 
     train_loader = PyGDataLoader(
         train_dataset, batch_size=batch_size, shuffle=True, drop_last=True, **loader_kwargs

@@ -159,6 +159,9 @@ def get_elasticity_irreps_loaders(
     num_workers: int = 0,
     train_subset: int | None = None,
     max_radius: float = 5.0,
+    persistent_workers: bool = False,
+    pin_memory: bool = False,
+    prefetch_factor: int | None = None,
 ):
     """Create PyG data loaders for irrep-space elasticity targets."""
     train_path = f"{data_dir}/train.pkl"
@@ -180,7 +183,13 @@ def get_elasticity_irreps_loaders(
         indices = random.sample(range(len(train_dataset)), train_subset)
         train_dataset = torch.utils.data.Subset(train_dataset, indices)
 
-    loader_kwargs = {"num_workers": num_workers, "persistent_workers": False, "pin_memory": False}
+    loader_kwargs: dict = {
+        "num_workers": num_workers,
+        "persistent_workers": persistent_workers if num_workers > 0 else False,
+        "pin_memory": pin_memory,
+    }
+    if num_workers > 0 and prefetch_factor is not None:
+        loader_kwargs["prefetch_factor"] = prefetch_factor
 
     train_loader = PyGDataLoader(
         train_dataset, batch_size=batch_size, shuffle=True, drop_last=True, **loader_kwargs
