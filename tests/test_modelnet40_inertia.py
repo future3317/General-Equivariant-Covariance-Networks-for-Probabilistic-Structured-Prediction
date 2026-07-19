@@ -14,7 +14,6 @@ from data.modelnet40_inertia_dataset import (
     _shape_covariance_voigt,
     DEFAULT_CACHE_PATH,
 )
-from data.tensor_conversions import voigt_to_irreps
 from models import (
     EquivariantBackbone,
     EquivariantMeanHead,
@@ -176,31 +175,26 @@ def test_shape_covariance_dataset_loads():
 
 
 def test_shape_covariance_rotation_equivariance():
-    """Shape covariance target transforms as a rank-2 tensor under rotation.
+    """Scalar-normalized shape covariance target is rotation equivariant."""
+    from data.tensor_conversions import voigt_to_irreps
 
-    The test uses unnormalized targets because per-component standardization
-    does not commute with rotations. The underlying tensor transformation is
-    still equivariant.
-    """
     ds = ModelNet40InertiaDataset(
         split="train", target_type="shape_covariance", num_points=128, num_neighbors=8
     )
     data = ds[0]
     R = torch.tensor([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
 
-    # Use the raw (unnormalized) shape covariance to avoid standardization bias.
-    S_voigt = _shape_covariance_voigt(data.pos.numpy())
-    y = voigt_to_irreps(torch.from_numpy(S_voigt).float().unsqueeze(0)).squeeze(0)
+    # Scalar std is shared across all components.
+    scalar_std = data.y_voigt_std[0].item()
 
     pos_rot = data.pos @ R.T
     S_rot_voigt = _shape_covariance_voigt(pos_rot.numpy())
-    y_rot_expected = voigt_to_irreps(
-        torch.from_numpy(S_rot_voigt).float().unsqueeze(0)
-    ).squeeze(0)
+    S_rot_norm = torch.from_numpy(S_rot_voigt).float() / scalar_std
+    y_rot_expected = voigt_to_irreps(S_rot_norm.unsqueeze(0)).squeeze(0)
 
     output_spec = O3IrrepsSpec("0e + 2e")
     D = output_spec.representation_matrix(R)
-    y_rot_pred = D @ y
+    y_rot_pred = D @ data.y_irreps.squeeze(0)
     assert torch.allclose(y_rot_pred, y_rot_expected, atol=1e-4)
 
 

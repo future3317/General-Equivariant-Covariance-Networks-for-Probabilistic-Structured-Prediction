@@ -11,6 +11,10 @@ Supports two targets:
 * ``'inertia'``: the 3x3 inertia tensor of the point cloud (precomputed).
 * ``'shape_covariance'``: the 3x3 shape covariance / second-moment tensor
   computed on the fly from the centered point cloud.
+
+Target tensors are normalized by a single scalar standard deviation shared
+across all Voigt components. Scalar scaling commutes with O(3) rotations and
+therefore preserves the equivariance of the learning problem.
 """
 
 from __future__ import annotations
@@ -28,7 +32,7 @@ from torch.utils.data import Dataset
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader as PyGDataLoader
 
-from data.tensor_conversions import voigt_to_irreps, irreps_to_voigt
+from data.tensor_conversions import voigt_to_irreps
 
 
 DEFAULT_CACHE_PATH = "data/modelnet40/cache/modelnet40_inertia_dataset.pkl"
@@ -108,6 +112,26 @@ def _shape_covariance_voigt(points: np.ndarray) -> np.ndarray:
     ], dtype=np.float32)
 
 
+def _scalar_normalize_voigt(
+    target_voigt: np.ndarray,
+    stats: dict[str, np.ndarray],
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Normalize a Voigt target by a single scalar standard deviation.
+
+    A scalar scale commutes with the O(3) representation matrix, so this
+    normalization preserves equivariance. No mean shift is applied because a
+    scalar shift vector is generally not invariant under rotations.
+    """
+    target = torch.from_numpy(target_voigt).float()
+    std_all = torch.from_numpy(stats["std"]).float()
+    global_std = std_all.mean().item()
+    if global_std < 1e-8:
+        global_std = 1.0
+    std = torch.full_like(std_all, global_std)
+    mean = torch.zeros_like(std_all)
+    return target / std, mean, std
+
+
 def _point_cloud_to_data(
     points: np.ndarray,
     target_voigt: np.ndarray,
@@ -133,11 +157,8 @@ def _point_cloud_to_data(
     # Constant atomic type for all points -> single learnable embedding vector.
     z = torch.zeros(pos.shape[0], dtype=torch.long)
 
-    # Normalize target in Voigt space, then convert to 0e+2e irrep coefficients.
-    mean = torch.from_numpy(stats["mean"]).float()
-    std = torch.from_numpy(stats["std"]).float()
-    target_voigt_t = torch.from_numpy(target_voigt).float()
-    target_voigt_norm = (target_voigt_t - mean) / std
+    # Scalar-normalize target in Voigt space, then convert to 0e+2e irrep coefficients.
+    target_voigt_norm, mean, std = _scalar_normalize_voigt(target_voigt, stats)
     y_irreps = voigt_to_irreps(target_voigt_norm).unsqueeze(0)
 
     data = Data(
@@ -163,6 +184,9 @@ class ModelNet40InertiaDataset(Dataset):
     The precomputed cache is expected to contain ``train``, ``test`` and
     ``stats`` dictionaries, where each split has ``points`` (N, P, 3),
     ``inertia`` (N, 6) in Voigt notation, and ``labels`` (N,).
+
+    Targets are always normalized by a single scalar standard deviation so that
+    the learning problem remains strictly equivariant under O(3).
 
     Args:
         target_type: ``'inertia'`` uses the precomputed inertia tensor;
@@ -208,9 +232,10 @@ class ModelNet40InertiaDataset(Dataset):
             self.targets_voigt = self._data[split]["inertia"]
             self.stats = self._data["stats"]
         else:
-            # Compute shape-covariance targets and statistics from the training split.
+            # Compute shape-covariance targets from the same subsampled points that
+            # the model sees. This keeps input and target consistent.
             self.targets_voigt = np.stack(
-                [_shape_covariance_voigt(p) for p in self.points],
+                [_shape_covariance_voigt(p[:num_points]) for p in self.points],
                 axis=0,
             )
             if split == "train":
@@ -219,9 +244,9 @@ class ModelNet40InertiaDataset(Dataset):
                     "std": self.targets_voigt.std(axis=0),
                 }
             else:
-                # Reuse training statistics computed from the full training set.
+                # Reuse training statistics.
                 train_targets = np.stack(
-                    [_shape_covariance_voigt(p) for p in self._data["train"]["points"]],
+                    [_shape_covariance_voigt(p[:num_points]) for p in self._data["train"]["points"]],
                     axis=0,
                 )
                 self.stats = {
