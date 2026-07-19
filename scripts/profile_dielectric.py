@@ -317,6 +317,7 @@ def main():
         persistent_workers=args.persistent_workers,
         pin_memory=args.pin_memory,
         prefetch_factor=args.prefetch_factor,
+        lmax=args.lmax,
     )
 
     output_spec = O3IrrepsSpec("0e + 2e")

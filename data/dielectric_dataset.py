@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import torch
+from e3nn import o3
 from torch.utils.data import Dataset
 from torch_geometric.loader import DataLoader as PyGDataLoader
 
@@ -21,10 +22,21 @@ class DielectricIrrepsDataset(Dataset):
     Args:
         base_dir: Data directory containing ``{split}_graphs_full`` folders.
         split: ``'train'``, ``'val'`` or ``'test'``.
+        lmax: If provided, slice the precomputed spherical-harmonics edge
+            features to this maximum degree. This lets a backbone with a lower
+            ``lmax`` use graphs that were originally precomputed with a higher
+            one without re-running the expensive preprocessing pipeline.
     """
 
-    def __init__(self, base_dir: str, split: str):
+    def __init__(self, base_dir: str, split: str, lmax: int | None = None):
         self._base = DielectricDataset(base_dir, split)
+        self.lmax = lmax
+
+        # Precomputed edge_sh dimension for the requested lmax.
+        if self.lmax is not None:
+            self._edge_sh_dim = o3.Irreps.spherical_harmonics(self.lmax).dim
+        else:
+            self._edge_sh_dim = None
 
         # Normalization parameters from the preprocessed graphs.
         self.component_mean = torch.tensor(self._base.component_mean, dtype=torch.float32)
@@ -36,6 +48,10 @@ class DielectricIrrepsDataset(Dataset):
     def __getitem__(self, idx):
         data = self._base[idx]
 
+        # Optionally downsample spherical-harmonics to a lower lmax.
+        if self._edge_sh_dim is not None and data.edge_sh.shape[-1] != self._edge_sh_dim:
+            data.edge_sh = data.edge_sh[..., : self._edge_sh_dim]
+
         # y is [6] normalized log-KM; reshape to [1, 6] for conversion helpers.
         y_km_norm = data.y.view(1, -1)
 
@@ -43,11 +59,12 @@ class DielectricIrrepsDataset(Dataset):
         y_km = y_km_norm * self.component_std.to(y_km_norm.device) + self.component_mean.to(y_km_norm.device)
 
         # Convert to irreps (log-tensor in irrep space).
-        y_irreps = km_to_irreps(y_km).squeeze(0)
+        y_irreps = km_to_irreps(y_km)
 
         # Attach the physical log-KM and normalization params for evaluation.
+        # Keep a leading dimension so PyG stacks graph-level targets to [B, 6].
         data.y_irreps = y_irreps
-        data.y_km = y_km.squeeze(0)
+        data.y_km = y_km
         return data
 
 
@@ -59,11 +76,12 @@ def get_dielectric_irreps_loaders(
     persistent_workers: bool = False,
     pin_memory: bool = False,
     prefetch_factor: int | None = None,
+    lmax: int | None = None,
 ):
     """Create PyG data loaders with irrep-space dielectric targets."""
-    train_dataset = DielectricIrrepsDataset(data_dir, "train")
-    val_dataset = DielectricIrrepsDataset(data_dir, "val")
-    test_dataset = DielectricIrrepsDataset(data_dir, "test")
+    train_dataset = DielectricIrrepsDataset(data_dir, "train", lmax=lmax)
+    val_dataset = DielectricIrrepsDataset(data_dir, "val", lmax=lmax)
+    test_dataset = DielectricIrrepsDataset(data_dir, "test", lmax=lmax)
 
     if train_subset is not None and train_subset < len(train_dataset):
         import random
