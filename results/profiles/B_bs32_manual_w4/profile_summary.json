@@ -1,0 +1,196 @@
+{
+  "args": {
+    "data_dir": "data/mp_dielectric",
+    "save_dir": "results/profiles/B_bs32_manual_w4",
+    "hidden_dim": 32,
+    "lmax": 2,
+    "num_layers": 2,
+    "num_basis": 8,
+    "batch_size": 32,
+    "warmup_batches": 5,
+    "profile_batches": 20,
+    "num_workers": 4,
+    "persistent_workers": true,
+    "pin_memory": true,
+    "prefetch_factor": 2,
+    "atom_features": "manual",
+    "device": "cuda",
+    "chrome_trace": false
+  },
+  "num_parameters": 165288,
+  "tp_weight_numel": 19572,
+  "tp_instructions": [
+    {
+      "name": "backbone.layers.0.tp",
+      "weight_numel": 2156,
+      "instruction_count": 3,
+      "irreps_in1": "49x0e",
+      "irreps_in2": "1x0e+1x1o+1x2e",
+      "irreps_out": "32x0e+8x1e+8x1o+4x2e+4x2o"
+    },
+    {
+      "name": "backbone.layers.0.self_interaction",
+      "weight_numel": 1184,
+      "instruction_count": 5,
+      "irreps_in1": null,
+      "irreps_in2": null,
+      "irreps_out": "32x0e+8x1e+8x1o+4x2e+4x2o"
+    },
+    {
+      "name": "backbone.layers.0.skip",
+      "weight_numel": 1568,
+      "instruction_count": 1,
+      "irreps_in1": null,
+      "irreps_in2": null,
+      "irreps_out": "32x0e+8x1e+8x1o+4x2e+4x2o"
+    },
+    {
+      "name": "backbone.layers.0.act.gate.mul",
+      "weight_numel": 0,
+      "instruction_count": 4,
+      "irreps_in1": "8x1e+8x1o+4x2e+4x2o",
+      "irreps_in2": "8x0e+8x0e+4x0e+4x0e",
+      "irreps_out": "8x1e+8x1o+4x2e+4x2o"
+    },
+    {
+      "name": "backbone.layers.0.act.input_proj",
+      "weight_numel": 1952,
+      "instruction_count": 6,
+      "irreps_in1": null,
+      "irreps_in2": null,
+      "irreps_out": "32x0e+24x0e+8x1e+8x1o+4x2e+4x2o"
+    },
+    {
+      "name": "backbone.layers.1.tp",
+      "weight_numel": 2528,
+      "instruction_count": 25,
+      "irreps_in1": "32x0e+8x1e+8x1o+4x2e+4x2o",
+      "irreps_in2": "1x0e+1x1o+1x2e",
+      "irreps_out": "32x0e+8x1e+8x1o+4x2e+4x2o"
+    },
+    {
+      "name": "backbone.layers.1.self_interaction",
+      "weight_numel": 1184,
+      "instruction_count": 5,
+      "irreps_in1": null,
+      "irreps_in2": null,
+      "irreps_out": "32x0e+8x1e+8x1o+4x2e+4x2o"
+    },
+    {
+      "name": "backbone.layers.1.skip",
+      "weight_numel": 1184,
+      "instruction_count": 5,
+      "irreps_in1": null,
+      "irreps_in2": null,
+      "irreps_out": "32x0e+8x1e+8x1o+4x2e+4x2o"
+    },
+    {
+      "name": "backbone.layers.1.act.gate.mul",
+      "weight_numel": 0,
+      "instruction_count": 4,
+      "irreps_in1": "8x1e+8x1o+4x2e+4x2o",
+      "irreps_in2": "8x0e+8x0e+4x0e+4x0e",
+      "irreps_out": "8x1e+8x1o+4x2e+4x2o"
+    },
+    {
+      "name": "backbone.layers.1.act.input_proj",
+      "weight_numel": 1952,
+      "instruction_count": 6,
+      "irreps_in1": null,
+      "irreps_in2": null,
+      "irreps_out": "32x0e+24x0e+8x1e+8x1o+4x2e+4x2o"
+    },
+    {
+      "name": "backbone.post_linear1",
+      "weight_numel": 1184,
+      "instruction_count": 5,
+      "irreps_in1": null,
+      "irreps_in2": null,
+      "irreps_out": "32x0e+8x1e+8x1o+4x2e+4x2o"
+    },
+    {
+      "name": "backbone.post_act.gate.mul",
+      "weight_numel": 0,
+      "instruction_count": 4,
+      "irreps_in1": "8x1e+8x1o+4x2e+4x2o",
+      "irreps_in2": "8x0e+8x0e+4x0e+4x0e",
+      "irreps_out": "8x1e+8x1o+4x2e+4x2o"
+    },
+    {
+      "name": "backbone.post_act.input_proj",
+      "weight_numel": 1952,
+      "instruction_count": 6,
+      "irreps_in1": null,
+      "irreps_in2": null,
+      "irreps_out": "32x0e+24x0e+8x1e+8x1o+4x2e+4x2o"
+    },
+    {
+      "name": "backbone.post_linear2",
+      "weight_numel": 1184,
+      "instruction_count": 5,
+      "irreps_in1": null,
+      "irreps_in2": null,
+      "irreps_out": "32x0e+8x1e+8x1o+4x2e+4x2o"
+    },
+    {
+      "name": "mean_head.linear",
+      "weight_numel": 36,
+      "instruction_count": 2,
+      "irreps_in1": null,
+      "irreps_in2": null,
+      "irreps_out": "1x0e+1x2e"
+    },
+    {
+      "name": "covariance_head.pre",
+      "weight_numel": 608,
+      "instruction_count": 3,
+      "irreps_in1": null,
+      "irreps_in2": null,
+      "irreps_out": "16x0e+8x1o+8x2e"
+    },
+    {
+      "name": "covariance_head.linear",
+      "weight_numel": 48,
+      "instruction_count": 2,
+      "irreps_in1": null,
+      "irreps_in2": null,
+      "irreps_out": "2x0e+2x2e+1x4e"
+    },
+    {
+      "name": "covariance_head.square",
+      "weight_numel": 852,
+      "instruction_count": 13,
+      "irreps_in1": "16x0e+8x1o+8x2e",
+      "irreps_in2": "16x0e+8x1o+8x2e",
+      "irreps_out": "2x0e+2x2e+1x4e"
+    }
+  ],
+  "component_timing_ms": {
+    "mode": "component_timing",
+    "data_wait_ms": 1060.5971999975736,
+    "h2d_ms": 0.9733499988215044,
+    "backbone_ms": 40.21951000468107,
+    "mean_head_ms": 2.2272399975918233,
+    "covariance_head_ms": 6.297255000390578,
+    "spd_loss_ms": 4.674630002409685,
+    "backward_ms": 186.28012999834027,
+    "grad_clip_ms": 4.834689998824615,
+    "optimizer_ms": 1.3776250038063154,
+    "num_batches": 20,
+    "total_graphs": 640,
+    "total_nodes": 8837,
+    "total_edges": 279304
+  },
+  "steady_state": {
+    "mode": "steady_state_throughput",
+    "num_batches": 20,
+    "total_time_ms": 27491.11719999928,
+    "total_graphs": 640,
+    "total_nodes": 8421,
+    "total_edges": 265496,
+    "graphs_per_second": 23.28024704649023,
+    "nodes_per_second": 306.3171255913972,
+    "edges_per_second": 9657.51948414839
+  },
+  "peak_cuda_memory_mb": 654.90283203125
+}
