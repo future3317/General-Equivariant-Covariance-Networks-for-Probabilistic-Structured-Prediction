@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import pickle
-import itertools
+from pathlib import Path
+
 import numpy as np
 import torch
 from torch.utils.data import Dataset
@@ -12,16 +13,32 @@ from pymatgen.core import Structure
 from compatibility.e3nn import o3, soft_one_hot_linspace
 
 from atom_features import create_composite_atom_features
+from data.paths import dataset_dir
 from data.tensor_conversions import elasticity_21d_to_irreps
 
 
 # 21D vector indices as upper-triangular positions in a 6x6 Voigt matrix.
 _ELASTICITY_21_INDICES = [
-    (0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5),
-    (0, 1), (0, 2), (0, 3), (0, 4), (0, 5),
-    (1, 2), (1, 3), (1, 4), (1, 5),
-    (2, 3), (2, 4), (2, 5),
-    (3, 4), (3, 5),
+    (0, 0),
+    (1, 1),
+    (2, 2),
+    (3, 3),
+    (4, 4),
+    (5, 5),
+    (0, 1),
+    (0, 2),
+    (0, 3),
+    (0, 4),
+    (0, 5),
+    (1, 2),
+    (1, 3),
+    (1, 4),
+    (1, 5),
+    (2, 3),
+    (2, 4),
+    (2, 5),
+    (3, 4),
+    (3, 5),
     (4, 5),
 ]
 
@@ -63,7 +80,9 @@ class ElasticityIrrepsDataset(Dataset):
         self.num_neighbors = num_neighbors
         self.lmax = lmax
         self.num_basis = num_basis
-        self._edge_sh_dim = o3.Irreps.spherical_harmonics(lmax).dim if lmax is not None else None
+        self._edge_sh_dim = (
+            o3.Irreps.spherical_harmonics(lmax).dim if lmax is not None else None
+        )
 
         with open(data_path, "rb") as f:
             df = pickle.load(f)
@@ -110,7 +129,10 @@ class ElasticityIrrepsDataset(Dataset):
         target_irreps = elasticity_21d_to_irreps(target_21d.unsqueeze(0))
 
         data = self._build_graph(structure, atom_features)
-        if self._edge_sh_dim is not None and data.edge_sh.shape[-1] != self._edge_sh_dim:
+        if (
+            self._edge_sh_dim is not None
+            and data.edge_sh.shape[-1] != self._edge_sh_dim
+        ):
             data.edge_sh = data.edge_sh[..., : self._edge_sh_dim]
 
         data.y = target_21d.unsqueeze(0)
@@ -150,7 +172,7 @@ class ElasticityIrrepsDataset(Dataset):
                 basis="smooth_finite",
                 cutoff=True,
             )
-            edge_weights = torch.exp(-(edge_distances / self.max_radius) ** 2)
+            edge_weights = torch.exp(-((edge_distances / self.max_radius) ** 2))
 
         return Data(
             node_features=torch.tensor(atom_features, dtype=torch.float32),
@@ -163,7 +185,7 @@ class ElasticityIrrepsDataset(Dataset):
 
 
 def get_elasticity_irreps_loaders(
-    data_dir: str = "data/mp_elastic",
+    data_dir: str | Path | None = None,
     batch_size: int = 16,
     num_workers: int = 0,
     train_subset: int | None = None,
@@ -175,9 +197,10 @@ def get_elasticity_irreps_loaders(
     num_basis: int = 8,
 ):
     """Create PyG data loaders for irrep-space elasticity targets."""
-    train_path = f"{data_dir}/train.pkl"
-    val_path = f"{data_dir}/val.pkl"
-    test_path = f"{data_dir}/test.pkl"
+    data_dir = dataset_dir(data_dir, "mp_elastic")
+    train_path = data_dir / "train.pkl"
+    val_path = data_dir / "val.pkl"
+    test_path = data_dir / "test.pkl"
 
     train_dataset = ElasticityIrrepsDataset(
         train_path, "train", max_radius=max_radius, lmax=lmax, num_basis=num_basis
@@ -185,14 +208,25 @@ def get_elasticity_irreps_loaders(
     train_stats = (train_dataset.mean_21d, train_dataset.std_21d)
 
     val_dataset = ElasticityIrrepsDataset(
-        val_path, "val", max_radius=max_radius, train_stats=train_stats, lmax=lmax, num_basis=num_basis
+        val_path,
+        "val",
+        max_radius=max_radius,
+        train_stats=train_stats,
+        lmax=lmax,
+        num_basis=num_basis,
     )
     test_dataset = ElasticityIrrepsDataset(
-        test_path, "test", max_radius=max_radius, train_stats=train_stats, lmax=lmax, num_basis=num_basis
+        test_path,
+        "test",
+        max_radius=max_radius,
+        train_stats=train_stats,
+        lmax=lmax,
+        num_basis=num_basis,
     )
 
     if train_subset is not None and train_subset < len(train_dataset):
         import random
+
         indices = random.sample(range(len(train_dataset)), train_subset)
         train_dataset = torch.utils.data.Subset(train_dataset, indices)
 
@@ -205,13 +239,25 @@ def get_elasticity_irreps_loaders(
         loader_kwargs["prefetch_factor"] = prefetch_factor
 
     train_loader = PyGDataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True, drop_last=True, **loader_kwargs
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        drop_last=True,
+        **loader_kwargs,
     )
     val_loader = PyGDataLoader(
-        val_dataset, batch_size=batch_size, shuffle=False, drop_last=False, **loader_kwargs
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        drop_last=False,
+        **loader_kwargs,
     )
     test_loader = PyGDataLoader(
-        test_dataset, batch_size=batch_size, shuffle=False, drop_last=False, **loader_kwargs
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        drop_last=False,
+        **loader_kwargs,
     )
 
     return train_loader, val_loader, test_loader

@@ -34,6 +34,7 @@ def test_graph_structure_incidence_and_parameter_count():
     assert torch.allclose(incidence.sum(-1), torch.zeros(3))
     assert graph.output_dim == 12
     assert graph.num_potentials * 6 == 42
+    assert graph.is_tree
 
 
 def test_graph_precision_is_spd_and_covariance_is_dense():
@@ -59,9 +60,76 @@ def test_local_precision_action_and_logdet_match_dense_algebra():
     expected_action = torch.einsum("bi,bij,bj->b", residual, precision, residual)
     expected_logdet = -torch.linalg.slogdet(precision).logabsdet
     assert torch.allclose(
-        spd_map.precision_action(params, residual), expected_action, atol=2e-5, rtol=2e-5
+        spd_map.precision_action(params, residual),
+        expected_action,
+        atol=2e-5,
+        rtol=2e-5,
     )
     assert torch.allclose(spd_map.logdet(params), expected_logdet, atol=2e-5, rtol=2e-5)
+
+
+def test_joint_graph_statistics_reuse_local_exponentials():
+    class CountingGraphMap(GraphStructuredPrecisionMap):
+        local_calls = 0
+
+        def local_precisions(self, params):
+            self.local_calls += 1
+            return super().local_precisions(params)
+
+    graph = _graph()
+    spd_map = CountingGraphMap(graph)
+    params = _symmetric_params()
+    residual = torch.randn(2, graph.output_dim)
+    logdet, quadratic = spd_map.statistics(params, residual)
+    assert spd_map.local_calls == 1
+    precision = spd_map.precision(params)
+    expected_logdet = -torch.linalg.slogdet(precision).logabsdet
+    expected_quadratic = torch.einsum("bi,bij,bj->b", residual, precision, residual)
+    torch.testing.assert_close(logdet, expected_logdet, atol=2e-5, rtol=2e-5)
+    torch.testing.assert_close(quadratic, expected_quadratic, atol=2e-5, rtol=2e-5)
+
+
+def test_tree_statistics_match_dense_gradients():
+    graph = _graph()
+    spd_map = GraphStructuredPrecisionMap(graph).double()
+    params_tree = _symmetric_params().double().requires_grad_(True)
+    params_dense = params_tree.detach().clone().requires_grad_(True)
+    residual_tree = torch.randn(2, graph.output_dim, dtype=torch.float64)
+    residual_tree.requires_grad_(True)
+    residual_dense = residual_tree.detach().clone().requires_grad_(True)
+
+    tree_logdet, tree_quadratic = spd_map.statistics(params_tree, residual_tree)
+    dense_precision = spd_map.precision(params_dense)
+    dense_logdet = -torch.linalg.slogdet(dense_precision).logabsdet
+    dense_quadratic = torch.einsum(
+        "bi,bij,bj->b", residual_dense, dense_precision, residual_dense
+    )
+    (tree_logdet + tree_quadratic).sum().backward()
+    (dense_logdet + dense_quadratic).sum().backward()
+
+    torch.testing.assert_close(tree_logdet, dense_logdet, atol=1e-10, rtol=1e-10)
+    torch.testing.assert_close(tree_quadratic, dense_quadratic, atol=1e-10, rtol=1e-10)
+    torch.testing.assert_close(
+        params_tree.grad, params_dense.grad, atol=2e-9, rtol=2e-9
+    )
+    torch.testing.assert_close(
+        residual_tree.grad, residual_dense.grad, atol=1e-10, rtol=1e-10
+    )
+
+
+def test_cyclic_graph_uses_dense_logdet_path():
+    graph = EquivariantOutputGraph(
+        num_nodes=3,
+        edges=((0, 1), (1, 2), (2, 0)),
+        node_irrep="1o",
+    )
+    assert not graph.is_tree
+    spd_map = GraphStructuredPrecisionMap(graph)
+    raw = torch.randn(2, graph.num_potentials, 3, 3)
+    params = 0.5 * (raw + raw.transpose(-1, -2))
+    precision = spd_map.precision(params)
+    expected = -torch.linalg.slogdet(precision).logabsdet
+    torch.testing.assert_close(spd_map.logdet(params), expected, atol=2e-5, rtol=2e-5)
 
 
 def test_graph_precision_equivariance():
@@ -116,7 +184,10 @@ def test_graph_precision_gradients_and_sampling():
     spd_map = GraphStructuredPrecisionMap(graph)
     params = _symmetric_params().requires_grad_()
     residual = torch.randn(2, graph.output_dim)
-    loss = spd_map.logdet(params).mean() + spd_map.precision_action(params, residual).mean()
+    loss = (
+        spd_map.logdet(params).mean()
+        + spd_map.precision_action(params, residual).mean()
+    )
     loss.backward()
     assert params.grad is not None
     assert torch.isfinite(params.grad).all()
@@ -164,9 +235,7 @@ def test_compiled_graph_head_and_precision_are_equivariant():
     assert torch.allclose(transformed_mean, expected_mean, atol=2e-4, rtol=2e-4)
 
     expected_params = rotation @ params @ rotation.T
-    assert torch.allclose(
-        transformed_params, expected_params, atol=2e-4, rtol=2e-4
-    )
+    assert torch.allclose(transformed_params, expected_params, atol=2e-4, rtol=2e-4)
     precision = spd_map.precision(params)
     transformed_precision = spd_map.precision(transformed_params)
     expected_precision = output_representation @ precision @ output_representation.T

@@ -14,13 +14,20 @@ from tqdm import tqdm
 
 from representations import CompilerConfig, O3RepresentationCompiler
 from models import EquivariantBackbone
-from data.modelnet40_inertia_dataset import get_modelnet40_inertia_loaders
+from data.modelnet40_inertia_dataset import (
+    default_modelnet40_cache_path,
+    default_modelnet40_graph_cache_path,
+    get_modelnet40_inertia_loaders,
+)
 from data.tensor_conversions import irreps_to_voigt
+from scripts._common import add_tensor_product_arguments, tensor_product_kwargs
 
 
 def setup_logger(save_dir: str, experiment_name: str | None = None):
     if experiment_name is None:
-        experiment_name = f"modelnet40_inertia_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        experiment_name = (
+            f"modelnet40_inertia_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        )
     os.makedirs(save_dir, exist_ok=True)
     log_file = os.path.join(save_dir, f"{experiment_name}.log")
 
@@ -39,7 +46,9 @@ def setup_logger(save_dir: str, experiment_name: str | None = None):
     return logger, experiment_name
 
 
-def physical_mae(pred_irreps: torch.Tensor, y_voigt_mean: torch.Tensor, y_voigt_std: torch.Tensor) -> torch.Tensor:
+def physical_mae(
+    pred_irreps: torch.Tensor, y_voigt_mean: torch.Tensor, y_voigt_std: torch.Tensor
+) -> torch.Tensor:
     """Mean absolute error in physical Voigt space."""
     pred_voigt_norm = irreps_to_voigt(pred_irreps)
     pred_voigt_phys = pred_voigt_norm * y_voigt_std + y_voigt_mean
@@ -92,12 +101,19 @@ def validate(model, dataloader, device, non_blocking: bool = False):
 
         # Physical-space MAE: denormalize predicted Voigt.
         pred_voigt_norm = irreps_to_voigt(result["mu"])
-        pred_voigt_phys = pred_voigt_norm * batch.y_voigt_std.to(device) + batch.y_voigt_mean.to(device)
+        y_voigt_std = batch.y_voigt_std.reshape(batch_size, -1).to(device)
+        y_voigt_mean = batch.y_voigt_mean.reshape(batch_size, -1).to(device)
+        pred_voigt_phys = pred_voigt_norm * y_voigt_std + y_voigt_mean
         target_voigt_norm = irreps_to_voigt(batch.y_irreps)
-        target_voigt_phys = target_voigt_norm * batch.y_voigt_std.to(device) + batch.y_voigt_mean.to(device)
+        target_voigt_phys = target_voigt_norm * y_voigt_std + y_voigt_mean
 
-        total_phys_abs += torch.mean(torch.abs(pred_voigt_phys - target_voigt_phys)).item() * batch_size
-        total_irreps_abs += torch.mean(torch.abs(result["mu"] - batch.y_irreps)).item() * batch_size
+        total_phys_abs += (
+            torch.mean(torch.abs(pred_voigt_phys - target_voigt_phys)).item()
+            * batch_size
+        )
+        total_irreps_abs += (
+            torch.mean(torch.abs(result["mu"] - batch.y_irreps)).item() * batch_size
+        )
         num_mae_samples += batch_size
 
     return {
@@ -109,8 +125,11 @@ def validate(model, dataloader, device, non_blocking: bool = False):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--cache_path", default="data/modelnet40/cache/modelnet40_inertia_dataset.pkl")
-    parser.add_argument("--target_type", default="inertia", choices=["inertia", "shape_covariance"])
+    parser.add_argument("--cache_path", default=None)
+    parser.add_argument("--graph_cache_path", default=None)
+    parser.add_argument(
+        "--target_type", default="inertia", choices=["inertia", "shape_covariance"]
+    )
     parser.add_argument("--save_dir", default=None)
     parser.add_argument("--hidden_dim", type=int, default=32)
     parser.add_argument("--lmax", type=int, default=2)
@@ -130,8 +149,19 @@ def main():
     parser.add_argument("--prefetch_factor", type=int, default=None)
     parser.add_argument("--val_frac", type=float, default=0.1)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    add_tensor_product_arguments(parser)
+    parser.add_argument(
+        "--device", default="cuda" if torch.cuda.is_available() else "cpu"
+    )
     args = parser.parse_args()
+    if args.cache_path is None:
+        args.cache_path = str(default_modelnet40_cache_path())
+    if args.graph_cache_path is None:
+        graph_cache = default_modelnet40_graph_cache_path(
+            args.cache_path, args.num_points, args.num_neighbors
+        )
+        if graph_cache.is_file():
+            args.graph_cache_path = str(graph_cache)
 
     if args.save_dir is None:
         args.save_dir = f"checkpoints_modelnet40_{args.target_type}"
@@ -152,6 +182,7 @@ def main():
         max_radius=args.max_radius,
         num_basis=args.num_basis,
         lmax=args.lmax,
+        graph_cache_path=args.graph_cache_path,
         num_workers=args.num_workers,
         persistent_workers=args.persistent_workers,
         pin_memory=args.pin_memory,
@@ -168,19 +199,26 @@ def main():
         atom_feature_dim=49,
         num_basis=args.num_basis,
         atom_features="learnable",
+        **tensor_product_kwargs(args),
     )
     compilation = O3RepresentationCompiler(
         "0e + 2e",
         CompilerConfig(covariance="full", output_scope="global", objective="gaussian"),
     ).compile(backbone.irreps_out)
     model = compilation.build_model(backbone).to(args.device)
+    if args.compile_tp:
+        model.backbone.compile_tensor_products(dynamic=True)
 
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(f"Model parameters: {num_params:,}")
     logger.info("Compiled lifting depth: %d", compilation.active_plan.depth)
 
-    optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=5)
+    optimizer = optim.AdamW(
+        model.parameters(), lr=args.lr, weight_decay=args.weight_decay
+    )
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="min", factor=0.5, patience=5
+    )
 
     best_val_loss = float("inf")
     patience_counter = 0
@@ -188,7 +226,9 @@ def main():
 
     non_blocking = args.pin_memory and args.device.startswith("cuda")
     for epoch in range(args.num_epochs):
-        train_loss = train_epoch(model, train_loader, optimizer, args.device, non_blocking)
+        train_loss = train_epoch(
+            model, train_loader, optimizer, args.device, non_blocking
+        )
         val_metrics = validate(model, val_loader, args.device, non_blocking)
         scheduler.step(val_metrics["loss"])
 
@@ -211,9 +251,15 @@ def main():
             logger.info(f"Early stopping at epoch {epoch + 1}")
             break
 
-    model.load_state_dict(torch.load(os.path.join(args.save_dir, "best_model.pt"), map_location=args.device))
+    model.load_state_dict(
+        torch.load(
+            os.path.join(args.save_dir, "best_model.pt"), map_location=args.device
+        )
+    )
     test_metrics = validate(model, test_loader, args.device, non_blocking=non_blocking)
-    logger.info(f"Test: loss={test_metrics['loss']:.4f}, phys_mae={test_metrics['phys_mae']:.4f}, irreps_mae={test_metrics['irreps_mae']:.4f}")
+    logger.info(
+        f"Test: loss={test_metrics['loss']:.4f}, phys_mae={test_metrics['phys_mae']:.4f}, irreps_mae={test_metrics['irreps_mae']:.4f}"
+    )
 
     with open(os.path.join(args.save_dir, "args.json"), "w") as f:
         json.dump(vars(args), f, indent=2)

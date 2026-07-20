@@ -39,9 +39,7 @@ class IsotypicBlockMap(SPDMap):
         for _, copies in self._groups:
             multiplicity = len(copies)
             count = multiplicity * (multiplicity + 1) // 2
-            self._parameter_slices.append(
-                (parameter_cursor, parameter_cursor + count)
-            )
+            self._parameter_slices.append((parameter_cursor, parameter_cursor + count))
             parameter_cursor += count
         self._num_parameters = parameter_cursor
 
@@ -77,10 +75,9 @@ class IsotypicBlockMap(SPDMap):
         for (irrep, copies), block in zip(self._groups, self._blocks(params)):
             for row_copy, row_indices in enumerate(copies):
                 for col_copy, col_indices in enumerate(copies):
-                    covariance[..., row_indices, col_indices] = (
-                        block[..., row_copy, col_copy, None]
-                        * torch.ones(irrep.dim, device=params.device, dtype=params.dtype)
-                    )
+                    covariance[..., row_indices, col_indices] = block[
+                        ..., row_copy, col_copy, None
+                    ] * torch.ones(irrep.dim, device=params.device, dtype=params.dtype)
         return covariance
 
     def logdet(self, params: torch.Tensor) -> torch.Tensor:
@@ -105,3 +102,23 @@ class IsotypicBlockMap(SPDMap):
             solved = torch.linalg.solve(block, values)
             result = result + torch.sum(values * solved, dim=(-2, -1))
         return result
+
+    def statistics(
+        self, params: torch.Tensor, residual: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Reuse the multiplicity-space SPD blocks for both NLL terms."""
+        if residual.shape[-1] != self.irreps.dim:
+            raise ValueError(
+                f"residual last dim {residual.shape[-1]} != {self.irreps.dim}"
+            )
+        logdet = params.new_zeros(params.shape[:-1])
+        quadratic = params.new_zeros(params.shape[:-1])
+        for (irrep, copies), block in zip(self._groups, self._blocks(params)):
+            logdet = logdet + irrep.dim * torch.linalg.slogdet(block).logabsdet
+            indices = [index for copy in copies for index in copy]
+            values = residual[..., indices].reshape(
+                *residual.shape[:-1], len(copies), irrep.dim
+            )
+            solved = torch.linalg.solve(block, values)
+            quadratic = quadratic + torch.sum(values * solved, dim=(-2, -1))
+        return logdet, quadratic

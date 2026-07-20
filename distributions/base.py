@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import abc
-from typing import Dict, Tuple
 import torch
 
 from spd_maps.base import SPDMap
@@ -25,7 +24,7 @@ class StructuredDistributionLoss(abc.ABC):
         params: torch.Tensor,
         target: torch.Tensor,
         spd_map: SPDMap,
-    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         return self.forward(mu, params, target, spd_map)
 
     @abc.abstractmethod
@@ -35,7 +34,7 @@ class StructuredDistributionLoss(abc.ABC):
         params: torch.Tensor,
         target: torch.Tensor,
         spd_map: SPDMap,
-    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         """Compute loss and diagnostic components.
 
         Args:
@@ -49,3 +48,18 @@ class StructuredDistributionLoss(abc.ABC):
             diagnostic tensors.
         """
         ...
+
+
+def diagnostic_components(
+    fit: torch.Tensor,
+    uncertainty: torch.Tensor,
+    mahalanobis2: torch.Tensor,
+    logdet: torch.Tensor,
+) -> dict[str, torch.Tensor]:
+    """Build the common detached diagnostics reported by every objective."""
+    return {
+        "loss_fit": fit.mean().detach(),
+        "loss_uncertainty": uncertainty.mean().detach(),
+        "mahalanobis2_mean": mahalanobis2.mean().detach(),
+        "logdet_mean": logdet.mean().detach(),
+    }

@@ -66,6 +66,25 @@ class EquivariantOutputGraph:
     def num_potentials(self) -> int:
         return self.num_nodes + self.num_edges
 
+    @property
+    def is_tree(self) -> bool:
+        """Whether the undirected output graph is connected and acyclic."""
+        if self.num_edges != self.num_nodes - 1:
+            return False
+        adjacency: list[list[int]] = [[] for _ in range(self.num_nodes)]
+        for source, target in self.edges:
+            adjacency[source].append(target)
+            adjacency[target].append(source)
+        visited = {0}
+        frontier = [0]
+        while frontier:
+            node = frontier.pop()
+            for neighbor in adjacency[node]:
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    frontier.append(neighbor)
+        return len(visited) == self.num_nodes
+
     def incidence_matrix(
         self,
         *,
@@ -98,7 +117,10 @@ class EquivariantOutputGraph:
             "num_edges": self.num_edges,
             "edges": [list(edge) for edge in self.edges],
             "node_irrep": str(self.node_irrep),
-            "node_names": list(self.node_names) if self.node_names is not None else None,
+            "node_names": list(self.node_names)
+            if self.node_names is not None
+            else None,
             "block_dim": self.block_dim,
             "output_dim": self.output_dim,
+            "is_tree": self.is_tree,
         }

@@ -5,8 +5,6 @@ from __future__ import annotations
 import torch
 from compatibility.e3nn import o3
 
-from representations.base import SymmetricSquareSpec
-
 
 def symmetric_square_irreps(output_irreps: o3.Irreps) -> o3.Irreps:
     """Return the irreps of :math:`\\operatorname{Sym}^2(V)`.
@@ -48,7 +46,9 @@ class O3SymmetricOperatorBasis(torch.nn.Module):
         basis = rtp.change_of_basis
         if basis.shape != (self._operator_dim, self._output_dim, self._output_dim):
             # Defensive reshape in case future e3nn changes the layout.
-            basis = basis.reshape(self._operator_dim, self._output_dim, self._output_dim)
+            basis = basis.reshape(
+                self._operator_dim, self._output_dim, self._output_dim
+            )
 
         self.register_buffer("_basis", basis)
 

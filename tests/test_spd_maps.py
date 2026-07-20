@@ -59,6 +59,17 @@ def test_degenerate_gradient_finite(MapClass):
     assert torch.isfinite(A.grad).all()
 
 
+@pytest.mark.parametrize("MapClass", MAP_CLASSES)
+def test_joint_statistics_match_separate_operations(MapClass):
+    A, _ = _symmetric_matrix(4, 6)
+    residual = torch.randn(4, 6)
+    spd_map = MapClass()
+    expected = (spd_map.logdet(A), spd_map.precision_action(A, residual))
+    actual = spd_map.statistics(A, residual)
+    torch.testing.assert_close(actual[0], expected[0])
+    torch.testing.assert_close(actual[1], expected[1])
+
+
 def test_low_rank_spd():
     params = torch.randn(4, 6 * 3 + 1, requires_grad=True)
     spdm = LowRankPlusIsotropicMap(dim=6, rank=3)
@@ -72,10 +83,13 @@ def test_low_rank_spd():
 def test_no_anisotropic_jitter_in_package():
     """Ensure the forbidden anisotropic eigenvalue jitter is not in the new codebase."""
     import pathlib
+
     root = pathlib.Path(__file__).parent.parent
     for pyfile in root.rglob("*.py"):
         if "tests" in pyfile.parts or "figure_scripts" in pyfile.parts:
             continue
         text = pyfile.read_text(encoding="utf-8")
-        assert "anisotropic" not in text.lower(), f"anisotropic jitter found in {pyfile}"
+        assert "anisotropic" not in text.lower(), (
+            f"anisotropic jitter found in {pyfile}"
+        )
         assert "safe_eigh" not in text, f"safe_eigh found in {pyfile}"

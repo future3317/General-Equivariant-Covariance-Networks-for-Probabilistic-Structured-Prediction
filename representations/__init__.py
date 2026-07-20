@@ -24,6 +24,19 @@ from representations.compiler import (
     O3RepresentationCompiler,
 )
 from representations.graph_structure import EquivariantOutputGraph
+from representations.cartesian_stf import (
+    MultiplicityFirstCartesianTensorSquare,
+    Rank2CartesianSTFOperatorBasis,
+    is_rank2_stf_output,
+    supports_cartesian_stf_seed,
+)
+from representations.dense_projector import MultiplicityFirstDenseTensorProduct
+from representations.diagnostics import (
+    CompilationCertificate,
+    CompilationError,
+    UnreachableTargetError,
+)
+from representations.report import CompilationReport, build_compilation_report
 
 __all__ = [
     "OrthogonalRepresentationSpec",
@@ -46,4 +59,14 @@ __all__ = [
     "O3CompiledOutputHead",
     "O3RepresentationCompiler",
     "EquivariantOutputGraph",
+    "MultiplicityFirstCartesianTensorSquare",
+    "MultiplicityFirstDenseTensorProduct",
+    "Rank2CartesianSTFOperatorBasis",
+    "is_rank2_stf_output",
+    "supports_cartesian_stf_seed",
+    "CompilationCertificate",
+    "CompilationError",
+    "UnreachableTargetError",
+    "CompilationReport",
+    "build_compilation_report",
 ]

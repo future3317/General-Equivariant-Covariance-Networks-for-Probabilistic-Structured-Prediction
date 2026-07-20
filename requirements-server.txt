@@ -1,0 +1,6 @@
+# Lab server: NVIDIA driver 535, using CUDA 12.x minor-version compatibility.
+# cuEquivariance 0.10 requires cuBLAS >= 12.5, so cu121 PyTorch is incompatible.
+--extra-index-url https://download.pytorch.org/whl/cu126
+-r requirements.txt
+torch==2.6.0+cu126
+cuequivariance-ops-torch-cu12==0.10.0

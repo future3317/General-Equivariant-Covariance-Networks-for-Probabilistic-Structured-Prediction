@@ -13,6 +13,7 @@ import torch
 from tqdm import tqdm
 
 from data.itop_dataset import ITOP_OUTPUT_GRAPH, get_itop_loaders
+from data.paths import dataset_dir
 from evaluation import (
     bone_length_error,
     calibration_absolute_error,
@@ -26,6 +27,7 @@ from evaluation import (
 )
 from models import EquivariantBackbone
 from representations import CompilerConfig, O3RepresentationCompiler
+from scripts._common import add_tensor_product_arguments, tensor_product_kwargs
 
 
 def _logger(save_dir: Path) -> logging.Logger:
@@ -152,15 +154,21 @@ def evaluate(model, loader, device: str, *, detailed: bool = False) -> dict[str,
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_dir", default="data/itop")
+    parser.add_argument("--data_dir", default=None)
     parser.add_argument(
         "--protocol",
         choices=["side", "top", "side_to_top", "top_to_side"],
         default="side",
     )
     parser.add_argument("--save_dir", default="checkpoints_itop")
-    parser.add_argument("--covariance", choices=["auto", "graph", "full", "block", "low_rank"], default="auto")
-    parser.add_argument("--objective", choices=["gaussian", "student_t"], default="gaussian")
+    parser.add_argument(
+        "--covariance",
+        choices=["auto", "graph", "full", "block", "low_rank"],
+        default="auto",
+    )
+    parser.add_argument(
+        "--objective", choices=["gaussian", "student_t"], default="gaussian"
+    )
     parser.add_argument("--student_t_dof", type=float, default=5.0)
     parser.add_argument("--parameter_budget", type=int, default=192)
     parser.add_argument("--rank", type=int, default=8)
@@ -182,8 +190,12 @@ def main() -> None:
     parser.add_argument("--point_dropout", type=float, default=0.0)
     parser.add_argument("--occlusion_fraction", type=float, default=0.0)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    add_tensor_product_arguments(parser)
+    parser.add_argument(
+        "--device", default="cuda" if torch.cuda.is_available() else "cpu"
+    )
     args = parser.parse_args()
+    args.data_dir = str(dataset_dir(args.data_dir, "ITOP"))
 
     torch.manual_seed(args.seed)
     save_dir = Path(args.save_dir)
@@ -215,6 +227,7 @@ def main() -> None:
         num_basis=args.num_basis,
         atom_feature_dim=32,
         atom_features="learnable",
+        **tensor_product_kwargs(args),
     )
     compiler = O3RepresentationCompiler.for_graph(
         ITOP_OUTPUT_GRAPH,
@@ -229,9 +242,15 @@ def main() -> None:
     )
     compilation = compiler.compile(backbone.irreps_out)
     model = compilation.build_model(backbone).to(args.device)
-    logger.info("protocol=%s, train_view=%s, test_view=%s", args.protocol, train_view, test_view)
+    if args.compile_tp:
+        model.backbone.compile_tensor_products(dynamic=True)
+    logger.info(
+        "protocol=%s, train_view=%s, test_view=%s", args.protocol, train_view, test_view
+    )
     logger.info("compilation=%s", json.dumps(compilation.as_dict()))
-    logger.info("parameters=%d", sum(parameter.numel() for parameter in model.parameters()))
+    logger.info(
+        "parameters=%d", sum(parameter.numel() for parameter in model.parameters())
+    )
 
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay
@@ -259,7 +278,9 @@ def main() -> None:
                 break
 
     model.load_state_dict(
-        torch.load(save_dir / "best_model.pt", map_location=args.device, weights_only=True)
+        torch.load(
+            save_dir / "best_model.pt", map_location=args.device, weights_only=True
+        )
     )
     test_metrics = evaluate(model, test_loader, args.device, detailed=True)
     logger.info("test=%s", json.dumps(test_metrics))

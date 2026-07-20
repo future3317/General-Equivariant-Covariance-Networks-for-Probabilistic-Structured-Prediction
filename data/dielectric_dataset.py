@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import torch
 from compatibility.e3nn import o3
 from torch.utils.data import Dataset
 from compatibility.torch_geometric import PyGDataLoader
 
-from dielectric_data_loader import DielectricDataset
+from dielectric_data_loader import DielectricDataset, ShardBatchSampler
+from data.paths import dataset_dir
 from data.tensor_conversions import km_to_irreps
 
 
@@ -20,7 +23,7 @@ class DielectricIrrepsDataset(Dataset):
     the training script can convert predictions back to physical tensors.
 
     Args:
-        base_dir: Data directory containing ``{split}_graphs_full`` folders.
+        base_dir: Data directory containing per-graph or sharded split folders.
         split: ``'train'``, ``'val'`` or ``'test'``.
         lmax: If provided, slice the precomputed spherical-harmonics edge
             features to this maximum degree. This lets a backbone with a lower
@@ -28,8 +31,21 @@ class DielectricIrrepsDataset(Dataset):
             one without re-running the expensive preprocessing pipeline.
     """
 
-    def __init__(self, base_dir: str, split: str, lmax: int | None = None):
-        self._base = DielectricDataset(base_dir, split)
+    def __init__(
+        self,
+        base_dir: str,
+        split: str,
+        lmax: int | None = None,
+        *,
+        storage: str = "files",
+        shard_cache_size: int = 2,
+    ):
+        self._base = DielectricDataset(
+            base_dir,
+            split,
+            storage=storage,
+            shard_cache_size=shard_cache_size,
+        )
         self.lmax = lmax
 
         # Precomputed edge_sh dimension for the requested lmax.
@@ -39,24 +55,35 @@ class DielectricIrrepsDataset(Dataset):
             self._edge_sh_dim = None
 
         # Normalization parameters from the preprocessed graphs.
-        self.component_mean = torch.tensor(self._base.component_mean, dtype=torch.float32)
+        self.component_mean = torch.tensor(
+            self._base.component_mean, dtype=torch.float32
+        )
         self.component_std = torch.tensor(self._base.component_std, dtype=torch.float32)
 
     def __len__(self):
         return len(self._base)
 
+    @property
+    def shard_ranges(self):
+        return self._base.shard_ranges
+
     def __getitem__(self, idx):
         data = self._base[idx]
 
         # Optionally downsample spherical-harmonics to a lower lmax.
-        if self._edge_sh_dim is not None and data.edge_sh.shape[-1] != self._edge_sh_dim:
+        if (
+            self._edge_sh_dim is not None
+            and data.edge_sh.shape[-1] != self._edge_sh_dim
+        ):
             data.edge_sh = data.edge_sh[..., : self._edge_sh_dim]
 
         # y is [6] normalized log-KM; reshape to [1, 6] for conversion helpers.
         y_km_norm = data.y.view(1, -1)
 
         # Denormalize to physical log-KM.
-        y_km = y_km_norm * self.component_std.to(y_km_norm.device) + self.component_mean.to(y_km_norm.device)
+        y_km = y_km_norm * self.component_std.to(
+            y_km_norm.device
+        ) + self.component_mean.to(y_km_norm.device)
 
         # Convert to irreps (log-tensor in irrep space).
         y_irreps = km_to_irreps(y_km)
@@ -69,7 +96,7 @@ class DielectricIrrepsDataset(Dataset):
 
 
 def get_dielectric_irreps_loaders(
-    data_dir: str = "data/mp_dielectric",
+    data_dir: str | Path | None = None,
     batch_size: int = 32,
     train_subset: int | None = None,
     num_workers: int = 0,
@@ -77,14 +104,23 @@ def get_dielectric_irreps_loaders(
     pin_memory: bool = False,
     prefetch_factor: int | None = None,
     lmax: int | None = None,
+    storage: str = "files",
+    shard_cache_size: int = 2,
 ):
     """Create PyG data loaders with irrep-space dielectric targets."""
-    train_dataset = DielectricIrrepsDataset(data_dir, "train", lmax=lmax)
-    val_dataset = DielectricIrrepsDataset(data_dir, "val", lmax=lmax)
-    test_dataset = DielectricIrrepsDataset(data_dir, "test", lmax=lmax)
+    data_dir = dataset_dir(data_dir, "mp_dielectric")
+    dataset_kwargs = {
+        "lmax": lmax,
+        "storage": storage,
+        "shard_cache_size": shard_cache_size,
+    }
+    train_dataset = DielectricIrrepsDataset(data_dir, "train", **dataset_kwargs)
+    val_dataset = DielectricIrrepsDataset(data_dir, "val", **dataset_kwargs)
+    test_dataset = DielectricIrrepsDataset(data_dir, "test", **dataset_kwargs)
 
     if train_subset is not None and train_subset < len(train_dataset):
         import random
+
         indices = random.sample(range(len(train_dataset)), train_subset)
         train_dataset = torch.utils.data.Subset(train_dataset, indices)
 
@@ -96,14 +132,38 @@ def get_dielectric_irreps_loaders(
     if num_workers > 0 and prefetch_factor is not None:
         loader_kwargs["prefetch_factor"] = prefetch_factor
 
-    train_loader = PyGDataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True, drop_last=True, **loader_kwargs
-    )
+    if storage == "shards" and not isinstance(train_dataset, torch.utils.data.Subset):
+        train_loader = PyGDataLoader(
+            train_dataset,
+            batch_sampler=ShardBatchSampler(
+                train_dataset.shard_ranges,
+                batch_size,
+                shuffle=True,
+                drop_last=True,
+            ),
+            **loader_kwargs,
+        )
+    else:
+        train_loader = PyGDataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            drop_last=True,
+            **loader_kwargs,
+        )
     val_loader = PyGDataLoader(
-        val_dataset, batch_size=batch_size, shuffle=False, drop_last=False, **loader_kwargs
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        drop_last=False,
+        **loader_kwargs,
     )
     test_loader = PyGDataLoader(
-        test_dataset, batch_size=batch_size, shuffle=False, drop_last=False, **loader_kwargs
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        drop_last=False,
+        **loader_kwargs,
     )
 
     return train_loader, val_loader, test_loader

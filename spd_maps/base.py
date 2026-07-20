@@ -51,6 +51,19 @@ class SPDMap(torch.nn.Module, abc.ABC):
         """Return the precision matrix, computed lazily by default."""
         return torch.linalg.inv(self.forward(A))
 
+    def statistics(
+        self,
+        A: torch.Tensor,
+        residual: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return ``(log det S, r^T S^{-1} r)`` for a proper objective.
+
+        The default preserves the existing public contract. Structured maps
+        override this method when the determinant and precision action share
+        an expensive factorization or local SPD construction.
+        """
+        return self.logdet(A), self.precision_action(A, residual)
+
 
 def symmetrize(A: torch.Tensor) -> torch.Tensor:
     """Numerical symmetrization."""

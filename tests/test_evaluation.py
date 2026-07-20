@@ -7,7 +7,6 @@ from evaluation import (
     mean_absolute_error,
     root_mean_squared_error,
     r2_score,
-    mean_r2_score,
     empirical_coverage,
     negative_log_likelihood_gaussian,
     energy_score,

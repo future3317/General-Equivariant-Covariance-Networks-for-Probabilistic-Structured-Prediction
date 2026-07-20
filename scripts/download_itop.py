@@ -13,6 +13,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 from data.itop_dataset import compact_itop_labels
+from data.paths import dataset_dir
 
 
 ZENODO_RECORD_API = "https://zenodo.org/api/records/3932973"
@@ -90,7 +91,7 @@ def _decompress(source: Path, destination: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_dir", default="data/itop")
+    parser.add_argument("--data_dir", default=None)
     parser.add_argument("--view", choices=["side", "top", "all"], default="side")
     parser.add_argument("--split", choices=["train", "test", "all"], default="all")
     parser.add_argument("--download_only", action="store_true")
@@ -98,7 +99,7 @@ def main() -> None:
     parser.add_argument("--delete_gzip", action="store_true")
     args = parser.parse_args()
 
-    data_dir = Path(args.data_dir).resolve()
+    data_dir = dataset_dir(args.data_dir, "ITOP").resolve()
     data_dir.mkdir(parents=True, exist_ok=True)
     views = ("side", "top") if args.view == "all" else (args.view,)
     splits = ("train", "test") if args.split == "all" else (args.split,)

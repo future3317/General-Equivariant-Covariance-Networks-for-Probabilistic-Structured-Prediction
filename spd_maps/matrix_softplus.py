@@ -81,7 +81,9 @@ class SpectralSoftplusMap(SPDMap):
 
     def forward(self, A: torch.Tensor) -> torch.Tensor:
         A = symmetrize(A)
-        return _SpectralMapFunction.apply(A, self._f, self._df, self.eps, self.delta_threshold)
+        return _SpectralMapFunction.apply(
+            A, self._f, self._df, self.eps, self.delta_threshold
+        )
 
     def logdet(self, A: torch.Tensor) -> torch.Tensor:
         A = symmetrize(A)
@@ -95,3 +97,18 @@ class SpectralSoftplusMap(SPDMap):
         # Whiten residual in eigenbasis.
         z = torch.matmul(Q.transpose(-1, -2), residual.unsqueeze(-1)).squeeze(-1)
         return torch.sum((z * z) / fL, dim=-1)
+
+    def statistics(
+        self, A: torch.Tensor, residual: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Reuse one eigendecomposition for determinant and precision action."""
+        A = symmetrize(A)
+        eigenvalues, eigenvectors = torch.linalg.eigh(A)
+        mapped = torch.nn.functional.softplus(eigenvalues) + self.eps
+        projected = torch.matmul(
+            eigenvectors.transpose(-1, -2), residual.unsqueeze(-1)
+        ).squeeze(-1)
+        return (
+            torch.log(mapped).sum(-1),
+            (projected.square() / mapped).sum(-1),
+        )

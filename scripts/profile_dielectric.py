@@ -8,9 +8,7 @@ Saves a JSON summary and an optional Chrome trace.
 from __future__ import annotations
 
 import argparse
-import csv
 import json
-import os
 import time
 from pathlib import Path
 
@@ -24,6 +22,7 @@ from torch.profiler import (
 )
 
 from data.dielectric_dataset import get_dielectric_irreps_loaders
+from data.paths import dataset_dir
 from distributions import GaussianNLL
 from models import (
     EquivariantBackbone,
@@ -33,6 +32,7 @@ from models import (
 )
 from representations import O3IrrepsSpec
 from spd_maps import MatrixExponentialMap
+from scripts._common import add_tensor_product_arguments, tensor_product_kwargs
 
 
 def count_tp_instructions(model):
@@ -42,14 +42,24 @@ def count_tp_instructions(model):
     for name, module in model.named_modules():
         if hasattr(module, "weight_numel"):
             total_weight += module.weight_numel
-            instructions.append({
-                "name": name,
-                "weight_numel": module.weight_numel,
-                "instruction_count": len(module.instructions) if hasattr(module, "instructions") else None,
-                "irreps_in1": str(module.irreps_in1) if hasattr(module, "irreps_in1") else None,
-                "irreps_in2": str(module.irreps_in2) if hasattr(module, "irreps_in2") else None,
-                "irreps_out": str(module.irreps_out) if hasattr(module, "irreps_out") else None,
-            })
+            instructions.append(
+                {
+                    "name": name,
+                    "weight_numel": module.weight_numel,
+                    "instruction_count": len(module.instructions)
+                    if hasattr(module, "instructions")
+                    else None,
+                    "irreps_in1": str(module.irreps_in1)
+                    if hasattr(module, "irreps_in1")
+                    else None,
+                    "irreps_in2": str(module.irreps_in2)
+                    if hasattr(module, "irreps_in2")
+                    else None,
+                    "irreps_out": str(module.irreps_out)
+                    if hasattr(module, "irreps_out")
+                    else None,
+                }
+            )
     return total_weight, instructions
 
 
@@ -63,7 +73,9 @@ def _sync(device):
         torch.cuda.synchronize(device)
 
 
-def profile_components(model, dataloader, device, warmup_batches: int, profile_batches: int):
+def profile_components(
+    model, dataloader, device, warmup_batches: int, profile_batches: int
+):
     """Synchronized component-level timing.
 
     Each batch is synchronized so that CPU-side timers correspond to GPU work.
@@ -195,7 +207,9 @@ def profile_components(model, dataloader, device, warmup_batches: int, profile_b
     }
 
 
-def profile_steady_state(model, dataloader, device, warmup_batches: int, profile_batches: int):
+def profile_steady_state(
+    model, dataloader, device, warmup_batches: int, profile_batches: int
+):
     """Unsynchronized steady-state throughput measurement.
 
     Only synchronizes at the end, so this reflects normal CPU/GPU overlap and
@@ -253,7 +267,14 @@ def profile_steady_state(model, dataloader, device, warmup_batches: int, profile
     }
 
 
-def profile_chrome_trace(model, dataloader, device, warmup_batches: int, active_batches: int, output_dir: Path):
+def profile_chrome_trace(
+    model,
+    dataloader,
+    device,
+    warmup_batches: int,
+    active_batches: int,
+    output_dir: Path,
+):
     """Record a Chrome trace of complete training steps using torch.profiler."""
     model.train()
     optimizer = optim.AdamW(model.parameters(), lr=1e-3)
@@ -265,7 +286,9 @@ def profile_chrome_trace(model, dataloader, device, warmup_batches: int, active_
         record_shapes=True,
         profile_memory=True,
         with_stack=True,
-        schedule=schedule(wait=warmup_batches, warmup=warmup_batches, active=active_batches),
+        schedule=schedule(
+            wait=warmup_batches, warmup=warmup_batches, active=active_batches
+        ),
         on_trace_ready=tensorboard_trace_handler(str(output_dir)),
     )
 
@@ -288,7 +311,11 @@ def profile_chrome_trace(model, dataloader, device, warmup_batches: int, active_
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_dir", default="data/mp_dielectric")
+    parser.add_argument("--data_dir", default=None)
+    parser.add_argument(
+        "--dataset_storage", choices=["files", "shards"], default="files"
+    )
+    parser.add_argument("--shard_cache_size", type=int, default=2)
     parser.add_argument("--save_dir", default="results/profile_dielectric")
     parser.add_argument("--hidden_dim", type=int, default=32)
     parser.add_argument("--lmax", type=int, default=2)
@@ -301,10 +328,16 @@ def main():
     parser.add_argument("--persistent_workers", action="store_true")
     parser.add_argument("--pin_memory", action="store_true")
     parser.add_argument("--prefetch_factor", type=int, default=None)
-    parser.add_argument("--atom_features", default="manual", choices=["manual", "learnable"])
-    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument(
+        "--atom_features", default="manual", choices=["manual", "learnable"]
+    )
+    add_tensor_product_arguments(parser)
+    parser.add_argument(
+        "--device", default="cuda" if torch.cuda.is_available() else "cpu"
+    )
     parser.add_argument("--chrome_trace", action="store_true")
     args = parser.parse_args()
+    args.data_dir = str(dataset_dir(args.data_dir, "mp_dielectric"))
 
     device = torch.device(args.device)
     output_dir = Path(args.save_dir)
@@ -318,6 +351,8 @@ def main():
         pin_memory=args.pin_memory,
         prefetch_factor=args.prefetch_factor,
         lmax=args.lmax,
+        storage=args.dataset_storage,
+        shard_cache_size=args.shard_cache_size,
     )
 
     output_spec = O3IrrepsSpec("0e + 2e")
@@ -328,9 +363,12 @@ def main():
         atom_feature_dim=49,
         num_basis=args.num_basis,
         atom_features=args.atom_features,
+        **tensor_product_kwargs(args),
     )
     mean_head = EquivariantMeanHead(backbone.irreps_out, output_spec.irreps, pool=True)
-    cov_head = O3QuadraticSymmetricOperatorHead(backbone.irreps_out, output_spec, pool=True)
+    cov_head = O3QuadraticSymmetricOperatorHead(
+        backbone.irreps_out, output_spec, pool=True
+    )
     model = StructuredProbabilisticPredictor(
         backbone=backbone,
         output_spec=output_spec,
@@ -339,6 +377,8 @@ def main():
         spd_map=MatrixExponentialMap(),
         distribution=GaussianNLL(),
     ).to(device)
+    if args.compile_tp:
+        model.backbone.compile_tensor_products(dynamic=True)
 
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     tp_weight_numel, tp_instructions = count_tp_instructions(model)
@@ -358,7 +398,7 @@ def main():
     )
 
     if device.type == "cuda":
-        peak_memory_mb = torch.cuda.max_memory_allocated(device) / (1024.0 ** 2)
+        peak_memory_mb = torch.cuda.max_memory_allocated(device) / (1024.0**2)
         torch.cuda.reset_peak_memory_stats(device)
     else:
         peak_memory_mb = None
@@ -401,7 +441,9 @@ def main():
 
     if args.chrome_trace:
         profile_chrome_trace(
-            model, train_loader, device,
+            model,
+            train_loader,
+            device,
             warmup_batches=args.warmup_batches,
             active_batches=args.profile_batches,
             output_dir=output_dir,

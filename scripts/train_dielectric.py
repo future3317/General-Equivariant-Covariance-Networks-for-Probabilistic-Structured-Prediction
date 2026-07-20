@@ -15,9 +15,11 @@ from tqdm import tqdm
 from representations import CompilerConfig, O3RepresentationCompiler
 from models import EquivariantBackbone
 from data.dielectric_dataset import get_dielectric_irreps_loaders
+from data.paths import dataset_dir
 from data.tensor_conversions import irreps_to_km, irreps_to_matrix_exp_voigt
 from voigt_utils import kelvin_mandel_to_voigt
 from matrix_log_transform import matrix_exponential_transform
+from scripts._common import add_tensor_product_arguments, tensor_product_kwargs
 
 
 def setup_logger(save_dir: str, experiment_name: str | None = None):
@@ -56,7 +58,14 @@ def log_mae(pred_irreps: torch.Tensor, target_km: torch.Tensor) -> torch.Tensor:
     return torch.mean(torch.abs(pred_km - target_km))
 
 
-def train_epoch(model, dataloader, optimizer, device, warmup_mse_weight: float = 0.0, non_blocking: bool = False):
+def train_epoch(
+    model,
+    dataloader,
+    optimizer,
+    device,
+    warmup_mse_weight: float = 0.0,
+    non_blocking: bool = False,
+):
     model.train()
     total_loss = torch.tensor(0.0, device=device)
     num_samples = 0
@@ -118,7 +127,11 @@ def validate(model, dataloader, device, non_blocking: bool = False):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_dir", default="data/mp_dielectric")
+    parser.add_argument("--data_dir", default=None)
+    parser.add_argument(
+        "--dataset_storage", choices=["files", "shards"], default="files"
+    )
+    parser.add_argument("--shard_cache_size", type=int, default=2)
     parser.add_argument("--save_dir", default="checkpoints_dielectric")
     parser.add_argument("--hidden_dim", type=int, default=32)
     parser.add_argument("--lmax", type=int, default=2)
@@ -135,9 +148,15 @@ def main():
     parser.add_argument("--persistent_workers", action="store_true")
     parser.add_argument("--pin_memory", action="store_true")
     parser.add_argument("--prefetch_factor", type=int, default=None)
-    parser.add_argument("--atom_features", default="manual", choices=["manual", "learnable"])
-    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument(
+        "--atom_features", default="manual", choices=["manual", "learnable"]
+    )
+    add_tensor_product_arguments(parser)
+    parser.add_argument(
+        "--device", default="cuda" if torch.cuda.is_available() else "cpu"
+    )
     args = parser.parse_args()
+    args.data_dir = str(dataset_dir(args.data_dir, "mp_dielectric"))
 
     logger, experiment_name = setup_logger(args.save_dir)
     logger.info("=" * 60)
@@ -155,6 +174,8 @@ def main():
         pin_memory=args.pin_memory,
         prefetch_factor=args.prefetch_factor,
         lmax=args.lmax,
+        storage=args.dataset_storage,
+        shard_cache_size=args.shard_cache_size,
     )
 
     backbone = EquivariantBackbone(
@@ -164,19 +185,26 @@ def main():
         atom_feature_dim=49,
         num_basis=args.num_basis,
         atom_features=args.atom_features,
+        **tensor_product_kwargs(args),
     )
     compilation = O3RepresentationCompiler(
         "0e + 2e",
         CompilerConfig(covariance="full", output_scope="global", objective="gaussian"),
     ).compile(backbone.irreps_out)
     model = compilation.build_model(backbone).to(args.device)
+    if args.compile_tp:
+        model.backbone.compile_tensor_products(dynamic=True)
 
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(f"Model parameters: {num_params:,}")
     logger.info("Compiled lifting depth: %d", compilation.active_plan.depth)
 
-    optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=5)
+    optimizer = optim.AdamW(
+        model.parameters(), lr=args.lr, weight_decay=args.weight_decay
+    )
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="min", factor=0.5, patience=5
+    )
 
     best_val_loss = float("inf")
     patience_counter = 0
@@ -186,10 +214,16 @@ def main():
     for epoch in range(args.num_epochs):
         warmup_mse = 0.1 if epoch < args.warmup_epochs else 0.0
         train_loss = train_epoch(
-            model, train_loader, optimizer, args.device, warmup_mse,
+            model,
+            train_loader,
+            optimizer,
+            args.device,
+            warmup_mse,
             non_blocking=non_blocking,
         )
-        val_metrics = validate(model, val_loader, args.device, non_blocking=non_blocking)
+        val_metrics = validate(
+            model, val_loader, args.device, non_blocking=non_blocking
+        )
         scheduler.step(val_metrics["loss"])
 
         logger.info(
@@ -213,9 +247,15 @@ def main():
             break
 
     # Test on best model.
-    model.load_state_dict(torch.load(os.path.join(args.save_dir, "best_model.pt"), map_location=args.device))
+    model.load_state_dict(
+        torch.load(
+            os.path.join(args.save_dir, "best_model.pt"), map_location=args.device
+        )
+    )
     test_metrics = validate(model, test_loader, args.device, non_blocking=non_blocking)
-    logger.info(f"Test: loss={test_metrics['loss']:.4f}, phys_mae={test_metrics['phys_mae']:.4f}, log_mae={test_metrics['log_mae']:.4f}")
+    logger.info(
+        f"Test: loss={test_metrics['loss']:.4f}, phys_mae={test_metrics['phys_mae']:.4f}, log_mae={test_metrics['log_mae']:.4f}"
+    )
 
     with open(os.path.join(args.save_dir, "args.json"), "w") as f:
         json.dump(vars(args), f, indent=2)

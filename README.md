@@ -1,6 +1,6 @@
 # Representation-Compiled Equivariant Probabilistic Networks
 
-TPAMI submission implementation for *A Representation Compiler for Equivariant
+TPAMI submission implementation for *A Basis-Agnostic Representation Compiler for Equivariant
 Probabilistic Structured Prediction*.
 
 The main abstraction is a representation compiler. Given a finite-dimensional
@@ -13,14 +13,18 @@ T(V) = Irreps(V + Sym^2(V))
 
 and compiles a target-directed Clebsch--Gordan graph whose final feature space
 covers every required angular momentum, parity, and irrep multiplicity. The
-same compilation result creates the shared mean/covariance head, covariance
-basis, SPD parameterization, and proper Gaussian or Student-t objective.
+same compilation result selects an execution basis, creates the mean/covariance
+head, covariance basis, SPD parameterization, and proper Gaussian or Student-t
+objective.
 
 ## What is automatic
 
 - `Sym^2(V)` decomposition and an orthonormal symmetric-operator basis.
-- Shortest CG paths from the backbone representation to `T(V)`.
+- Shortest CG paths and a depth-minimal, target-pruned representation frontier
+  from the backbone representation to `T(V)`.
 - Parity reachability checks and exact final irrep multiplicities.
+- Automatic exact STF-coordinate/dense-projector lowering for one-edge rank-2
+  full covariance and complete `spherical_cg` execution for other targets.
 - Cartesian tensor symmetries such as `ij=ji` and
   `ijkl=jikl=ijlk=klij`.
 - Graph-level (`global`) or element-level (`dense`) output.
@@ -43,49 +47,254 @@ output from 1,035 full-covariance parameters to `6 * (15 + 14) = 174` while
 retaining a generally dense marginal covariance.
 
 For structured covariance modes, the compiler records both the canonical full
-target and the cheaper active target in `compilation.as_dict()`. Approximation
-is therefore explicit and auditable.
+target and the cheaper active target in a versioned compilation report. It
+separately records whether the covariance family restricts the canonical full
+target and whether backend lowering is algebraically exact. A budget-selected
+low-rank or graph family can therefore never be mislabeled as full covariance,
+and contraction truncation can never be mislabeled as checkpoint-equivalent.
+
+## Stable staged interface
+
+The interface separates output semantics, feature reachability, lowering, and
+module binding. The governing contract is:
+
+```text
+V determines what must be predicted; H^(0) determines whether and how it can be computed.
+```
+
+`describe_output()` therefore accepts `V` alone but is explicitly
+non-executable. It returns `V`, `Sym^2(V)`, `T(V)`, dimensions, multiplicities,
+parity, and highest angular momentum while marking reachability as unknown:
+
+```python
+from equivcompiler import describe_output
+
+semantics = describe_output("ijkl=jikl=ijlk=klij")
+assert semantics.executable is False
+assert semantics.reachability == "unknown_without_seed"
+```
+
+Executable compilation uses one of two unambiguous entry points. A standalone
+readout receives a complete `FeatureSpec`; a full predictor receives a
+backbone. Both call the same pure `plan_readout()` internally:
+
+```python
+from equivcompiler import (
+    AutoBudget,
+    ExactOnly,
+    FeatureSpec,
+    compile_readout,
+)
+
+seed = FeatureSpec.from_irreps(
+    "32x0e + 16x1o + 16x2e",
+    group="O3",
+    scope="global",
+    layout="e3nn",
+    basis_convention="e3nn_real_v1",
+)
+readout, report = compile_readout(
+    seed,
+    output="ijkl=jikl=ijlk=klij",
+    covariance=AutoBudget(budget=192, low_rank=8),
+    lowering=ExactOnly(),
+    distribution="student_t",
+)
+```
+
+`FeatureSpec` fixes group, scope, declared irrep order and multiplicity, storage
+layout, real-basis convention, parity convention, and pooling permission. Its
+SHA-256 fingerprint is part of the compatibility hash. Binding a plan to a
+backbone with a different contract fails before checkpoint loading.
+
+Advanced users can dry-run without constructing a neural module:
+
+```python
+from equivcompiler import FullCovariance, plan_readout
+
+plan = plan_readout(
+    seed,
+    output="ij=ji",
+    covariance=FullCovariance(),
+    lowering=ExactOnly(),
+)
+plan.report.save("compilation.json")
+readout = plan.build_readout(device="cuda")
+```
+
+The report includes:
+
+- decompositions of `V`, `Sym^2(V)`, the canonical target, and active target,
+  including highest angular momentum, parity, and every multiplicity;
+- a shortest-CG-path reachability proof and zero-deficit multiplicity check;
+- structured failure certificates for unreachable parity, incompatible
+  backends, missing seed types, and unsupported parameterizations;
+- orthogonal canonical/active reachability, covariance-family coverage, and
+  execution-lowering exactness;
+- emitted-coordinate, readout, and executable parameter counts plus
+  covariance-specific storage and likelihood complexity;
+- exact covariance/scatter/precision semantics and the selected proper
+  likelihood.
+
+Family and lowering policies are typed objects. `FullCovariance()`,
+`LowRankCovariance(rank)`, `GraphPrecision(graph)`, and
+`AutoBudget(allowed_families=...)` select a statistical family;
+`ExactOnly()` and `TruncatedMultiplicityRank(rank)` independently select
+execution fidelity. Low-rank and graph models report `strict_subfamily` plus
+`exact_for_active_family`; only explicit contraction truncation reports
+`approximate_for_active_family`. `ExactOnly()` never selects truncation.
+Canonical full-target reachability is checked before any authorized budget
+selection. An unreachable canonical target therefore fails with a structured
+certificate instead of silently changing the statistical family.
+
+This separation is also a safeguard. Coordinate-wise Cholesky is not exposed
+because it is not conjugation equivariant; a Gaunt-only shortcut is not
+accepted as a general backend because it can miss parity channels and irrep
+copies. Low-level invalid requests and reachability failures carry
+machine-readable certificates and possible remedies.
+
+For `V = 0e + 2e`, the specialized operator basis uses the bijection
+`A <-> (a, b, P, Q, H)` with dimensions `1 + 1 + 5 + 5 + 9 = 21`. Frozen
+`2 x 2 -> 0, 2, 4` projectors are generated once in e3nn's orthonormal real
+irrep coordinates. The exact compiler backend preserves the complete lifting
+stage, including mixed-parity input paths, and retains the identical flat
+`FullyConnectedTensorProduct` weights, normalization, module names, and output
+basis. It changes only the multiplicity/angular contraction schedule, so an
+existing spherical checkpoint loads with `strict=True`. A requested
+`stf_contraction_rank` below a path's matrix rank creates a separate,
+explicitly approximate CP parameterization.
+
+The lifting certificate is minimal in tensor-product depth. Its retained irrep
+frontiers are the union of selected shortest paths. Each executable stage
+remains a fully connected tensor product over those types; the implementation
+does not claim globally minimal frontier width, instruction count, FLOPs, or
+parameterization.
+
+## Algebra-preserving performance paths
+
+- The exact rank-2 lowering replaces each retained one-edge spherical CG
+  tensor product with multiplicity-first dense projectors. Strict checkpoint
+  loading, mapped output, shared-feature/weight/loss gradients, rotations, and
+  reflections are covered by regression tests. Speed is treated as
+  hardware-, width-, and execution-mode-dependent rather than guaranteed.
+- Message-passing degree normalization is computed once per backbone forward
+  and reused by every layer; native `index_add_` performs the sum aggregation.
+- Proper objectives call `SPDMap.statistics()`. Low-rank and graph backends
+  reuse one factorization/local-SPD construction for log determinant and
+  Mahalanobis terms.
+- Tree output graphs such as ITOP use exact block Schur elimination for
+  `logdet(Q)`; cyclic graphs retain dense Cholesky.
+- `--compile_tp` compiles only edge tensor products. It fails explicitly when
+  CUDA compilation dependencies such as Triton are unavailable and never
+  silently changes backend.
+- Every training/profile entry point exposes the same
+  `--tp_backend/--cueq_method/--compile_tp` contract.
+  `--tp_backend cueq --cueq_method naive --compile_tp` uses cuEquivariance's
+  e3nn-compatible `mul_ir` layout through the Windows Triton path. On WSL,
+  `--cueq_method fused_tp` selects NVIDIA's native CUDA kernels. Missing fused
+  ops raise immediately instead of silently changing the requested method.
+- Dielectric graphs can be converted to cache-friendly shards with
+  `python -m scripts.shard_dielectric_graphs`. Use
+  `--dataset_storage shards` to enable shard-aware batching.
+
+These paths preserve the mathematical model. Compiled kernels and native
+scatter reductions can reorder floating-point operations, so equivalence is
+tested with numerical tolerances rather than claimed bitwise identity.
 
 ## Quick start
 
+On the Windows workstation, the existing `EGNN` environment is configured
+once with the shared data root:
+
+```powershell
+conda env config vars set EQUIVCOMPILER_DATA_ROOT=E:\DATA\Tpami -n EGNN
+conda activate EGNN
+```
+
+The tested fused-kernel environment is WSL2 with Python 3.11 and CUDA 12.8:
+
+```bash
+micromamba env config vars set \
+  EQUIVCOMPILER_DATA_ROOT=/mnt/e/DATA/Tpami -n equivcompiler
+micromamba activate equivcompiler
+python -m pip install -r requirements-wsl.txt
+```
+
+For the lab server with NVIDIA driver 535, use the CUDA 12.6 lock. NVIDIA's
+CUDA 12.x minor-version compatibility allows this on the 535 driver, and
+cuEquivariance 0.10 requires cuBLAS 12.5 or newer (so a cu121 PyTorch wheel is
+not compatible):
+
+```bash
+conda create -n equivcompiler python=3.11 pip -y
+conda env config vars set \
+  EQUIVCOMPILER_DATA_ROOT=/home/workspace/lrh/DATA/Tpami -n equivcompiler
+conda activate equivcompiler
+python -m pip install -r requirements-server.txt
+```
+
+Dataset payloads live outside the Git checkout. Configure their root once per
+environment through `EQUIVCOMPILER_DATA_ROOT`; loaders and CLI scripts then
+select their dataset-specific subdirectory automatically. The current roots
+are:
+
+```text
+Windows: E:\DATA\Tpami
+WSL:     /mnt/e/DATA/Tpami
+Server:  /home/workspace/lrh/DATA/Tpami
+```
+
+The root must contain `ITOP`, `modelnet40`, `mp_dielectric`, and `mp_elastic`.
+`--data_dir` and `--cache_path` remain available only for intentional
+per-command overrides. Python loader code stays in the repository's `data/`
+package; no dataset symlinks are required.
+
 ```python
+from equivcompiler import ExactOnly, FullCovariance, compile_predictor
 from models import EquivariantBackbone
-from representations import CompilerConfig, O3RepresentationCompiler
 
 backbone = EquivariantBackbone(hidden_dim=32, lmax=2, num_layers=2)
-
-# A symmetric rank-2 Cartesian output. This compiles to V = 0e + 2e,
-# Sym^2(V) = 2x0e + 2x2e + 4e, and one quadratic lifting edge.
-compiler = O3RepresentationCompiler.from_cartesian(
-    "ij=ji",
-    CompilerConfig(
-        covariance="auto",
-        parameter_budget=192,
-        output_scope="global",
-        objective="gaussian",
-    ),
+model, report = compile_predictor(
+    backbone,
+    output="ij=ji",
+    covariance=FullCovariance(),
+    lowering=ExactOnly(),
+    distribution="gaussian",
 )
-compilation = compiler.compile(backbone.irreps_out)
-model = compilation.build_model(backbone)
-
-print(compilation.as_dict())
 ```
 
 For the 21-dimensional elasticity representation, the same API discovers a
 canonical full-covariance target up to `8e`. With an `lmax=2` seed this requires
-three CG edges. Under the default parameter budget, the active graph selects a
-rank-8 covariance instead of materializing all 231 symmetric-operator
-parameters.
+three CG edges. With an explicit `AutoBudget(budget=192, low_rank=8)` policy,
+the compiler selects the rank-8 low-rank subfamily instead of materializing all
+231 symmetric-operator parameters and records that restriction in the report.
 
 ## Training
 
 ```bash
 # Rank-2 dielectric output; full covariance is selected explicitly.
-python -m scripts.train_dielectric --data_dir data/mp_dielectric --device cuda
+python -m scripts.train_dielectric --device cuda
+
+# Optional one-time I/O conversion. Shard-aware batching preserves shuffle
+# while avoiding random per-graph file opens.
+python -m scripts.shard_dielectric_graphs \
+  --shard_size 256
+python -m scripts.train_dielectric \
+  --dataset_storage shards \
+  --shard_cache_size 2 --num_workers 4 --persistent_workers --device cuda
+
+# Windows cuEquivariance frontend compiled through Triton.
+python -m scripts.train_dielectric \
+  --tp_backend cueq \
+  --cueq_method naive --compile_tp --device cuda
+
+# WSL native cuEquivariance CUDA kernels (no torch.compile required).
+python -m scripts.train_dielectric \
+  --tp_backend cueq \
+  --cueq_method fused_tp --device cuda
 
 # Rank-4 elasticity output; choose auto/full/block/low_rank.
 python -m scripts.train_elasticity \
-  --data_dir data/mp_elastic \
   --lmax 2 --covariance auto --parameter_budget 192 --rank 8 \
   --objective gaussian --device cuda
 
@@ -93,16 +302,27 @@ python -m scripts.train_elasticity \
 python -m scripts.train_modelnet40_inertia \
   --target_type inertia --device cuda
 
+# One-time, non-destructive ModelNet40 scale cleaning. The rule is fitted on
+# centered point-cloud radii from the training inputs only; it writes a new
+# cache and JSON audit without overwriting the raw cache. The cleaned cache is
+# the default used by training.
+python -m scripts.clean_modelnet40_cache
+
+# One-time exact k-NN precomputation for the standard training geometry.
+python -m scripts.precompute_modelnet40_graphs \
+  --num_points 1024 \
+  --num_neighbors 16
+
 # Download only ITOP depth/label files, compact labels, and skip point clouds.
-python -m scripts.download_itop --data_dir data/ITOP --view side
+python -m scripts.download_itop --view side
 
 # ITOP standard side-view protocol with graph precision selected at B=192.
 python -m scripts.train_itop \
-  --data_dir data/ITOP --protocol side --covariance auto \
+  --protocol side --covariance auto \
   --parameter_budget 192 --num_points 1024 --device cuda
 
 # Cross-view OOD protocols use the same entry point.
-python -m scripts.train_itop --data_dir data/ITOP --protocol side_to_top --device cuda
+python -m scripts.train_itop --protocol side_to_top --device cuda
 ```
 
 The ITOP loader reconstructs XYZ points from the documented depth calibration,
@@ -112,21 +332,69 @@ supports depth noise, point dropout, synthetic occlusion, and 256--2048 point
 input budgets without using ground-truth torso centering.
 
 Each training run writes `compilation.json` beside its checkpoint so the exact
-representation target, lifting stages, covariance complexity, and objective
-are reproducible.
+representation target, lifting stages, covariance complexity, execution
+backend/exactness, and objective are reproducible.
+
+The backend microbenchmark is synthetic and never starts training:
+
+```bash
+python -m scripts.benchmark_stf_backend \
+  --device cuda --batch-sizes 32,128,256 \
+  --multiplicities 8,16,32,64 \
+  --dtypes float32 --executions eager,compile \
+  --warmup 20 --repeats 100 \
+  --output results/stf_backend_sweep_cuda.json
+```
+
+An existing ModelNet40 compiler checkpoint can be audited without training:
+
+```bash
+python -m scripts.benchmark_checkpoint_lowering \
+  --checkpoint runs/modelnet40/inertia_clean_seed42/best_model.pt \
+  --tp-backend cueq --cueq-method fused_tp --device cuda \
+  --batch-size 16 --warmup 10 --repeats 30 --no-tf32 \
+  --output results/checkpoint_lowering_modelnet40_cuda.json
+```
+
+Exact checkpoint migration is a formal, no-retraining workflow. The tool
+strictly instantiates both compilations, verifies learned names and shapes,
+loads both heads, performs a deterministic numerical equivalence check, removes
+only regenerable e3nn code-generation buffers, and writes a SHA-256 audit
+sidecar. It refuses incompatible, approximate, ambiguous, and in-place
+conversions:
+
+```bash
+equiv-compiler convert-checkpoint \
+  --checkpoint runs/modelnet40/inertia_clean_seed42/best_model.pt \
+  --destination runs/modelnet40/inertia_clean_seed42/best_model_stf.pt \
+  --from spherical-cg --to cartesian-stf \
+  --output-representation "0e + 2e" \
+  --seed-irreps "32x0e + 16x1o + 16x2e" \
+  --feature-scope node --covariance full --output-scope global
+```
 
 ## Layout
 
 | Path | Purpose |
 |---|---|
 | `representations/compiler.py` | Representation compiler and shared output head |
+| `representations/report.py` | Versioned reachability, semantics, complexity, and approximation report |
+| `representations/diagnostics.py` | Machine-readable compilation and safeguard certificates |
 | `representations/adaptive_lifting.py` | Shortest-path CG graph planning and execution |
 | `representations/symmetric_square.py` | `Sym^2(V)` decomposition and covariance basis |
+| `representations/cartesian_stf.py` | Rank-2 STF-coordinate operator basis and specialized tensor square |
+| `representations/dense_projector.py` | Checkpoint-preserving multiplicity-first lowering of compiled CG stages |
 | `representations/graph_structure.py` | Typed repeated-variable output graphs |
 | `spd_maps/` | Full, block, low-rank, and graph-precision SPD maps |
 | `data/itop_dataset.py` | ITOP depth reconstruction, label compaction, and loaders |
 | `evaluation/pose.py` | Pose accuracy, calibration, risk-coverage, and sampling metrics |
 | `distributions/` | Proper Gaussian and Student-t objectives |
+| `equivcompiler/api.py` | Stable declarative Python interface |
+| `equivcompiler/specs.py` | Output semantics and feature contracts/fingerprints |
+| `equivcompiler/policies.py` | Independent covariance-family and lowering policies |
+| `equivcompiler/planning.py` | Immutable dry-run planning and compatibility hashes |
+| `equivcompiler/modules.py` | Deferred executable readout materialization |
+| `equivcompiler/checkpoint.py` | Strict exact checkpoint migration and audit |
 | `models/` | Equivariant backbone and structured predictor |
 | `scripts/` | Reproducible task training entry points |
 | `tests/` | Representation, equivariance, SPD, objective, and integration tests |
@@ -141,4 +409,5 @@ python -m pytest tests -q -W error
 The compiler tests cover rank-2 and rank-4 outputs, highest angular momentum,
 parity failures, multiplicity coverage, Cartesian round trips, dense/global
 heads, complexity selection, equivariance, finite gradients, SPD validity,
-graph-precision algebra, and real depth-to-point-cloud data contracts.
+CG/STF output and gradient equivalence, projector orthogonality, explicit rank
+truncation, graph-precision algebra, and real depth-to-point-cloud data contracts.

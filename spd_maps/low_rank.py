@@ -16,9 +16,50 @@ class LowRankPlusIsotropicMap(SPDMap):
 
     def __init__(self, dim: int, rank: int, min_sigma2: float = 1e-4):
         super().__init__()
+        if dim < 1 or rank < 1:
+            raise ValueError("dim and rank must be positive")
         self.dim = dim
         self.rank = rank
         self.min_sigma2 = min_sigma2
+
+    def _unpack(self, params: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        expected = self.dim * self.rank + 1
+        if params.shape[-1] != expected:
+            raise ValueError(f"params last dim {params.shape[-1]} != {expected}")
+        L = params[..., :-1].reshape(*params.shape[:-1], self.dim, self.rank)
+        sigma2 = torch.nn.functional.softplus(params[..., -1]) + self.min_sigma2
+        return L, sigma2
+
+    def _factor_system(
+        self, params: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return ``L``, ``sigma2`` and the Cholesky factor of Woodbury ``M``."""
+        L, sigma2 = self._unpack(params)
+        gram = torch.matmul(L.transpose(-1, -2), L)
+        identity = torch.eye(self.rank, device=params.device, dtype=params.dtype)
+        system = identity + gram / sigma2[..., None, None]
+        return L, sigma2, torch.linalg.cholesky(system)
+
+    def _statistics_from_factor(
+        self,
+        L: torch.Tensor,
+        sigma2: torch.Tensor,
+        cholesky: torch.Tensor,
+        residual: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if residual.shape[-1] != self.dim:
+            raise ValueError(f"residual last dim {residual.shape[-1]} != {self.dim}")
+        logdet = self.dim * torch.log(sigma2) + 2.0 * torch.log(
+            torch.diagonal(cholesky, dim1=-2, dim2=-1)
+        ).sum(-1)
+        projected = torch.matmul(L.transpose(-1, -2), residual.unsqueeze(-1))
+        solved = torch.cholesky_solve(projected, cholesky)
+        precision_residual = (
+            residual / sigma2[..., None]
+            - torch.matmul(L, solved).squeeze(-1) / sigma2[..., None].square()
+        )
+        quadratic = torch.sum(residual * precision_residual, dim=-1)
+        return logdet, quadratic
 
     def forward(self, params: torch.Tensor) -> torch.Tensor:
         """Assemble SPD matrix from unconstrained parameters.
@@ -31,11 +72,7 @@ class LowRankPlusIsotropicMap(SPDMap):
         Returns:
             SPD matrices of shape ``(..., dim, dim)``.
         """
-        *batch, _ = params.shape
-        L_flat = params[..., :-1]
-        log_sigma2 = params[..., -1]
-        L = L_flat.reshape(*batch, self.dim, self.rank)
-        sigma2 = torch.nn.functional.softplus(log_sigma2) + self.min_sigma2
+        L, sigma2 = self._unpack(params)
         eye = torch.eye(self.dim, device=params.device, dtype=params.dtype)
         return sigma2[..., None, None] * eye + torch.matmul(L, L.transpose(-1, -2))
 
@@ -46,19 +83,14 @@ class LowRankPlusIsotropicMap(SPDMap):
         :math:`M = I_r + L^\\top L / \\sigma^2`. Then
         :math:`\\log\\det S = d\\log\\sigma^2 + \\log\\det M`.
         """
-        *batch, _ = params.shape
-        L_flat = params[..., :-1]
-        log_sigma2 = params[..., -1]
-        L = L_flat.reshape(*batch, self.dim, self.rank)
-        sigma2 = torch.nn.functional.softplus(log_sigma2) + self.min_sigma2
+        _, sigma2, cholesky = self._factor_system(params)
+        return self.dim * torch.log(sigma2) + 2.0 * torch.log(
+            torch.diagonal(cholesky, dim1=-2, dim2=-1)
+        ).sum(-1)
 
-        # M = I_r + L^T L / sigma^2
-        LT_L = torch.matmul(L.transpose(-1, -2), L)
-        eye_r = torch.eye(self.rank, device=params.device, dtype=params.dtype)
-        M = eye_r + LT_L / sigma2[..., None, None]
-        return self.dim * torch.log(sigma2) + torch.logdet(M)
-
-    def precision_action(self, params: torch.Tensor, residual: torch.Tensor) -> torch.Tensor:
+    def precision_action(
+        self, params: torch.Tensor, residual: torch.Tensor
+    ) -> torch.Tensor:
         """Compute r^T S^{-1} r using the Woodbury identity.
 
         For :math:`S = \\sigma^2 I + L L^\\top`,
@@ -70,20 +102,12 @@ class LowRankPlusIsotropicMap(SPDMap):
 
         where :math:`M = I_r + L^\\top L / \\sigma^2`.
         """
-        *batch, _ = params.shape
-        L_flat = params[..., :-1]
-        log_sigma2 = params[..., -1]
-        L = L_flat.reshape(*batch, self.dim, self.rank)
-        sigma2 = torch.nn.functional.softplus(log_sigma2) + self.min_sigma2
+        L, sigma2, cholesky = self._factor_system(params)
+        return self._statistics_from_factor(L, sigma2, cholesky, residual)[1]
 
-        LT_r = torch.matmul(L.transpose(-1, -2), residual.unsqueeze(-1))
-        LT_L = torch.matmul(L.transpose(-1, -2), L)
-        eye_r = torch.eye(self.rank, device=params.device, dtype=params.dtype)
-        M = eye_r + LT_L / sigma2[..., None, None]
-        M_inv_LT_r = torch.linalg.solve(M, LT_r)
-
-        S_inv_r = (
-            residual / sigma2[..., None]
-            - torch.matmul(L, M_inv_LT_r).squeeze(-1) / (sigma2[..., None] ** 2)
-        )
-        return torch.sum(residual * S_inv_r, dim=-1)
+    def statistics(
+        self, params: torch.Tensor, residual: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Reuse one Woodbury Gram matrix and Cholesky factor for both terms."""
+        L, sigma2, cholesky = self._factor_system(params)
+        return self._statistics_from_factor(L, sigma2, cholesky, residual)

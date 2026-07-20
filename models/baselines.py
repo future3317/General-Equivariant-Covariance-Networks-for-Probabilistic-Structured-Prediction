@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import torch
 from compatibility.e3nn import o3
-from torch_scatter import scatter
 
+from models.pooling import GraphOutputHead
 from representations import O3IrrepsSpec
 
 
-class DeterministicHead(torch.nn.Module):
+class DeterministicHead(GraphOutputHead):
     """Predict only the mean :math:`\\mu(x)`. No covariance output."""
 
     def __init__(
@@ -24,22 +24,15 @@ class DeterministicHead(torch.nn.Module):
         output_spec: O3IrrepsSpec,
         pool: bool = True,
     ):
-        super().__init__()
+        super().__init__(pool=pool)
         self.output_spec = output_spec
-        self.pool = pool
         self.head = o3.Linear(o3.Irreps(hidden_irreps), output_spec.irreps)
 
-    def forward(self, node_features, batch=None):
-        if self.pool:
-            if batch is None:
-                raise ValueError("batch is required when pool=True")
-            pooled = scatter(node_features, batch, dim=0, reduce="mean")
-        else:
-            pooled = node_features
-        return self.head(pooled)
+    def forward_pooled(self, pooled_features: torch.Tensor) -> torch.Tensor:
+        return self.head(pooled_features)
 
 
-class IsotropicCovarianceHead(torch.nn.Module):
+class IsotropicCovarianceHead(GraphOutputHead):
     """Predict mean and a single isotropic variance :math:`\\sigma^2 I`."""
 
     def __init__(
@@ -48,28 +41,21 @@ class IsotropicCovarianceHead(torch.nn.Module):
         output_spec: O3IrrepsSpec,
         pool: bool = True,
     ):
-        super().__init__()
+        super().__init__(pool=pool)
         self.output_spec = output_spec
-        self.pool = pool
         self.mean_head = o3.Linear(o3.Irreps(hidden_irreps), output_spec.irreps)
         # One invariant scalar for log(sigma^2).
-        self.log_sigma2_head = o3.Linear(
-            o3.Irreps(hidden_irreps), o3.Irreps("1x0e")
-        )
+        self.log_sigma2_head = o3.Linear(o3.Irreps(hidden_irreps), o3.Irreps("1x0e"))
 
-    def forward(self, node_features, batch=None):
-        if self.pool:
-            if batch is None:
-                raise ValueError("batch is required when pool=True")
-            pooled = scatter(node_features, batch, dim=0, reduce="mean")
-        else:
-            pooled = node_features
-        mu = self.mean_head(pooled)
-        log_sigma2 = self.log_sigma2_head(pooled)
+    def forward_pooled(
+        self, pooled_features: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        mu = self.mean_head(pooled_features)
+        log_sigma2 = self.log_sigma2_head(pooled_features)
         return mu, log_sigma2
 
 
-class IrrepBlockDiagonalCovarianceHead(torch.nn.Module):
+class IrrepBlockDiagonalCovarianceHead(GraphOutputHead):
     """Predict mean and one variance per irrep block.
 
     The output covariance is block-diagonal with blocks :math:`\\sigma_\\lambda^2 I`
@@ -83,9 +69,8 @@ class IrrepBlockDiagonalCovarianceHead(torch.nn.Module):
         output_spec: O3IrrepsSpec,
         pool: bool = True,
     ):
-        super().__init__()
+        super().__init__(pool=pool)
         self.output_spec = output_spec
-        self.pool = pool
         self.mean_head = o3.Linear(o3.Irreps(hidden_irreps), output_spec.irreps)
 
         # Count irrep blocks.
@@ -95,13 +80,9 @@ class IrrepBlockDiagonalCovarianceHead(torch.nn.Module):
             o3.Irreps(f"{self._num_blocks}x0e"),
         )
 
-    def forward(self, node_features, batch=None):
-        if self.pool:
-            if batch is None:
-                raise ValueError("batch is required when pool=True")
-            pooled = scatter(node_features, batch, dim=0, reduce="mean")
-        else:
-            pooled = node_features
-        mu = self.mean_head(pooled)
-        log_vars = self.log_var_head(pooled)
+    def forward_pooled(
+        self, pooled_features: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        mu = self.mean_head(pooled_features)
+        log_vars = self.log_var_head(pooled_features)
         return mu, log_vars

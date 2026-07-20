@@ -6,9 +6,11 @@ scikit-learn>=1.2.0
 
 # Geometric deep learning
 torch-geometric>=2.3.0
-torch-scatter>=2.1.0
 torchmetrics>=0.11.0
 e3nn>=0.5.7
+cuequivariance==0.10.0
+cuequivariance-torch==0.10.0
+triton-windows==3.7.1.post27; platform_system == "Windows"
 h5py>=3.8.0
 
 # Materials science utilities

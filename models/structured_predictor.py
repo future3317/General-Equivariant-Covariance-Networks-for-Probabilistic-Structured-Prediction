@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Dict, TYPE_CHECKING
+from typing import TYPE_CHECKING
 import torch
 
 from distributions.base import StructuredDistributionLoss
 from models.backbone import EquivariantBackbone
+from models.pooling import GraphOutputHead, mean_pool
 from representations import O3IrrepsSpec
 from spd_maps.base import SPDMap
 
@@ -51,12 +52,46 @@ class StructuredProbabilisticPredictor(torch.nn.Module):
         self.compilation = compilation
         if joint_head is None and (mean_head is None or covariance_head is None):
             raise ValueError("provide joint_head or both mean_head and covariance_head")
-        if joint_head is not None and (mean_head is not None or covariance_head is not None):
+        if joint_head is not None and (
+            mean_head is not None or covariance_head is not None
+        ):
             raise ValueError("joint_head cannot be combined with separate heads")
-        if spd_map is None or distribution is None:
-            raise ValueError("spd_map and distribution are required")
+        if (spd_map is None) != (distribution is None):
+            raise ValueError("spd_map and distribution must be provided together")
+        if joint_head is None and spd_map is None:
+            raise ValueError("separate mean/covariance heads require an SPD map")
+        self._heads_share_pooling = False
+        if joint_head is None and mean_head is not None and covariance_head is not None:
+            self._heads_share_pooling = bool(
+                isinstance(mean_head, GraphOutputHead)
+                and isinstance(covariance_head, GraphOutputHead)
+                and mean_head.pool
+                and covariance_head.pool
+            )
         self.spd_map = spd_map
         self.distribution = distribution
+
+    def _predict(
+        self, node_features: torch.Tensor, batch: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        """Run exactly one configured head path."""
+        if self.joint_head is not None:
+            output = self.joint_head(node_features, batch)
+            if isinstance(output, torch.Tensor):
+                return output, None
+            if not isinstance(output, tuple) or len(output) != 2:
+                raise TypeError("joint_head must return mu or the pair (mu, params)")
+            return output
+        if self._heads_share_pooling:
+            pooled = mean_pool(node_features, batch)
+            return (
+                self.mean_head.forward_pooled(pooled),
+                self.covariance_head.forward_pooled(pooled),
+            )
+        return (
+            self.mean_head(node_features, batch),
+            self.covariance_head(node_features, batch),
+        )
 
     def forward(
         self,
@@ -64,7 +99,7 @@ class StructuredProbabilisticPredictor(torch.nn.Module):
         target: torch.Tensor | None = None,
         return_scale: bool = False,
         return_precision: bool = False,
-    ) -> Dict[str, torch.Tensor]:
+    ) -> dict[str, torch.Tensor | dict[str, torch.Tensor]]:
         """Forward pass.
 
         Args:
@@ -82,16 +117,19 @@ class StructuredProbabilisticPredictor(torch.nn.Module):
             provided.
         """
         node_features, batch = self.backbone(data)
-        if self.joint_head is not None:
-            mu, params = self.joint_head(node_features, batch)
-        else:
-            mu = self.mean_head(node_features, batch)
-            params = self.covariance_head(node_features, batch)
+        mu, params = self._predict(node_features, batch)
+        result: dict[str, torch.Tensor | dict[str, torch.Tensor]] = {"mu": mu}
 
-        result: Dict[str, torch.Tensor] = {
-            "mu": mu,
-            "params": params,
-        }
+        if params is None:
+            if self.spd_map is not None:
+                raise TypeError("a probabilistic joint_head must return (mu, params)")
+            if target is not None:
+                result["loss"] = torch.nn.functional.mse_loss(mu, target)
+            return result
+
+        if self.spd_map is None or self.distribution is None:
+            raise TypeError("a joint_head returning params requires an SPD map")
+        result["params"] = params
 
         if target is not None:
             loss, components = self.distribution(mu, params, target, self.spd_map)

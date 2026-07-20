@@ -1,9 +1,12 @@
 """Target-directed Clebsch--Gordan lifting for O(3) representations.
 
 The planner searches irrep *types* rather than imposing an angular-momentum
-cutoff.  Consequently angular momentum, parity and target multiplicity are all
-part of the compiled graph.  Every retained intermediate lies on a shortest CG
-path to a requested output irrep.
+cutoff. Consequently angular momentum, parity and target multiplicity are all
+part of the compiled representation frontier. Every retained intermediate
+type lies on a shortest CG path to a requested output irrep. Execution remains
+fully connected over admissible CG instructions between retained frontiers;
+the plan is therefore depth-minimal and target-pruned, not globally minimal in
+frontier width, instruction count, FLOPs, or parameters.
 """
 
 from __future__ import annotations
@@ -13,6 +16,13 @@ from typing import Iterable
 
 import torch
 from compatibility.e3nn import o3
+
+from representations.dense_projector import MultiplicityFirstDenseTensorProduct
+from representations.diagnostics import (
+    CompilationCertificate,
+    CompilationError,
+    UnreachableTargetError,
+)
 
 
 def irrep_multiplicities(irreps: o3.Irreps) -> dict[o3.Irrep, int]:
@@ -77,7 +87,7 @@ class LiftingStage:
 
 @dataclass(frozen=True)
 class O3LiftingPlan:
-    """A depth-minimal, target-pruned CG lifting plan."""
+    """A depth-minimal CG plan pruned to its selected shortest paths."""
 
     seed_irreps: o3.Irreps
     target_irreps: o3.Irreps
@@ -97,6 +107,9 @@ class O3LiftingPlan:
             "seed_irreps": str(self.seed_irreps),
             "target_irreps": str(self.target_irreps),
             "depth": self.depth,
+            "minimality": "tensor_product_depth",
+            "pruning": "union_of_selected_shortest_path_frontiers",
+            "execution": "fully_connected_within_retained_frontiers",
             "stages": [
                 {
                     "depth": stage.depth,
@@ -117,10 +130,13 @@ def plan_lifting_graph(
 ) -> O3LiftingPlan:
     """Compile a shortest target-directed CG graph.
 
-    Search is breadth first, hence the returned number of tensor-product edges
-    is minimal.  Ties at the same depth prefer lower-dimensional CG paths.  The
-    graph is then pruned to the union of the selected shortest paths; target
-    multiplicities are carried explicitly through every retained path.
+    Search is breadth first, hence the returned tensor-product depth is
+    minimal. Ties at the same depth prefer lower-dimensional CG paths. The
+    representation frontier is pruned to the union of selected shortest paths;
+    target multiplicities are carried explicitly through every retained path.
+    ``_O3LiftingStage`` deliberately uses a fully connected tensor product over
+    these retained types, so this routine does not claim globally minimal
+    frontier width, instruction count, FLOPs, or parameterization.
 
     Raises:
         ValueError: if a target parity/angular momentum cannot be generated
@@ -131,9 +147,23 @@ def plan_lifting_graph(
     seed_counts = irrep_multiplicities(seed)
     target_counts = irrep_multiplicities(target)
     if not seed_counts:
-        raise ValueError("seed_irreps must not be empty")
+        raise CompilationError(
+            CompilationCertificate(
+                code="empty_seed_representation",
+                status="failure",
+                message="seed_irreps must not be empty",
+                details={"seed_irreps": str(seed), "target_irreps": str(target)},
+            )
+        )
     if not target_counts:
-        raise ValueError("target_irreps must not be empty")
+        raise CompilationError(
+            CompilationCertificate(
+                code="empty_target_representation",
+                status="failure",
+                message="target_irreps must not be empty",
+                details={"seed_irreps": str(seed), "target_irreps": str(target)},
+            )
+        )
 
     target_lmax = max(irrep.l for irrep in target_counts)
     search_lmax = max(target_lmax, max(irrep.l for irrep in seed_counts))
@@ -173,9 +203,59 @@ def plan_lifting_graph(
     unreachable = [irrep for irrep in target_counts if irrep not in distance]
     if unreachable:
         missing = ", ".join(str(irrep) for irrep in unreachable)
-        raise ValueError(
-            f"target irreps [{missing}] are unreachable from seed {seed}; "
-            "the seed lacks the required angular-momentum/parity CG paths"
+        seed_parities = {irrep.p for irrep in seed_counts}
+        missing_parities = {irrep.p for irrep in unreachable}
+        parity_obstruction = seed_parities == {1} and -1 in missing_parities
+        angular_obstruction = (
+            max(irrep.l for irrep in seed_counts) == 0
+            and any(irrep.l > 0 for irrep in unreachable)
+        )
+        if parity_obstruction:
+            code = "parity_unreachable"
+            reason = "available parity paths cannot produce the missing odd irreps"
+            remedies = [
+                "expose at least one odd-parity seed channel",
+                "explicitly select a restricted covariance family if scientifically justified",
+            ]
+        elif angular_obstruction:
+            code = "angular_momentum_unreachable"
+            reason = "scalar seed factors cannot generate non-scalar angular momentum"
+            remedies = [
+                "expose a non-scalar seed channel",
+                "increase the backbone angular cutoff",
+                "explicitly select a restricted covariance family if scientifically justified",
+            ]
+        else:
+            code = "target_unreachable"
+            reason = "no CG path was found within the declared search contract"
+            remedies = [
+                "increase the backbone angular cutoff or expose additional parity types",
+                "inspect the missing_irrep_multiplicities field",
+                "explicitly select a restricted covariance family if scientifically justified",
+            ]
+        raise UnreachableTargetError(
+            CompilationCertificate(
+                code=code,
+                status="failure",
+                message=(
+                    f"target irreps [{missing}] are unreachable from seed {seed}; "
+                    "the seed lacks the required angular-momentum/parity CG paths"
+                ),
+                details={
+                    "seed_irreps": str(seed),
+                    "target_irreps": str(target),
+                    "missing_irreps": [str(irrep) for irrep in unreachable],
+                    "missing_irrep_multiplicities": {
+                        str(irrep): target_counts[irrep] for irrep in unreachable
+                    },
+                    "max_depth": max_depth,
+                    "parity_obstruction": parity_obstruction,
+                    "angular_momentum_obstruction": angular_obstruction,
+                    "reason": reason,
+                    "possible_remedies": remedies,
+                    "restricted_family_changes_statistical_model": True,
+                },
+            )
         )
 
     typed_paths: dict[o3.Irrep, list[o3.Irrep]] = {}
@@ -197,9 +277,7 @@ def plan_lifting_graph(
             state = path[min(stage_depth, len(path) - 1)]
             stage_counts[state] = max(stage_counts.get(state, 0), multiplicity)
         next_irreps = (
-            target
-            if stage_depth == depth
-            else irreps_from_multiplicities(stage_counts)
+            target if stage_depth == depth else irreps_from_multiplicities(stage_counts)
         )
         stages.append(LiftingStage(stage_depth, current_irreps, next_irreps))
         current_irreps = next_irreps
@@ -225,8 +303,14 @@ class O3AdaptiveLifting(torch.nn.Module):
         target_irreps: o3.Irreps,
         *,
         plan: O3LiftingPlan | None = None,
+        tensor_product_backend: str = "spherical_cg",
+        contraction_rank: int | None = None,
     ):
         super().__init__()
+        if tensor_product_backend not in {"spherical_cg", "dense_projector"}:
+            raise ValueError(
+                "tensor_product_backend must be spherical_cg or dense_projector"
+            )
         self.plan = plan or plan_lifting_graph(seed_irreps, target_irreps)
         if o3.Irreps(seed_irreps) != self.plan.seed_irreps:
             raise ValueError("seed_irreps does not match the supplied lifting plan")
@@ -239,7 +323,13 @@ class O3AdaptiveLifting(torch.nn.Module):
         self.stages = torch.nn.ModuleList()
         for stage in self.plan.stages:
             self.stages.append(
-                _O3LiftingStage(stage.irreps_in, self.seed_irreps, stage.irreps_out)
+                _O3LiftingStage(
+                    stage.irreps_in,
+                    self.seed_irreps,
+                    stage.irreps_out,
+                    tensor_product_backend=tensor_product_backend,
+                    contraction_rank=contraction_rank,
+                )
             )
         self.final_linear = (
             o3.Linear(self.seed_irreps, self.target_irreps)
@@ -270,15 +360,29 @@ class _O3LiftingStage(torch.nn.Module):
         irreps_in: o3.Irreps,
         seed_irreps: o3.Irreps,
         irreps_out: o3.Irreps,
+        *,
+        tensor_product_backend: str = "spherical_cg",
+        contraction_rank: int | None = None,
     ):
         super().__init__()
         self.linear = o3.Linear(irreps_in, irreps_out)
-        self.tensor_product = o3.FullyConnectedTensorProduct(
-            irreps_in,
-            seed_irreps,
-            irreps_out,
-            internal_weights=True,
-        )
+        if tensor_product_backend == "dense_projector":
+            self.tensor_product = MultiplicityFirstDenseTensorProduct(
+                irreps_in,
+                seed_irreps,
+                irreps_out,
+                contraction_rank=contraction_rank,
+            )
+        else:
+            self.tensor_product = o3.FullyConnectedTensorProduct(
+                irreps_in,
+                seed_irreps,
+                irreps_out,
+                internal_weights=True,
+                shared_weights=True,
+                irrep_normalization="component",
+                path_normalization="element",
+            )
 
     def forward(self, hidden: torch.Tensor, seed: torch.Tensor) -> torch.Tensor:
         return self.linear(hidden) + self.tensor_product(hidden, seed)

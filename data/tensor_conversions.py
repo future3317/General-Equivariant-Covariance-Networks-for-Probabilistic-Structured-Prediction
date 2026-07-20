@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import itertools
 import torch
-from compatibility.e3nn import CartesianTensor, o3
+from compatibility.e3nn import CartesianTensor
 
 from voigt_utils import (
     voigt_to_tensor,
@@ -33,11 +33,26 @@ _VOIGT_PAIR = {
 
 # Unique (I, J) pairs for a 21-dimensional elasticity vector.
 _ELASTICITY_21_INDICES = [
-    (0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5),
-    (0, 1), (0, 2), (0, 3), (0, 4), (0, 5),
-    (1, 2), (1, 3), (1, 4), (1, 5),
-    (2, 3), (2, 4), (2, 5),
-    (3, 4), (3, 5),
+    (0, 0),
+    (1, 1),
+    (2, 2),
+    (3, 3),
+    (4, 4),
+    (5, 5),
+    (0, 1),
+    (0, 2),
+    (0, 3),
+    (0, 4),
+    (0, 5),
+    (1, 2),
+    (1, 3),
+    (1, 4),
+    (1, 5),
+    (2, 3),
+    (2, 4),
+    (2, 5),
+    (3, 4),
+    (3, 5),
     (4, 5),
 ]
 
@@ -98,8 +113,10 @@ def voigt6x6_to_tensor(C6: torch.Tensor) -> torch.Tensor:
     """Expand a symmetric 6x6 Voigt matrix to a 3x3x3x3 elasticity tensor."""
     *batch, _, _ = C6.shape
     C = torch.zeros(*batch, 3, 3, 3, 3, device=C6.device, dtype=C6.dtype)
-    for i, j, k, l in itertools.product(range(3), repeat=4):
-        C[..., i, j, k, l] = C6[..., _VOIGT_PAIR[(i, j)], _VOIGT_PAIR[(k, l)]]
+    for i, j, k, fourth_index in itertools.product(range(3), repeat=4):
+        C[..., i, j, k, fourth_index] = C6[
+            ..., _VOIGT_PAIR[(i, j)], _VOIGT_PAIR[(k, fourth_index)]
+        ]
     return C
 
 
@@ -107,14 +124,16 @@ def tensor_to_voigt6x6(C: torch.Tensor) -> torch.Tensor:
     """Contract a 3x3x3x3 elasticity tensor to a symmetric 6x6 Voigt matrix."""
     *batch, _, _, _, _ = C.shape
     C6 = torch.zeros(*batch, 6, 6, device=C.device, dtype=C.dtype)
-    for I, J in itertools.product(range(6), repeat=2):
-        pairs_I = [p for p, idx in _VOIGT_PAIR.items() if idx == I]
-        pairs_J = [p for p, idx in _VOIGT_PAIR.items() if idx == J]
+    for voigt_row, voigt_column in itertools.product(range(6), repeat=2):
+        row_pairs = [pair for pair, index in _VOIGT_PAIR.items() if index == voigt_row]
+        column_pairs = [
+            pair for pair, index in _VOIGT_PAIR.items() if index == voigt_column
+        ]
         vals = []
-        for i, j in pairs_I:
-            for k, l in pairs_J:
-                vals.append(C[..., i, j, k, l])
-        C6[..., I, J] = torch.stack(vals, dim=-1).mean(dim=-1)
+        for i, j in row_pairs:
+            for k, fourth_index in column_pairs:
+                vals.append(C[..., i, j, k, fourth_index])
+        C6[..., voigt_row, voigt_column] = torch.stack(vals, dim=-1).mean(dim=-1)
     return C6
 
 

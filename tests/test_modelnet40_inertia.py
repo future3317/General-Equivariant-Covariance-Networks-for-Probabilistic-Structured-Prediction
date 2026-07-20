@@ -1,18 +1,18 @@
 """Tests for ModelNet40 inertia dataset integration."""
 
-import os
-
 import numpy as np
 import pytest
 import torch
 from e3nn import o3
+from torch_geometric.loader import DataLoader
+
+import data.modelnet40_inertia_dataset as modelnet40_dataset
 
 from data.modelnet40_inertia_dataset import (
     ModelNet40InertiaDataset,
     _compute_edge_features,
-    _point_cloud_to_data,
     _shape_covariance_voigt,
-    DEFAULT_CACHE_PATH,
+    default_modelnet40_cache_path,
 )
 from models import (
     EquivariantBackbone,
@@ -25,9 +25,14 @@ from spd_maps import MatrixExponentialMap
 from distributions import GaussianNLL
 
 
+try:
+    _CACHE_PATH = default_modelnet40_cache_path()
+except RuntimeError:
+    _CACHE_PATH = None
+
 pytestmark = pytest.mark.skipif(
-    not os.path.exists(DEFAULT_CACHE_PATH),
-    reason=f"ModelNet40 cache not found at {DEFAULT_CACHE_PATH}",
+    _CACHE_PATH is None or not _CACHE_PATH.is_file(),
+    reason=f"ModelNet40 cache not found at {_CACHE_PATH}",
 )
 
 
@@ -67,19 +72,47 @@ def test_target_shape_and_finite():
     assert torch.isfinite(data.y_irreps).all()
 
 
+def test_target_irreps_are_precomputed(monkeypatch):
+    ds = ModelNet40InertiaDataset(split="train", num_points=32, num_neighbors=4)
+    target = torch.from_numpy(ds.targets_voigt[0]).float()
+    expected = modelnet40_dataset.voigt_to_irreps(target / ds.target_std)
+    torch.testing.assert_close(ds.targets_irreps[0], expected)
+
+    def fail_if_recomputed(_):
+        pytest.fail("voigt_to_irreps must not run inside __getitem__")
+
+    monkeypatch.setattr(modelnet40_dataset, "voigt_to_irreps", fail_if_recomputed)
+    data = ds[0]
+    torch.testing.assert_close(data.y_irreps.squeeze(0), expected)
+
+
+def test_normalization_statistics_batch_by_graph():
+    ds = ModelNet40InertiaDataset(split="train", num_points=32, num_neighbors=4)
+    batch = next(iter(DataLoader(ds, batch_size=2, shuffle=False)))
+    assert batch.y_voigt_mean.shape == (2, 6)
+    assert batch.y_voigt_std.shape == (2, 6)
+
+
 def test_rotation_equivariance_of_edge_features():
     """Rotating the point cloud must rotate edge_sh accordingly."""
     points = torch.randn(64, 3)
-    edge_index = torch.stack([
-        torch.arange(64).repeat_interleave(4),
-        torch.randint(0, 64, (256,)),
-    ], dim=0)
+    edge_index = torch.stack(
+        [
+            torch.arange(64).repeat_interleave(4),
+            torch.randint(0, 64, (256,)),
+        ],
+        dim=0,
+    )
 
-    feats = _compute_edge_features(points, edge_index, max_radius=2.0, num_basis=8, lmax=2)
+    feats = _compute_edge_features(
+        points, edge_index, max_radius=2.0, num_basis=8, lmax=2
+    )
 
     R = torch.tensor([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
     points_rot = points @ R.T
-    feats_rot = _compute_edge_features(points_rot, edge_index, max_radius=2.0, num_basis=8, lmax=2)
+    feats_rot = _compute_edge_features(
+        points_rot, edge_index, max_radius=2.0, num_basis=8, lmax=2
+    )
 
     # Edge lengths and RBF are invariant; edge vectors rotate.
     assert torch.allclose(feats["edge_rbf"], feats_rot["edge_rbf"], atol=1e-5)
@@ -104,7 +137,9 @@ def test_full_model_forward_backward():
         atom_features="learnable",
     )
     mean_head = EquivariantMeanHead(backbone.irreps_out, output_spec.irreps, pool=True)
-    cov_head = O3QuadraticSymmetricOperatorHead(backbone.irreps_out, output_spec, pool=True)
+    cov_head = O3QuadraticSymmetricOperatorHead(
+        backbone.irreps_out, output_spec, pool=True
+    )
 
     model = StructuredProbabilisticPredictor(
         backbone=backbone,
@@ -141,7 +176,9 @@ def test_model_equivariance_under_point_cloud_rotation():
         atom_features="learnable",
     )
     mean_head = EquivariantMeanHead(backbone.irreps_out, output_spec.irreps, pool=True)
-    cov_head = O3QuadraticSymmetricOperatorHead(backbone.irreps_out, output_spec, pool=True)
+    cov_head = O3QuadraticSymmetricOperatorHead(
+        backbone.irreps_out, output_spec, pool=True
+    )
     model = StructuredProbabilisticPredictor(
         backbone=backbone,
         output_spec=output_spec,
@@ -185,7 +222,7 @@ def test_shape_covariance_rotation_equivariance():
     R = torch.tensor([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
 
     # Scalar std is shared across all components.
-    scalar_std = data.y_voigt_std[0].item()
+    scalar_std = data.y_voigt_std.reshape(-1)[0].item()
 
     pos_rot = data.pos @ R.T
     S_rot_voigt = _shape_covariance_voigt(pos_rot.numpy())
@@ -203,9 +240,9 @@ def test_shape_covariance_computation():
     points = np.random.randn(64, 3).astype(np.float32)
     centered = points - points.mean(axis=0)
     S = (centered.T @ centered) / len(points)
-    expected = np.array([
-        S[0, 0], S[1, 1], S[2, 2], S[1, 2], S[0, 2], S[0, 1]
-    ], dtype=np.float32)
+    expected = np.array(
+        [S[0, 0], S[1, 1], S[2, 2], S[1, 2], S[0, 2], S[0, 1]], dtype=np.float32
+    )
     assert np.allclose(_shape_covariance_voigt(points), expected, atol=1e-5)
 
 

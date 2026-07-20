@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import math
-from typing import Dict, Tuple
+from functools import lru_cache
 import torch
 
-from distributions.base import StructuredDistributionLoss
+from distributions.base import StructuredDistributionLoss, diagnostic_components
 from spd_maps.base import SPDMap
 
 
@@ -41,40 +41,36 @@ class StudentTNLL(StructuredDistributionLoss):
             raise ValueError("Student-t degrees of freedom nu must be positive.")
         self.nu = nu
 
+    @staticmethod
+    @lru_cache(maxsize=None)
+    def _normalization_constant(nu: float, dimension: int) -> float:
+        """Cache the fixed scalar term without launching device kernels."""
+        return (
+            -math.lgamma((nu + dimension) / 2.0)
+            + math.lgamma(nu / 2.0)
+            + 0.5 * dimension * math.log(nu * math.pi)
+        )
+
     def forward(
         self,
         mu: torch.Tensor,
         params: torch.Tensor,
         target: torch.Tensor,
         spd_map: SPDMap,
-    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         residual = target - mu
         d = residual.shape[-1]
         nu = self.nu
 
-        logdet = spd_map.logdet(params)
-        quad = spd_map.precision_action(params, residual)
+        logdet, quad = spd_map.statistics(params, residual)
+        const = self._normalization_constant(nu, d)
 
-        const = (
-            -torch.lgamma(torch.tensor((nu + d) / 2.0, device=mu.device, dtype=mu.dtype))
-            + torch.lgamma(torch.tensor(nu / 2.0, device=mu.device, dtype=mu.dtype))
-            + 0.5 * d * math.log(nu * math.pi)
-        )
-
-        loss = (
-            const
-            + 0.5 * logdet
-            + 0.5 * (nu + d) * torch.log1p(quad / nu)
-        )
+        fit = 0.5 * (nu + d) * torch.log1p(quad / nu)
+        uncertainty = 0.5 * logdet
+        loss = const + uncertainty + fit
         loss = loss.mean()
-
-        components = {
-            "loss_fit": (0.5 * (nu + d) * torch.log1p(quad / nu)).mean().detach(),
-            "loss_uncertainty": (0.5 * logdet).mean().detach(),
-            "mahalanobis2_mean": quad.mean().detach(),
-            "logdet_mean": logdet.mean().detach(),
-            "nu": torch.tensor(nu, device=mu.device, dtype=mu.dtype),
-        }
+        components = diagnostic_components(fit, uncertainty, quad, logdet)
+        components["nu"] = mu.new_tensor(nu)
         return loss, components
 
     @staticmethod

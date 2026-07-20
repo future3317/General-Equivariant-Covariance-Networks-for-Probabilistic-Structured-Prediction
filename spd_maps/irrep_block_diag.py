@@ -49,17 +49,59 @@ class IrrepBlockDiagonalMap(SPDMap):
         dim = self.irreps.dim
         S = torch.zeros(*batch, dim, dim, device=params.device, dtype=params.dtype)
         sigma2 = torch.nn.functional.softplus(params) + self.min_sigma2
-        for block_idx, ((i, j), size) in enumerate(zip(self._block_slices, self._block_sizes)):
+        for block_idx, ((i, j), size) in enumerate(
+            zip(self._block_slices, self._block_sizes)
+        ):
             S[..., i:j, i:j] = sigma2[..., block_idx][..., None, None] * torch.eye(
                 size, device=params.device, dtype=params.dtype
             )
         return S
 
     def logdet(self, params: torch.Tensor) -> torch.Tensor:
-        S = self.forward(params)
-        return torch.logdet(S)
+        if params.shape[-1] != self.num_blocks:
+            raise ValueError(
+                f"params last dim {params.shape[-1]} != num_blocks {self.num_blocks}"
+            )
+        sigma2 = torch.nn.functional.softplus(params) + self.min_sigma2
+        sizes = params.new_tensor(self._block_sizes)
+        return torch.sum(sizes * torch.log(sigma2), dim=-1)
 
-    def precision_action(self, params: torch.Tensor, residual: torch.Tensor) -> torch.Tensor:
-        S = self.forward(params)
-        x = torch.linalg.solve(S, residual.unsqueeze(-1))
-        return torch.sum(residual * x.squeeze(-1), dim=-1)
+    def precision_action(
+        self, params: torch.Tensor, residual: torch.Tensor
+    ) -> torch.Tensor:
+        if params.shape[-1] != self.num_blocks:
+            raise ValueError(
+                f"params last dim {params.shape[-1]} != num_blocks {self.num_blocks}"
+            )
+        if residual.shape[-1] != self.irreps.dim:
+            raise ValueError(
+                f"residual last dim {residual.shape[-1]} != {self.irreps.dim}"
+            )
+        sigma2 = torch.nn.functional.softplus(params) + self.min_sigma2
+        quadratic = params.new_zeros(params.shape[:-1])
+        for block_index, (start, end) in enumerate(self._block_slices):
+            quadratic = quadratic + (
+                residual[..., start:end].square().sum(-1) / sigma2[..., block_index]
+            )
+        return quadratic
+
+    def statistics(
+        self, params: torch.Tensor, residual: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if params.shape[-1] != self.num_blocks:
+            raise ValueError(
+                f"params last dim {params.shape[-1]} != num_blocks {self.num_blocks}"
+            )
+        if residual.shape[-1] != self.irreps.dim:
+            raise ValueError(
+                f"residual last dim {residual.shape[-1]} != {self.irreps.dim}"
+            )
+        sigma2 = torch.nn.functional.softplus(params) + self.min_sigma2
+        sizes = params.new_tensor(self._block_sizes)
+        logdet = torch.sum(sizes * torch.log(sigma2), dim=-1)
+        quadratic = params.new_zeros(params.shape[:-1])
+        for block_index, (start, end) in enumerate(self._block_slices):
+            quadratic = quadratic + (
+                residual[..., start:end].square().sum(-1) / sigma2[..., block_index]
+            )
+        return logdet, quadratic

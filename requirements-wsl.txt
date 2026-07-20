@@ -1,0 +1,5 @@
+# Reproducible WSL2 CUDA environment used for fused cuEquivariance tests.
+--extra-index-url https://download.pytorch.org/whl/cu128
+-r requirements.txt
+torch==2.8.0+cu128
+cuequivariance-ops-torch-cu12==0.10.0

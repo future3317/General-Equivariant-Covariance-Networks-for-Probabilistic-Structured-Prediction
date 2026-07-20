@@ -3,16 +3,26 @@
 import pytest
 import torch
 from representations import (
+    O3IrrepsSpec,
     O3SymmetricOperatorBasis,
     rank2_symmetric_irreps,
     rank4_elasticity_irreps,
 )
 
 
-@pytest.mark.parametrize("irreps,expected_operator_dim", [
-    ("1o", 6),
-    ("0e + 2e", 21),
-])
+def test_representation_matrix_preserves_floating_dtype():
+    rotation = torch.eye(3, dtype=torch.float64)
+    representation = O3IrrepsSpec("0e + 2e").representation_matrix(rotation)
+    assert representation.dtype == torch.float64
+
+
+@pytest.mark.parametrize(
+    "irreps,expected_operator_dim",
+    [
+        ("1o", 6),
+        ("0e + 2e", 21),
+    ],
+)
 def test_symmetric_square_dimension(irreps, expected_operator_dim):
     basis = O3SymmetricOperatorBasis(irreps)
     assert basis.operator_dim == expected_operator_dim

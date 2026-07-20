@@ -1,6 +1,5 @@
 """Tests for low-rank-plus-isotropic SPD map using Woodbury identity."""
 
-import pytest
 import torch
 
 from spd_maps import LowRankPlusIsotropicMap
@@ -50,3 +49,41 @@ def test_woodbury_gradients_finite():
 
     assert params.grad is not None
     assert torch.isfinite(params.grad).all()
+
+
+def test_joint_statistics_match_separate_values_and_gradients():
+    """One-factorization statistics must preserve both outputs and gradients."""
+    residual_old = torch.randn(4, 21, dtype=torch.float64, requires_grad=True)
+    residual_new = residual_old.detach().clone().requires_grad_(True)
+    params_old = _make_params(batch=4, dim=21, rank=4).double().requires_grad_(True)
+    params_new = params_old.detach().clone().requires_grad_(True)
+    spd_map = LowRankPlusIsotropicMap(dim=21, rank=4)
+
+    old_logdet = spd_map.logdet(params_old)
+    old_quadratic = spd_map.precision_action(params_old, residual_old)
+    new_logdet, new_quadratic = spd_map.statistics(params_new, residual_new)
+
+    torch.testing.assert_close(new_logdet, old_logdet, atol=1e-10, rtol=1e-10)
+    torch.testing.assert_close(new_quadratic, old_quadratic, atol=1e-10, rtol=1e-10)
+
+    (old_logdet + old_quadratic).sum().backward()
+    (new_logdet + new_quadratic).sum().backward()
+    torch.testing.assert_close(params_new.grad, params_old.grad, atol=1e-9, rtol=1e-9)
+    torch.testing.assert_close(
+        residual_new.grad, residual_old.grad, atol=1e-10, rtol=1e-10
+    )
+
+
+def test_joint_statistics_build_factor_system_once():
+    class CountingLowRankMap(LowRankPlusIsotropicMap):
+        calls = 0
+
+        def _factor_system(self, params):
+            self.calls += 1
+            return super()._factor_system(params)
+
+    spd_map = CountingLowRankMap(dim=21, rank=4)
+    params = _make_params(batch=2, dim=21, rank=4)
+    residual = torch.randn(2, 21)
+    spd_map.statistics(params, residual)
+    assert spd_map.calls == 1

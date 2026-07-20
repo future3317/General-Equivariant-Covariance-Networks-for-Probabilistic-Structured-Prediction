@@ -19,7 +19,9 @@ from representations import (
 )
 from models import EquivariantBackbone
 from data.elasticity_dataset import get_elasticity_irreps_loaders
+from data.paths import dataset_dir
 from data.tensor_conversions import irreps_to_elasticity_21d
+from scripts._common import add_tensor_product_arguments, tensor_product_kwargs
 
 
 def setup_logger(save_dir: str, experiment_name: str | None = None):
@@ -43,11 +45,20 @@ def setup_logger(save_dir: str, experiment_name: str | None = None):
     return logger, experiment_name
 
 
-def unnormalize_21d(pred_norm: torch.Tensor, mean: torch.Tensor, std: torch.Tensor) -> torch.Tensor:
+def unnormalize_21d(
+    pred_norm: torch.Tensor, mean: torch.Tensor, std: torch.Tensor
+) -> torch.Tensor:
     return pred_norm * std.to(pred_norm.device) + mean.to(pred_norm.device)
 
 
-def train_epoch(model, dataloader, optimizer, device, warmup_mse_weight: float = 0.0, non_blocking: bool = False):
+def train_epoch(
+    model,
+    dataloader,
+    optimizer,
+    device,
+    warmup_mse_weight: float = 0.0,
+    non_blocking: bool = False,
+):
     model.train()
     total_loss = torch.tensor(0.0, device=device)
     num_samples = 0
@@ -109,7 +120,7 @@ def validate(model, dataloader, device, mean_21d, std_21d, non_blocking: bool = 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_dir", default="data/mp_elastic")
+    parser.add_argument("--data_dir", default=None)
     parser.add_argument("--save_dir", default="checkpoints_elasticity")
     parser.add_argument("--hidden_dim", type=int, default=48)
     parser.add_argument("--lmax", type=int, default=2)
@@ -122,7 +133,9 @@ def main():
         default="auto",
     )
     parser.add_argument("--parameter_budget", type=int, default=192)
-    parser.add_argument("--objective", choices=["gaussian", "student_t"], default="gaussian")
+    parser.add_argument(
+        "--objective", choices=["gaussian", "student_t"], default="gaussian"
+    )
     parser.add_argument("--student_t_dof", type=float, default=5.0)
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--lr", type=float, default=5e-4)
@@ -135,9 +148,15 @@ def main():
     parser.add_argument("--persistent_workers", action="store_true")
     parser.add_argument("--pin_memory", action="store_true")
     parser.add_argument("--prefetch_factor", type=int, default=None)
-    parser.add_argument("--atom_features", default="manual", choices=["manual", "learnable"])
-    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument(
+        "--atom_features", default="manual", choices=["manual", "learnable"]
+    )
+    add_tensor_product_arguments(parser)
+    parser.add_argument(
+        "--device", default="cuda" if torch.cuda.is_available() else "cpu"
+    )
     args = parser.parse_args()
+    args.data_dir = str(dataset_dir(args.data_dir, "mp_elastic"))
 
     logger, experiment_name = setup_logger(args.save_dir)
     logger.info("=" * 60)
@@ -173,6 +192,7 @@ def main():
         atom_feature_dim=49,
         num_basis=args.num_basis,
         atom_features=args.atom_features,
+        **tensor_product_kwargs(args),
     )
     compiler = O3RepresentationCompiler(
         rank4_elasticity_irreps(),
@@ -187,6 +207,8 @@ def main():
     )
     compilation = compiler.compile(backbone.irreps_out)
     model = compilation.build_model(backbone).to(args.device)
+    if args.compile_tp:
+        model.backbone.compile_tensor_products(dynamic=True)
 
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(f"Model parameters: {num_params:,}")
@@ -198,8 +220,12 @@ def main():
         compilation.active_plan.depth,
     )
 
-    optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=5)
+    optimizer = optim.AdamW(
+        model.parameters(), lr=args.lr, weight_decay=args.weight_decay
+    )
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="min", factor=0.5, patience=5
+    )
 
     best_val_loss = float("inf")
     patience_counter = 0
@@ -209,10 +235,16 @@ def main():
     for epoch in range(args.num_epochs):
         warmup_mse = 0.1 if epoch < args.warmup_epochs else 0.0
         train_loss = train_epoch(
-            model, train_loader, optimizer, args.device, warmup_mse,
+            model,
+            train_loader,
+            optimizer,
+            args.device,
+            warmup_mse,
             non_blocking=non_blocking,
         )
-        val_metrics = validate(model, val_loader, args.device, mean_21d, std_21d, non_blocking=non_blocking)
+        val_metrics = validate(
+            model, val_loader, args.device, mean_21d, std_21d, non_blocking=non_blocking
+        )
         scheduler.step(val_metrics["loss"])
 
         logger.info(
@@ -235,8 +267,14 @@ def main():
             logger.info(f"Early stopping at epoch {epoch + 1}")
             break
 
-    model.load_state_dict(torch.load(os.path.join(args.save_dir, "best_model.pt"), map_location=args.device))
-    test_metrics = validate(model, test_loader, args.device, mean_21d, std_21d, non_blocking=non_blocking)
+    model.load_state_dict(
+        torch.load(
+            os.path.join(args.save_dir, "best_model.pt"), map_location=args.device
+        )
+    )
+    test_metrics = validate(
+        model, test_loader, args.device, mean_21d, std_21d, non_blocking=non_blocking
+    )
     logger.info(f"Test: loss={test_metrics['loss']:.4f}, mae={test_metrics['mae']:.4f}")
 
     with open(os.path.join(args.save_dir, "args.json"), "w") as f:

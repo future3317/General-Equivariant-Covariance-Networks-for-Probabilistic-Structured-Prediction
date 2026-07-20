@@ -17,11 +17,18 @@ from representations.adaptive_lifting import (
 )
 from representations.o3_irreps import O3IrrepsSpec
 from representations.graph_structure import EquivariantOutputGraph
+from representations.irrep_layout import RepeatedIrrepLayout
+from representations.cartesian_stf import (
+    Rank2CartesianSTFOperatorBasis,
+    is_rank2_stf_output,
+)
+from representations.diagnostics import CompilationCertificate, CompilationError
 
 
 CovarianceMode = Literal["auto", "full", "block", "low_rank", "graph"]
 OutputScope = Literal["global", "dense"]
 ObjectiveName = Literal["gaussian", "student_t"]
+ExecutionBackend = Literal["auto", "spherical_cg", "cartesian_stf"]
 
 
 @dataclass(frozen=True)
@@ -34,10 +41,23 @@ class CompilerConfig:
     parameter_budget: int = 192
     low_rank: int = 8
     student_t_dof: float = 5.0
+    backend: ExecutionBackend = "auto"
+    stf_contraction_rank: int | None = None
 
     def __post_init__(self):
         if self.covariance not in {"auto", "full", "block", "low_rank", "graph"}:
-            raise ValueError(f"unknown covariance mode: {self.covariance}")
+            raise CompilationError(
+                CompilationCertificate(
+                    code="unsupported_covariance_parameterization",
+                    status="failure",
+                    message=f"unknown covariance mode: {self.covariance}",
+                    details={
+                        "requested": self.covariance,
+                        "supported": ["auto", "full", "block", "low_rank", "graph"],
+                        "safeguard": "coordinate-wise Cholesky is intentionally unavailable because it is not conjugation equivariant",
+                    },
+                )
+            )
         if self.output_scope not in {"global", "dense"}:
             raise ValueError(f"unknown output scope: {self.output_scope}")
         if self.objective not in {"gaussian", "student_t"}:
@@ -48,18 +68,21 @@ class CompilerConfig:
             raise ValueError("low_rank must be positive")
         if self.student_t_dof <= 0:
             raise ValueError("student_t_dof must be positive")
-
-
-def _factor_irreps(output_irreps: o3.Irreps, rank: int) -> o3.Irreps:
-    return o3.Irreps(
-        [(multiplicity * rank, irrep) for multiplicity, irrep in output_irreps]
-    )
-
-
-def _repeat_irreps(irreps: o3.Irreps, copies: int) -> o3.Irreps:
-    return o3.Irreps(
-        [(multiplicity * copies, irrep) for multiplicity, irrep in irreps]
-    )
+        if self.backend not in {"auto", "spherical_cg", "cartesian_stf"}:
+            raise CompilationError(
+                CompilationCertificate(
+                    code="unsupported_execution_backend",
+                    status="failure",
+                    message=f"unknown execution backend: {self.backend}",
+                    details={
+                        "requested": self.backend,
+                        "supported": ["auto", "spherical_cg", "cartesian_stf"],
+                        "safeguard": "scalar Gaunt shortcuts are not accepted as a complete CG executor",
+                    },
+                )
+            )
+        if self.stf_contraction_rank is not None and self.stf_contraction_rank < 1:
+            raise ValueError("stf_contraction_rank must be positive")
 
 
 def _isotypic_parameter_count(output_irreps: o3.Irreps) -> int:
@@ -82,6 +105,9 @@ class O3Compilation:
     active_target_irreps: o3.Irreps
     canonical_plan: O3LiftingPlan
     active_plan: O3LiftingPlan
+    backend: Literal["spherical_cg", "cartesian_stf"]
+    backend_exact: bool
+    stf_contraction_rank: int | None
     config: CompilerConfig
     graph_structure: EquivariantOutputGraph | None = None
 
@@ -91,32 +117,16 @@ class O3Compilation:
 
     @property
     def covariance_irreps(self) -> o3.Irreps:
-        return self.output_spec.symmetric_square().operator_irreps
+        return self.output_spec.symmetric_square_irreps
 
     def as_dict(self) -> dict:
-        return {
-            "output_irreps": str(self.output_spec.irreps),
-            "cartesian_formula": self.output_spec.cartesian_formula,
-            "seed_irreps": str(self.seed_irreps),
-            "canonical_target_irreps": str(self.canonical_target_irreps),
-            "active_target_irreps": str(self.active_target_irreps),
-            "covariance_mode": self.covariance_mode,
-            "covariance_rank": self.covariance_rank,
-            "covariance_parameter_count": self.covariance_parameter_count,
-            "canonical_covariance_parameter_count": (
-                self.output_spec.dim * (self.output_spec.dim + 1) // 2
-            ),
-            "active_covariance_parameter_count": self.covariance_parameter_count,
-            "output_scope": self.config.output_scope,
-            "objective": self.config.objective,
-            "canonical_lifting": self.canonical_plan.as_dict(),
-            "active_lifting": self.active_plan.as_dict(),
-            "graph_structure": (
-                self.graph_structure.as_dict()
-                if self.graph_structure is not None
-                else None
-            ),
-        }
+        return self.report().as_dict()
+
+    def report(self, executable: torch.nn.Module | None = None):
+        """Return the stable, machine-readable compilation report."""
+        from representations.report import build_compilation_report
+
+        return build_compilation_report(self, executable)
 
     def build_head(self) -> "O3CompiledOutputHead":
         return O3CompiledOutputHead(self)
@@ -226,12 +236,35 @@ class O3RepresentationCompiler:
             graph_structure=graph_structure,
         )
 
-    def compile(self, seed_irreps: o3.Irreps) -> O3Compilation:
+    def compile(
+        self,
+        seed_irreps: o3.Irreps,
+        *,
+        canonical_plan: O3LiftingPlan | None = None,
+    ) -> O3Compilation:
         seed = o3.Irreps(seed_irreps)
         output_irreps = self.output_spec.irreps
-        covariance_irreps = self.output_spec.symmetric_square().operator_irreps
+        covariance_irreps = self.output_spec.symmetric_square_irreps
         canonical_target = direct_sum_irreps(output_irreps, covariance_irreps)
-        canonical_plan = plan_lifting_graph(seed, canonical_target)
+        if canonical_plan is None:
+            canonical_plan = plan_lifting_graph(seed, canonical_target)
+        elif (
+            canonical_plan.seed_irreps != seed
+            or canonical_plan.target_irreps != canonical_target
+        ):
+            raise CompilationError(
+                CompilationCertificate(
+                    code="canonical_plan_contract_mismatch",
+                    status="failure",
+                    message="the supplied canonical lifting plan does not match this compiler contract",
+                    details={
+                        "expected_seed_irreps": str(seed),
+                        "planned_seed_irreps": str(canonical_plan.seed_irreps),
+                        "expected_target_irreps": str(canonical_target),
+                        "planned_target_irreps": str(canonical_plan.target_irreps),
+                    },
+                )
+            )
 
         dim = self.output_spec.dim
         full_parameters = dim * (dim + 1) // 2
@@ -242,9 +275,9 @@ class O3RepresentationCompiler:
         graph_operator_irreps: o3.Irreps | None = None
         if self.graph_structure is not None:
             local_spec = O3IrrepsSpec(o3.Irreps([(1, self.graph_structure.node_irrep)]))
-            graph_operator_irreps = local_spec.symmetric_square().operator_irreps
+            graph_operator_irreps = local_spec.symmetric_square_irreps
             graph_parameters = (
-                local_spec.symmetric_square().operator_dim
+                local_spec.dim * (local_spec.dim + 1) // 2
                 * self.graph_structure.num_potentials
             )
 
@@ -267,20 +300,17 @@ class O3RepresentationCompiler:
             parameter_count = full_parameters
             selected_rank = None
         elif mode == "low_rank":
-            factors = _factor_irreps(output_irreps, rank)
-            active_target = direct_sum_irreps(
-                output_irreps, factors, o3.Irreps("1x0e")
-            )
+            factors = RepeatedIrrepLayout(output_irreps, rank).expanded_irreps
+            active_target = direct_sum_irreps(output_irreps, factors, o3.Irreps("1x0e"))
             parameter_count = low_rank_parameters
             selected_rank = rank
         elif mode == "graph":
             if self.graph_structure is None or graph_parameters is None:
                 raise ValueError("graph covariance requires graph_structure")
             assert graph_operator_irreps is not None
-            potential_irreps = _repeat_irreps(
-                graph_operator_irreps,
-                self.graph_structure.num_potentials,
-            )
+            potential_irreps = RepeatedIrrepLayout(
+                graph_operator_irreps, self.graph_structure.num_potentials
+            ).expanded_irreps
             active_target = direct_sum_irreps(output_irreps, potential_irreps)
             parameter_count = graph_parameters
             selected_rank = None
@@ -296,6 +326,50 @@ class O3RepresentationCompiler:
             if active_target == canonical_target
             else plan_lifting_graph(seed, active_target)
         )
+
+        stf_supported = (
+            mode == "full"
+            and is_rank2_stf_output(output_irreps)
+            and canonical_plan.depth == 1
+        )
+        backend = self.config.backend
+        if backend == "auto":
+            backend = "cartesian_stf" if stf_supported else "spherical_cg"
+        elif backend == "cartesian_stf" and not stf_supported:
+            raise CompilationError(
+                CompilationCertificate(
+                    code="backend_incompatible",
+                    status="failure",
+                    message=(
+                        "cartesian_stf requires full covariance, V=0e+2e, and a "
+                        "single direct lifting edge"
+                    ),
+                    details={
+                        "requested_backend": "cartesian_stf",
+                        "covariance_mode": mode,
+                        "output_irreps": str(output_irreps),
+                        "canonical_depth": canonical_plan.depth,
+                    },
+                )
+            )
+        if self.config.stf_contraction_rank is not None and backend != "cartesian_stf":
+            raise CompilationError(
+                CompilationCertificate(
+                    code="contraction_rank_without_lowering",
+                    status="failure",
+                    message="stf_contraction_rank is only valid when cartesian_stf is selected",
+                    details={
+                        "selected_backend": backend,
+                        "contraction_rank": self.config.stf_contraction_rank,
+                    },
+                )
+            )
+        contraction_rank = self.config.stf_contraction_rank
+        if backend == "cartesian_stf" and contraction_rank is not None:
+            max_exact_rank = max(multiplicity for multiplicity, _ in seed)
+            if contraction_rank >= max_exact_rank:
+                contraction_rank = None
+        backend_exact = backend == "spherical_cg" or contraction_rank is None
         return O3Compilation(
             output_spec=self.output_spec,
             seed_irreps=seed,
@@ -306,13 +380,16 @@ class O3RepresentationCompiler:
             active_target_irreps=active_target,
             canonical_plan=canonical_plan,
             active_plan=active_plan,
+            backend=backend,
+            backend_exact=backend_exact,
+            stf_contraction_rank=contraction_rank,
             config=self.config,
             graph_structure=self.graph_structure if mode == "graph" else None,
         )
 
 
 class O3CompiledOutputHead(torch.nn.Module):
-    """Shared lifting trunk with compiled mean and covariance projections."""
+    """Shared lifting trunk with checkpoint-preserving backend lowering."""
 
     def __init__(self, compilation: O3Compilation):
         super().__init__()
@@ -324,103 +401,53 @@ class O3CompiledOutputHead(torch.nn.Module):
             compilation.seed_irreps,
             active_irreps,
             plan=compilation.active_plan,
+            tensor_product_backend=(
+                "dense_projector"
+                if compilation.backend == "cartesian_stf"
+                else "spherical_cg"
+            ),
+            contraction_rank=compilation.stf_contraction_rank,
         )
         self.mean_projection = o3.Linear(active_irreps, self.output_spec.irreps)
 
         if compilation.covariance_mode == "full":
-            self.operator_basis = self.output_spec.symmetric_square()
+            self.operator_basis = (
+                Rank2CartesianSTFOperatorBasis()
+                if compilation.backend == "cartesian_stf"
+                else self.output_spec.symmetric_square()
+            )
             self.covariance_projection = o3.Linear(
                 active_irreps, self.operator_basis.operator_irreps
             )
         elif compilation.covariance_mode == "low_rank":
-            self.factor_irreps = _factor_irreps(
+            self.factor_layout = RepeatedIrrepLayout(
                 self.output_spec.irreps, int(compilation.covariance_rank)
             )
+            self.factor_irreps = self.factor_layout.expanded_irreps
             self.covariance_projection = o3.Linear(active_irreps, self.factor_irreps)
             self.scale_projection = o3.Linear(active_irreps, o3.Irreps("1x0e"))
-            self._factor_slices = self._build_factor_slices(
-                self.output_spec.irreps, int(compilation.covariance_rank)
-            )
         elif compilation.covariance_mode == "graph":
             if compilation.graph_structure is None:
                 raise RuntimeError("graph compilation is missing its graph structure")
             local_irreps = o3.Irreps([(1, compilation.graph_structure.node_irrep)])
             self.operator_basis = O3IrrepsSpec(local_irreps).symmetric_square()
-            self.potential_irreps = _repeat_irreps(
+            self.potential_layout = RepeatedIrrepLayout(
                 self.operator_basis.operator_irreps,
                 compilation.graph_structure.num_potentials,
             )
-            self.covariance_projection = o3.Linear(
-                active_irreps, self.potential_irreps
-            )
-            self._potential_slices = self._build_repeated_slices(
-                self.operator_basis.operator_irreps,
-                compilation.graph_structure.num_potentials,
-            )
+            self.potential_irreps = self.potential_layout.expanded_irreps
+            self.covariance_projection = o3.Linear(active_irreps, self.potential_irreps)
         else:
             count = compilation.covariance_parameter_count
             self.covariance_projection = o3.Linear(
                 active_irreps, o3.Irreps(f"{count}x0e")
             )
 
-    @staticmethod
-    def _build_factor_slices(
-        output_irreps: o3.Irreps, rank: int
-    ) -> list[list[tuple[int, int]]]:
-        slices = [[] for _ in range(rank)]
-        cursor = 0
-        for multiplicity, irrep in output_irreps:
-            for copy in range(multiplicity * rank):
-                rank_slot = copy % rank
-                start = cursor + copy * irrep.dim
-                slices[rank_slot].append((start, start + irrep.dim))
-            cursor += multiplicity * rank * irrep.dim
-        return slices
-
     def _pack_factors(self, coefficients: torch.Tensor) -> torch.Tensor:
-        rank = int(self.compilation.covariance_rank)
-        factor = coefficients.new_empty(
-            (*coefficients.shape[:-1], self.output_spec.dim, rank)
-        )
-        for rank_slot, source_slices in enumerate(self._factor_slices):
-            row = 0
-            for start, end in source_slices:
-                width = end - start
-                factor[..., row : row + width, rank_slot] = coefficients[..., start:end]
-                row += width
-        return factor
-
-    @staticmethod
-    def _build_repeated_slices(
-        irreps: o3.Irreps, copies: int
-    ) -> list[list[tuple[int, int]]]:
-        slices = [[] for _ in range(copies)]
-        cursor = 0
-        for multiplicity, irrep in irreps:
-            for repeated_copy in range(multiplicity * copies):
-                copy_slot = repeated_copy % copies
-                start = cursor + repeated_copy * irrep.dim
-                slices[copy_slot].append((start, start + irrep.dim))
-            cursor += multiplicity * copies * irrep.dim
-        return slices
+        return self.factor_layout.pack(coefficients).transpose(-1, -2)
 
     def _pack_repeated_coefficients(self, coefficients: torch.Tensor) -> torch.Tensor:
-        packed = coefficients.new_empty(
-            (
-                *coefficients.shape[:-1],
-                len(self._potential_slices),
-                self.operator_basis.operator_dim,
-            )
-        )
-        for copy_slot, source_slices in enumerate(self._potential_slices):
-            target_cursor = 0
-            for start, end in source_slices:
-                width = end - start
-                packed[..., copy_slot, target_cursor : target_cursor + width] = (
-                    coefficients[..., start:end]
-                )
-                target_cursor += width
-        return packed
+        return self.potential_layout.pack(coefficients)
 
     def forward(
         self, node_features: torch.Tensor, batch: torch.Tensor | None = None
@@ -429,13 +456,9 @@ class O3CompiledOutputHead(torch.nn.Module):
         if self.pool:
             if batch is None:
                 raise ValueError("batch is required for global output")
-            if batch.numel() == 0:
-                raise ValueError("batch must not be empty")
-            graph_count = int(batch.max().item()) + 1
-            pooled = hidden.new_zeros((graph_count, hidden.shape[-1]))
-            pooled.index_add_(0, batch, hidden)
-            counts = torch.bincount(batch, minlength=graph_count).to(hidden.dtype)
-            hidden = pooled / counts.clamp_min(1).unsqueeze(-1)
+            from models.pooling import mean_pool
+
+            hidden = mean_pool(hidden, batch)
         compiled = self.lifting(hidden)
         mean = self.mean_projection(compiled)
 
@@ -445,9 +468,7 @@ class O3CompiledOutputHead(torch.nn.Module):
         elif self.compilation.covariance_mode == "low_rank":
             factors = self._pack_factors(self.covariance_projection(compiled))
             log_sigma2 = self.scale_projection(compiled)
-            parameters = torch.cat(
-                [factors.flatten(start_dim=-2), log_sigma2], dim=-1
-            )
+            parameters = torch.cat([factors.flatten(start_dim=-2), log_sigma2], dim=-1)
         elif self.compilation.covariance_mode == "graph":
             coefficients = self.covariance_projection(compiled)
             parameters = self.operator_basis.assemble(

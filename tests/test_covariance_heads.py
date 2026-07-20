@@ -1,13 +1,13 @@
 """Tests for equivariant covariance heads."""
 
-import pytest
+from unittest import mock
+
 import torch
 from e3nn import o3
 
 from models import (
     EquivariantBackbone,
     EquivariantMeanHead,
-    O3EquivariantSymmetricOperatorHead,
     O3QuadraticSymmetricOperatorHead,
     O3EquivariantLowRankCovarianceHead,
     StructuredProbabilisticPredictor,
@@ -15,6 +15,7 @@ from models import (
 from representations import O3IrrepsSpec, rank4_elasticity_irreps
 from spd_maps import MatrixExponentialMap, LowRankPlusIsotropicMap
 from distributions import GaussianNLL
+from models.pooling import mean_pool
 
 
 def _make_graph_data(batch_size=2, num_nodes=5):
@@ -36,7 +37,12 @@ def _make_graph_data(batch_size=2, num_nodes=5):
         data.edge_sh = torch.cat([data.edge_sh, data.edge_sh], dim=0)
         data.edge_rbf = torch.cat([data.edge_rbf, data.edge_rbf], dim=0)
         data.edge_weights = torch.cat([data.edge_weights, data.edge_weights], dim=0)
-        data.batch = torch.cat([torch.zeros(num_nodes, dtype=torch.long), torch.ones(num_nodes, dtype=torch.long)])
+        data.batch = torch.cat(
+            [
+                torch.zeros(num_nodes, dtype=torch.long),
+                torch.ones(num_nodes, dtype=torch.long),
+            ]
+        )
     return data
 
 
@@ -113,10 +119,16 @@ def test_quadratic_head_forward_backward():
     """Full forward/backward through quadratic head inside a predictor."""
     output_spec = O3IrrepsSpec("0e + 2e")
     backbone = EquivariantBackbone(
-        hidden_dim=16, lmax=2, num_layers=1, atom_feature_dim=49, num_basis=8,
+        hidden_dim=16,
+        lmax=2,
+        num_layers=1,
+        atom_feature_dim=49,
+        num_basis=8,
     )
     mean_head = EquivariantMeanHead(backbone.irreps_out, output_spec.irreps, pool=True)
-    cov_head = O3QuadraticSymmetricOperatorHead(backbone.irreps_out, output_spec, pool=True)
+    cov_head = O3QuadraticSymmetricOperatorHead(
+        backbone.irreps_out, output_spec, pool=True
+    )
     model = StructuredProbabilisticPredictor(
         backbone=backbone,
         output_spec=output_spec,
@@ -135,6 +147,29 @@ def test_quadratic_head_forward_backward():
     for p in model.parameters():
         if p.requires_grad and p.grad is not None:
             assert torch.isfinite(p.grad).all()
+
+
+def test_separate_heads_share_one_graph_pooling_operation():
+    output_spec = O3IrrepsSpec("0e + 2e")
+    backbone = EquivariantBackbone(
+        hidden_dim=8, lmax=2, num_layers=1, atom_feature_dim=49, num_basis=8
+    )
+    model = StructuredProbabilisticPredictor(
+        backbone=backbone,
+        output_spec=output_spec,
+        mean_head=EquivariantMeanHead(
+            backbone.irreps_out, output_spec.irreps, pool=True
+        ),
+        covariance_head=O3QuadraticSymmetricOperatorHead(
+            backbone.irreps_out, output_spec, pool=True
+        ),
+        spd_map=MatrixExponentialMap(),
+        distribution=GaussianNLL(),
+    )
+    with mock.patch("models.structured_predictor.mean_pool", wraps=mean_pool) as pooled:
+        result = model(_make_graph_data(), return_scale=False)
+    assert pooled.call_count == 1
+    assert result["mu"].shape == (2, output_spec.dim)
 
 
 def test_lowrank_factor_layout():
@@ -174,7 +209,9 @@ def test_lowrank_factor_equivariance():
     torch.manual_seed(0)
     output_spec = O3IrrepsSpec("0e + 2e")
     hidden_irreps = o3.Irreps("16x0e + 8x1o + 8x2e")
-    cov_head = O3EquivariantLowRankCovarianceHead(hidden_irreps, output_spec, rank=4, pool=False)
+    cov_head = O3EquivariantLowRankCovarianceHead(
+        hidden_irreps, output_spec, rank=4, pool=False
+    )
     spd_map = LowRankPlusIsotropicMap(dim=output_spec.dim, rank=4)
 
     # Random pooled hidden features.
@@ -223,7 +260,6 @@ def test_lowrank_factor_layout_rank4():
     # Each column must contain the full output representation V.
     # We check this by ensuring the slice sizes match the irrep dimensions
     # scaled by their multiplicities.
-    cursor = 0
     for rank_slot in range(rank):
         row_cursor = 0
         for mul, ir in output_spec.irreps:
@@ -239,7 +275,9 @@ def test_lowrank_factor_equivariance_rank4():
     torch.manual_seed(2)
     output_spec = O3IrrepsSpec(rank4_elasticity_irreps())
     hidden_irreps = o3.Irreps("32x0e + 16x1o + 16x2e")
-    cov_head = O3EquivariantLowRankCovarianceHead(hidden_irreps, output_spec, rank=4, pool=False)
+    cov_head = O3EquivariantLowRankCovarianceHead(
+        hidden_irreps, output_spec, rank=4, pool=False
+    )
     spd_map = LowRankPlusIsotropicMap(dim=output_spec.dim, rank=4)
 
     h = hidden_irreps.randn(1, -1)

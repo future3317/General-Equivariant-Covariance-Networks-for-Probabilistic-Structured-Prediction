@@ -22,7 +22,6 @@ from plotting import (
     COLORS,
     PALETTE,
     cm2inch,
-    get_color,
     label_panels,
     save_figure,
     setup_tpami_style,
@@ -33,7 +32,10 @@ from plotting import (
 SYNTHETIC_CONFIGS = [
     {"output_irreps": "1o", "name": r"$V = \ell=1$ (vector)"},
     {"output_irreps": "0e + 2e", "name": r"$V = \ell=0 \oplus \ell=2$"},
-    {"output_irreps": "0e + 1o + 2e", "name": r"$V = \ell=0 \oplus \ell=1 \oplus \ell=2$"},
+    {
+        "output_irreps": "0e + 1o + 2e",
+        "name": r"$V = \ell=0 \oplus \ell=1 \oplus \ell=2$",
+    },
 ]
 
 
@@ -92,7 +94,9 @@ def plot_metric_comparison(metrics_list: list[dict], save_path: str | Path) -> N
     fig, ax = plt.subplots(figsize=cm2inch(16, 9))
 
     ax.bar(x - 1.5 * width, rel_err, width, label="Cov. rel. error", color=PALETTE[0])
-    ax.bar(x - 0.5 * width, log_err, width, label="Log-Euclidean error", color=PALETTE[1])
+    ax.bar(
+        x - 0.5 * width, log_err, width, label="Log-Euclidean error", color=PALETTE[1]
+    )
     ax.bar(x + 0.5 * width, eig_err, width, label="Eigenvalue error", color=PALETTE[2])
     ax.bar(x + 1.5 * width, mu_err, width, label="Mean MAE", color=PALETTE[3])
 
@@ -138,8 +142,12 @@ def plot_coverage_calibration(metrics_list: list[dict], save_path: str | Path) -
     # Right: whitened residual covariance trace.
     white_trace = [m["whitened_cov_trace"] for m in metrics_list]
     bars = ax_white.bar(x, white_trace, color=PALETTE[0])
-    ax_white.axhline(1.0, color=COLORS["dark_gray"], linestyle="--", linewidth=1.0, label="Ideal")
-    ax_white.set_ylabel(r"$\mathrm{Tr}\,\mathbb{E}[\boldsymbol{\epsilon}\boldsymbol{\epsilon}^\top]$")
+    ax_white.axhline(
+        1.0, color=COLORS["dark_gray"], linestyle="--", linewidth=1.0, label="Ideal"
+    )
+    ax_white.set_ylabel(
+        r"$\mathrm{Tr}\,\mathbb{E}[\boldsymbol{\epsilon}\boldsymbol{\epsilon}^\top]$"
+    )
     ax_white.set_xticks(x)
     ax_white.set_xticklabels(names)
     ax_white.set_title("Whitened Residual Covariance Trace")
@@ -194,7 +202,9 @@ def main():
         elif args.run_missing:
             metrics = load_or_run(config, results_root)
         else:
-            print(f"Skipping {config['output_irreps']}: metrics not found at {metrics_path}")
+            print(
+                f"Skipping {config['output_irreps']}: metrics not found at {metrics_path}"
+            )
             continue
         metrics["_name"] = config["name"]
         metrics["_output_irreps"] = config["output_irreps"]
@@ -206,7 +216,9 @@ def main():
 
     output_dir.mkdir(parents=True, exist_ok=True)
     plot_metric_comparison(metrics_list, output_dir / "synthetic_metric_comparison")
-    plot_coverage_calibration(metrics_list, output_dir / "synthetic_coverage_calibration")
+    plot_coverage_calibration(
+        metrics_list, output_dir / "synthetic_coverage_calibration"
+    )
 
     print(f"Figures saved to {output_dir}")
 

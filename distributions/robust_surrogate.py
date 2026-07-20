@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Dict, Tuple
 import torch
 
-from distributions.base import StructuredDistributionLoss
+from distributions.base import StructuredDistributionLoss, diagnostic_components
 from spd_maps.base import SPDMap
 
 
@@ -36,27 +35,20 @@ class RobustSurrogateLoss(StructuredDistributionLoss):
         params: torch.Tensor,
         target: torch.Tensor,
         spd_map: SPDMap,
-    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         residual = target - mu
 
-        logdet = spd_map.logdet(params)
-        quad = spd_map.precision_action(params, residual)
+        logdet, quad = spd_map.statistics(params, residual)
 
         # Huber loss on the squared Mahalanobis distance.
-        threshold_tensor = torch.tensor(
-            self.huber_threshold, device=quad.device, dtype=quad.dtype
-        )
+        threshold_tensor = quad.new_tensor(self.huber_threshold)
         quadratic_part = torch.minimum(quad, threshold_tensor)
         linear_part = torch.clamp(quad - threshold_tensor, min=0.0)
         huber_quad = quadratic_part + threshold_tensor * linear_part.sqrt()
 
-        loss = self.log_det_weight * logdet + 0.5 * huber_quad
+        fit = 0.5 * huber_quad
+        uncertainty = self.log_det_weight * logdet
+        loss = uncertainty + fit
         loss = loss.mean()
-
-        components = {
-            "loss_fit": (0.5 * huber_quad).mean().detach(),
-            "loss_uncertainty": (self.log_det_weight * logdet).mean().detach(),
-            "mahalanobis2_mean": quad.mean().detach(),
-            "logdet_mean": logdet.mean().detach(),
-        }
+        components = diagnostic_components(fit, uncertainty, quad, logdet)
         return loss, components

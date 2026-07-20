@@ -29,9 +29,14 @@ def _make_graph_data(num_graphs=2, num_nodes=6):
     edge_length = edge_vec.norm(dim=-1)
     from e3nn import o3
     from e3nn.math import soft_one_hot_linspace
+
     irreps_sh = o3.Irreps.spherical_harmonics(2)
-    edge_sh = o3.spherical_harmonics(irreps_sh, edge_vec, normalize=True, normalization="component")
-    edge_rbf = soft_one_hot_linspace(edge_length, start=0.0, end=3.0, number=8, basis="gaussian", cutoff=False)
+    edge_sh = o3.spherical_harmonics(
+        irreps_sh, edge_vec, normalize=True, normalization="component"
+    )
+    edge_rbf = soft_one_hot_linspace(
+        edge_length, start=0.0, end=3.0, number=8, basis="gaussian", cutoff=False
+    )
     edge_weights = torch.ones(edge_length.shape)
     batch = torch.arange(num_graphs).repeat_interleave(num_nodes)
     return Data(
@@ -47,7 +52,9 @@ def _make_graph_data(num_graphs=2, num_nodes=6):
 @pytest.mark.parametrize("output_irreps", ["1o", "0e + 2e"])
 def test_deterministic_head_forward(output_irreps):
     output_spec = O3IrrepsSpec(output_irreps)
-    backbone = EquivariantBackbone(hidden_dim=16, lmax=2, num_layers=1, atom_feature_dim=49, num_basis=8)
+    backbone = EquivariantBackbone(
+        hidden_dim=16, lmax=2, num_layers=1, atom_feature_dim=49, num_basis=8
+    )
     head = DeterministicHead(backbone.irreps_out, output_spec, pool=True)
     data = _make_graph_data()
     node_features, batch = backbone(data)
@@ -58,7 +65,9 @@ def test_deterministic_head_forward(output_irreps):
 @pytest.mark.parametrize("output_irreps", ["1o", "0e + 2e"])
 def test_isotropic_head_and_map(output_irreps):
     output_spec = O3IrrepsSpec(output_irreps)
-    backbone = EquivariantBackbone(hidden_dim=16, lmax=2, num_layers=1, atom_feature_dim=49, num_basis=8)
+    backbone = EquivariantBackbone(
+        hidden_dim=16, lmax=2, num_layers=1, atom_feature_dim=49, num_basis=8
+    )
     head = IsotropicCovarianceHead(backbone.irreps_out, output_spec, pool=True)
     data = _make_graph_data()
     node_features, batch = backbone(data)
@@ -77,7 +86,9 @@ def test_isotropic_head_and_map(output_irreps):
 @pytest.mark.parametrize("output_irreps", ["1o", "0e + 2e"])
 def test_irrep_block_diag_head_and_map(output_irreps):
     output_spec = O3IrrepsSpec(output_irreps)
-    backbone = EquivariantBackbone(hidden_dim=16, lmax=2, num_layers=1, atom_feature_dim=49, num_basis=8)
+    backbone = EquivariantBackbone(
+        hidden_dim=16, lmax=2, num_layers=1, atom_feature_dim=49, num_basis=8
+    )
     head = IrrepBlockDiagonalCovarianceHead(backbone.irreps_out, output_spec, pool=True)
     data = _make_graph_data()
     node_features, batch = backbone(data)
@@ -95,7 +106,9 @@ def test_irrep_block_diag_head_and_map(output_irreps):
 
 def test_baseline_predictor_isotropic():
     output_spec = O3IrrepsSpec("0e + 2e")
-    backbone = EquivariantBackbone(hidden_dim=16, lmax=2, num_layers=1, atom_feature_dim=49, num_basis=8)
+    backbone = EquivariantBackbone(
+        hidden_dim=16, lmax=2, num_layers=1, atom_feature_dim=49, num_basis=8
+    )
     head = IsotropicCovarianceHead(backbone.irreps_out, output_spec, pool=True)
     spd_map = IsotropicMap(dim=output_spec.dim)
     model = BaselineProbabilisticPredictor(
@@ -112,3 +125,26 @@ def test_baseline_predictor_isotropic():
     assert "scale" in result
     assert "loss" in result
     result["loss"].backward()
+
+
+def test_deterministic_baseline_uses_unified_predictor_path():
+    output_spec = O3IrrepsSpec("0e + 2e")
+    backbone = EquivariantBackbone(
+        hidden_dim=8,
+        lmax=2,
+        num_layers=1,
+        atom_feature_dim=49,
+        num_basis=8,
+    )
+    model = BaselineProbabilisticPredictor(
+        backbone=backbone,
+        output_spec=output_spec,
+        baseline_head=DeterministicHead(backbone.irreps_out, output_spec),
+        spd_map=None,
+        distribution=None,
+    )
+    target = torch.randn(2, output_spec.dim)
+    result = model(_make_graph_data(), target=target)
+    assert set(result) == {"mu", "loss"}
+    assert model.baseline_head is model.joint_head
+    assert not any(key.startswith("baseline_head.") for key in model.state_dict())

@@ -12,6 +12,7 @@ from torch.utils.data import Dataset, Subset
 
 from compatibility.torch_geometric import Data, PyGDataLoader
 from data.point_cloud_graph import compute_edge_features, knn_graph
+from data.paths import dataset_dir
 from representations import EquivariantOutputGraph
 
 
@@ -292,7 +293,7 @@ def _itop_paths(data_dir: Path, view: str, split: str) -> tuple[Path, Path]:
 
 
 def get_itop_loaders(
-    data_dir: str | Path,
+    data_dir: str | Path | None = None,
     *,
     train_view: str = "side",
     test_view: str | None = None,
@@ -313,7 +314,7 @@ def get_itop_loaders(
     occlusion_fraction: float = 0.0,
 ) -> tuple[PyGDataLoader, PyGDataLoader, PyGDataLoader]:
     """Build standard or cross-view ITOP train/validation/test loaders."""
-    data_dir = Path(data_dir)
+    data_dir = dataset_dir(data_dir, "ITOP")
     test_view = test_view or train_view
     train_depth, train_labels = _itop_paths(data_dir, train_view, "train")
     test_depth, test_labels = _itop_paths(data_dir, test_view, "test")

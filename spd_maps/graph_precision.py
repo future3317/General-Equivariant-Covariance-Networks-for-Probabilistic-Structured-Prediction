@@ -26,6 +26,42 @@ class GraphStructuredPrecisionMap(SPDMap):
         super().__init__()
         self.graph = graph
         self.register_buffer("incidence", graph.incidence_matrix())
+        self.register_buffer(
+            "edge_sources",
+            torch.tensor([source for source, _ in graph.edges], dtype=torch.long),
+        )
+        self.register_buffer(
+            "edge_targets",
+            torch.tensor([target for _, target in graph.edges], dtype=torch.long),
+        )
+        self._tree_parent, self._tree_parent_edge, self._tree_postorder = (
+            self._build_tree_elimination_plan()
+        )
+
+    def _build_tree_elimination_plan(
+        self,
+    ) -> tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...]]:
+        """Precompute a rooted post-order plan for exact tree elimination."""
+        if not self.graph.is_tree:
+            return (), (), ()
+        adjacency: list[list[tuple[int, int]]] = [
+            [] for _ in range(self.graph.num_nodes)
+        ]
+        for edge_index, (source, target) in enumerate(self.graph.edges):
+            adjacency[source].append((target, edge_index))
+            adjacency[target].append((source, edge_index))
+
+        parent = [-1] * self.graph.num_nodes
+        parent_edge = [-1] * self.graph.num_nodes
+        order = [0]
+        for node in order:
+            for neighbor, edge_index in adjacency[node]:
+                if neighbor == parent[node]:
+                    continue
+                parent[neighbor] = node
+                parent_edge[neighbor] = edge_index
+                order.append(neighbor)
+        return tuple(parent), tuple(parent_edge), tuple(reversed(order[1:]))
 
     def _validate(self, params: torch.Tensor) -> None:
         expected = (
@@ -49,8 +85,12 @@ class GraphStructuredPrecisionMap(SPDMap):
             blocks[..., self.graph.num_nodes :, :, :],
         )
 
-    def precision(self, params: torch.Tensor) -> torch.Tensor:
-        unary, relational = self.local_precisions(params)
+    def _precision_from_blocks(
+        self,
+        params: torch.Tensor,
+        unary: torch.Tensor,
+        relational: torch.Tensor,
+    ) -> torch.Tensor:
         dimension = self.graph.output_dim
         precision = params.new_zeros((*params.shape[:-3], dimension, dimension))
 
@@ -72,6 +112,10 @@ class GraphStructuredPrecisionMap(SPDMap):
             precision[..., target_slice, source_slice] -= block
         return symmetrize(precision)
 
+    def precision(self, params: torch.Tensor) -> torch.Tensor:
+        unary, relational = self.local_precisions(params)
+        return self._precision_from_blocks(params, unary, relational)
+
     def forward(self, params: torch.Tensor) -> torch.Tensor:
         precision = self.precision(params)
         cholesky = torch.linalg.cholesky(precision)
@@ -79,18 +123,58 @@ class GraphStructuredPrecisionMap(SPDMap):
 
     def logdet(self, params: torch.Tensor) -> torch.Tensor:
         """Return ``log det Sigma = -log det Q``."""
-        cholesky = torch.linalg.cholesky(self.precision(params))
-        return -2.0 * torch.log(torch.diagonal(cholesky, dim1=-2, dim2=-1)).sum(-1)
-
-    def precision_action(
-        self, params: torch.Tensor, residual: torch.Tensor
-    ) -> torch.Tensor:
-        """Evaluate ``r^T Q r`` directly from local graph potentials."""
-        if residual.shape[-1] != self.graph.output_dim:
-            raise ValueError(
-                f"residual last dim {residual.shape[-1]} != {self.graph.output_dim}"
-            )
         unary, relational = self.local_precisions(params)
+        return self._logdet_from_blocks(params, unary, relational)
+
+    @staticmethod
+    def _cholesky_logdet(matrix: torch.Tensor) -> torch.Tensor:
+        cholesky = torch.linalg.cholesky(matrix)
+        return 2.0 * torch.log(torch.diagonal(cholesky, dim1=-2, dim2=-1)).sum(-1)
+
+    def _tree_logdet_precision(
+        self,
+        unary: torch.Tensor,
+        relational: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute ``log det Q`` by exact block Schur elimination on a tree."""
+        diagonal = [unary[..., node, :, :] for node in range(self.graph.num_nodes)]
+        for edge_index, (source, target) in enumerate(self.graph.edges):
+            edge_block = relational[..., edge_index, :, :]
+            diagonal[source] = diagonal[source] + edge_block
+            diagonal[target] = diagonal[target] + edge_block
+
+        logdet = unary.new_zeros(unary.shape[:-3])
+        for node in self._tree_postorder:
+            pivot = symmetrize(diagonal[node])
+            cholesky = torch.linalg.cholesky(pivot)
+            logdet = logdet + 2.0 * torch.log(
+                torch.diagonal(cholesky, dim1=-2, dim2=-1)
+            ).sum(-1)
+            edge_index = self._tree_parent_edge[node]
+            edge_block = relational[..., edge_index, :, :]
+            correction = edge_block @ torch.cholesky_solve(edge_block, cholesky)
+            parent = self._tree_parent[node]
+            diagonal[parent] = diagonal[parent] - correction
+
+        return logdet + self._cholesky_logdet(symmetrize(diagonal[0]))
+
+    def _logdet_from_blocks(
+        self,
+        params: torch.Tensor,
+        unary: torch.Tensor,
+        relational: torch.Tensor,
+    ) -> torch.Tensor:
+        if self.graph.is_tree:
+            return -self._tree_logdet_precision(unary, relational)
+        precision = self._precision_from_blocks(params, unary, relational)
+        return -self._cholesky_logdet(precision)
+
+    def _precision_action_from_blocks(
+        self,
+        unary: torch.Tensor,
+        relational: torch.Tensor,
+        residual: torch.Tensor,
+    ) -> torch.Tensor:
         node_residual = residual.reshape(
             *residual.shape[:-1], self.graph.num_nodes, self.graph.block_dim
         )
@@ -103,12 +187,9 @@ class GraphStructuredPrecisionMap(SPDMap):
 
         if self.graph.num_edges == 0:
             return unary_action
-        differences = torch.stack(
-            [
-                node_residual[..., target, :] - node_residual[..., source, :]
-                for source, target in self.graph.edges
-            ],
-            dim=-2,
+        differences = (
+            node_residual[..., self.edge_targets, :]
+            - node_residual[..., self.edge_sources, :]
         )
         relational_action = torch.einsum(
             "...ei,...eik,...ek->...",
@@ -117,6 +198,31 @@ class GraphStructuredPrecisionMap(SPDMap):
             differences,
         )
         return unary_action + relational_action
+
+    def precision_action(
+        self, params: torch.Tensor, residual: torch.Tensor
+    ) -> torch.Tensor:
+        """Evaluate ``r^T Q r`` directly from local graph potentials."""
+        if residual.shape[-1] != self.graph.output_dim:
+            raise ValueError(
+                f"residual last dim {residual.shape[-1]} != {self.graph.output_dim}"
+            )
+        unary, relational = self.local_precisions(params)
+        return self._precision_action_from_blocks(unary, relational, residual)
+
+    def statistics(
+        self, params: torch.Tensor, residual: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Reuse one set of local matrix exponentials for both NLL statistics."""
+        if residual.shape[-1] != self.graph.output_dim:
+            raise ValueError(
+                f"residual last dim {residual.shape[-1]} != {self.graph.output_dim}"
+            )
+        unary, relational = self.local_precisions(params)
+        return (
+            self._logdet_from_blocks(params, unary, relational),
+            self._precision_action_from_blocks(unary, relational, residual),
+        )
 
     def sample(
         self,

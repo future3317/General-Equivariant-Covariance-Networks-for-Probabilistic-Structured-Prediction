@@ -23,11 +23,20 @@ class SquarePlusIdentityMap(SPDMap):
         return A @ A + self.eps * eye
 
     def logdet(self, A: torch.Tensor) -> torch.Tensor:
-        S = self.forward(A)
-        return torch.logdet(S)
+        cholesky = torch.linalg.cholesky(self.forward(A))
+        return 2.0 * torch.log(torch.diagonal(cholesky, dim1=-2, dim2=-1)).sum(-1)
 
     def precision_action(self, A: torch.Tensor, residual: torch.Tensor) -> torch.Tensor:
-        S = self.forward(A)
-        # Solve S x = r for each sample.
-        x = torch.linalg.solve(S, residual.unsqueeze(-1))
+        cholesky = torch.linalg.cholesky(self.forward(A))
+        x = torch.cholesky_solve(residual.unsqueeze(-1), cholesky)
         return torch.sum(residual * x.squeeze(-1), dim=-1)
+
+    def statistics(
+        self, A: torch.Tensor, residual: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Reuse one scale construction and Cholesky factorization."""
+        cholesky = torch.linalg.cholesky(self.forward(A))
+        logdet = 2.0 * torch.log(torch.diagonal(cholesky, dim1=-2, dim2=-1)).sum(-1)
+        solved = torch.cholesky_solve(residual.unsqueeze(-1), cholesky)
+        quadratic = torch.sum(residual * solved.squeeze(-1), dim=-1)
+        return logdet, quadratic

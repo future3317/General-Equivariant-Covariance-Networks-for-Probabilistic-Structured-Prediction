@@ -57,9 +57,13 @@ def test_synthetic_model_forward_backward(output_irreps):
     """The full predictor can be built and trained for one step."""
     output_spec = O3IrrepsSpec(output_irreps)
     input_irreps = o3.Irreps("16x0e + 8x1o + 4x2e")
-    backbone = SyntheticBackbone(input_irreps=input_irreps, hidden_irreps="16x0e + 8x1o + 4x2e")
+    backbone = SyntheticBackbone(
+        input_irreps=input_irreps, hidden_irreps="16x0e + 8x1o + 4x2e"
+    )
     mean_head = EquivariantMeanHead(backbone.irreps_out, output_spec.irreps, pool=True)
-    cov_head = O3QuadraticSymmetricOperatorHead(backbone.irreps_out, output_spec, pool=True)
+    cov_head = O3QuadraticSymmetricOperatorHead(
+        backbone.irreps_out, output_spec, pool=True
+    )
 
     model = StructuredProbabilisticPredictor(
         backbone=backbone,
@@ -107,10 +111,13 @@ def test_evaluate_metrics_finite(output_irreps):
 def test_synthetic_teacher_equivariance():
     """Teacher's A and S must transform equivariantly under O(3)."""
     output_spec = O3IrrepsSpec("0e + 2e")
-    teacher = EquivariantTeacher(DEFAULT_INPUT_IRREPS, output_spec)
+    teacher = EquivariantTeacher(DEFAULT_INPUT_IRREPS, output_spec).double()
 
-    x = teacher.input_irreps.randn(16, -1)
-    R = torch.tensor([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
+    x = teacher.input_irreps.randn(16, -1, dtype=torch.float64)
+    R = torch.tensor(
+        [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]],
+        dtype=torch.float64,
+    )
 
     rho_in = teacher.input_irreps.D_from_matrix(R)
     x_rot = (rho_in @ x.unsqueeze(-1)).squeeze(-1)
@@ -166,9 +173,13 @@ def test_synthetic_student_4e_gradient():
     """Student's 4e branch must receive nonzero finite gradients."""
     output_spec = O3IrrepsSpec("0e + 2e")
     input_irreps = o3.Irreps("16x0e + 8x1o + 4x2e")
-    backbone = SyntheticBackbone(input_irreps=input_irreps, hidden_irreps="32x0e + 16x1o + 16x2e")
+    backbone = SyntheticBackbone(
+        input_irreps=input_irreps, hidden_irreps="32x0e + 16x1o + 16x2e"
+    )
     mean_head = EquivariantMeanHead(backbone.irreps_out, output_spec.irreps, pool=True)
-    cov_head = O3QuadraticSymmetricOperatorHead(backbone.irreps_out, output_spec, pool=True)
+    cov_head = O3QuadraticSymmetricOperatorHead(
+        backbone.irreps_out, output_spec, pool=True
+    )
     model = StructuredProbabilisticPredictor(
         backbone=backbone,
         output_spec=output_spec,
@@ -205,9 +216,15 @@ def test_synthetic_rank2_full_operator_recovery():
     teacher = EquivariantTeacher(input_irreps, output_spec)
 
     def _build_model():
-        backbone = SyntheticBackbone(input_irreps=input_irreps, hidden_irreps="32x0e + 16x1o + 16x2e")
-        mean_head = EquivariantMeanHead(backbone.irreps_out, output_spec.irreps, pool=True)
-        cov_head = O3QuadraticSymmetricOperatorHead(backbone.irreps_out, output_spec, pool=True)
+        backbone = SyntheticBackbone(
+            input_irreps=input_irreps, hidden_irreps="32x0e + 16x1o + 16x2e"
+        )
+        mean_head = EquivariantMeanHead(
+            backbone.irreps_out, output_spec.irreps, pool=True
+        )
+        cov_head = O3QuadraticSymmetricOperatorHead(
+            backbone.irreps_out, output_spec, pool=True
+        )
         return StructuredProbabilisticPredictor(
             backbone=backbone,
             output_spec=output_spec,

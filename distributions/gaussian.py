@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import math
-from typing import Dict, Tuple
 import torch
 
-from distributions.base import StructuredDistributionLoss
+from distributions.base import StructuredDistributionLoss, diagnostic_components
 from spd_maps.base import SPDMap
 
 
@@ -32,20 +31,15 @@ class GaussianNLL(StructuredDistributionLoss):
         params: torch.Tensor,
         target: torch.Tensor,
         spd_map: SPDMap,
-    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         residual = target - mu
         d = residual.shape[-1]
 
-        logdet = spd_map.logdet(params)
-        quad = spd_map.precision_action(params, residual)
+        logdet, quad = spd_map.statistics(params, residual)
 
-        loss = 0.5 * d * math.log(2.0 * math.pi) + 0.5 * logdet + 0.5 * quad
+        fit = 0.5 * quad
+        uncertainty = 0.5 * logdet
+        loss = 0.5 * d * math.log(2.0 * math.pi) + uncertainty + fit
         loss = loss.mean()
-
-        components = {
-            "loss_fit": (0.5 * quad).mean().detach(),
-            "loss_uncertainty": (0.5 * logdet).mean().detach(),
-            "mahalanobis2_mean": quad.mean().detach(),
-            "logdet_mean": logdet.mean().detach(),
-        }
+        components = diagnostic_components(fit, uncertainty, quad, logdet)
         return loss, components

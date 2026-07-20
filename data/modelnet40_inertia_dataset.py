@@ -19,8 +19,9 @@ therefore preserves the equivariance of the learning problem.
 
 from __future__ import annotations
 
-import os
 import pickle
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 import joblib
@@ -31,6 +32,7 @@ from compatibility.torch_geometric import Data, PyGDataLoader
 
 from data.tensor_conversions import voigt_to_irreps
 from data.point_cloud_graph import compute_edge_features, knn_graph
+from data.paths import dataset_dir
 
 # Backward-compatible names for existing experiment utilities and tests. The
 # implementations live in one shared module and are not duplicated here.
@@ -38,7 +40,22 @@ _knn_graph = knn_graph
 _compute_edge_features = compute_edge_features
 
 
-DEFAULT_CACHE_PATH = "data/modelnet40/cache/modelnet40_inertia_dataset.pkl"
+MODELNET40_CACHE_RELATIVE_PATH = Path("cache/modelnet40_inertia_dataset_clean.pkl")
+
+
+def default_modelnet40_cache_path() -> Path:
+    """Return the ModelNet40 cache below the configured dataset root."""
+    return dataset_dir(None, "modelnet40") / MODELNET40_CACHE_RELATIVE_PATH
+
+
+def default_modelnet40_graph_cache_path(
+    cache_path: str | Path,
+    num_points: int,
+    num_neighbors: int,
+) -> Path:
+    """Return the parameter-bound cache path for fixed k-NN neighbors."""
+    source = Path(cache_path).expanduser()
+    return source.with_name(f"{source.stem}.knn_n{num_points}_k{num_neighbors}.pt")
 
 
 def _shape_covariance_voigt(points: np.ndarray) -> np.ndarray:
@@ -49,10 +66,17 @@ def _shape_covariance_voigt(points: np.ndarray) -> np.ndarray:
     centered = points - points.mean(axis=0)
     S = (centered.T @ centered) / len(points)
     S = 0.5 * (S + S.T)
-    return np.array([
-        S[0, 0], S[1, 1], S[2, 2],
-        S[1, 2], S[0, 2], S[0, 1],
-    ], dtype=np.float32)
+    return np.array(
+        [
+            S[0, 0],
+            S[1, 1],
+            S[2, 2],
+            S[1, 2],
+            S[0, 2],
+            S[0, 1],
+        ],
+        dtype=np.float32,
+    )
 
 
 def _scalar_normalize_voigt(
@@ -77,9 +101,12 @@ def _scalar_normalize_voigt(
 
 def _point_cloud_to_data(
     points: np.ndarray,
-    target_voigt: np.ndarray,
+    target_irreps: torch.Tensor,
     label: int,
-    stats: dict[str, np.ndarray],
+    target_mean: torch.Tensor,
+    target_std: torch.Tensor,
+    neighbors: torch.Tensor | None,
+    edge_source: torch.Tensor | None,
     num_points: int,
     num_neighbors: int,
     max_radius: float,
@@ -90,19 +117,20 @@ def _point_cloud_to_data(
     points = points[:num_points]
     pos = torch.from_numpy(points).float()
 
-    # k-NN graph. Equivariant: rotating the cloud rotates edge_vec.
-    edge_index = knn_graph(pos, k=num_neighbors)
+    # k-NN graph. Neighbor identities are invariant to orthogonal transforms and
+    # can therefore be cached without changing the equivariant computation.
+    if neighbors is None:
+        edge_index = knn_graph(pos, k=num_neighbors)
+    else:
+        if edge_source is None:
+            raise ValueError("edge_source is required with cached neighbors")
+        edge_target = neighbors.reshape(-1).to(dtype=torch.long)
+        edge_index = torch.stack((edge_source, edge_target), dim=0)
 
-    edge_features = compute_edge_features(
-        pos, edge_index, max_radius, num_basis, lmax
-    )
+    edge_features = compute_edge_features(pos, edge_index, max_radius, num_basis, lmax)
 
     # Constant atomic type for all points -> single learnable embedding vector.
     z = torch.zeros(pos.shape[0], dtype=torch.long)
-
-    # Scalar-normalize target in Voigt space, then convert to 0e+2e irrep coefficients.
-    target_voigt_norm, mean, std = _scalar_normalize_voigt(target_voigt, stats)
-    y_irreps = voigt_to_irreps(target_voigt_norm).unsqueeze(0)
 
     data = Data(
         pos=pos,
@@ -111,9 +139,11 @@ def _point_cloud_to_data(
         edge_sh=edge_features["edge_sh"],
         edge_rbf=edge_features["edge_rbf"],
         edge_weights=edge_features["edge_weights"],
-        y_irreps=y_irreps,
-        y_voigt_mean=mean,
-        y_voigt_std=std,
+        y_irreps=target_irreps.unsqueeze(0),
+        # Keep a leading graph dimension so PyG batches these as [B, 6]
+        # instead of flattening them to [B * 6].
+        y_voigt_mean=target_mean.unsqueeze(0),
+        y_voigt_std=target_std.unsqueeze(0),
         label=torch.tensor(label, dtype=torch.long),
         num_neighbors=num_neighbors,
     )
@@ -139,7 +169,7 @@ class ModelNet40InertiaDataset(Dataset):
 
     def __init__(
         self,
-        cache_path: str = DEFAULT_CACHE_PATH,
+        cache_path: str | Path | None = None,
         split: str = "train",
         target_type: str = "inertia",
         num_points: int = 1024,
@@ -147,6 +177,7 @@ class ModelNet40InertiaDataset(Dataset):
         max_radius: float = 2.0,
         num_basis: int = 8,
         lmax: int = 2,
+        graph_cache_path: str | Path | None = None,
     ):
         if split not in {"train", "test"}:
             raise ValueError(f"split must be 'train' or 'test', got {split}")
@@ -155,6 +186,11 @@ class ModelNet40InertiaDataset(Dataset):
                 f"target_type must be 'inertia' or 'shape_covariance', got {target_type}"
             )
 
+        cache_path = (
+            Path(cache_path).expanduser()
+            if cache_path is not None
+            else default_modelnet40_cache_path()
+        )
         self.cache_path = cache_path
         self.split = split
         self.target_type = target_type
@@ -164,7 +200,7 @@ class ModelNet40InertiaDataset(Dataset):
         self.num_basis = num_basis
         self.lmax = lmax
 
-        if not os.path.exists(cache_path):
+        if not cache_path.is_file():
             raise FileNotFoundError(f"ModelNet40 cache not found: {cache_path}")
 
         self._data = self._load_cache(cache_path)
@@ -189,7 +225,10 @@ class ModelNet40InertiaDataset(Dataset):
             else:
                 # Reuse training statistics.
                 train_targets = np.stack(
-                    [_shape_covariance_voigt(p[:num_points]) for p in self._data["train"]["points"]],
+                    [
+                        _shape_covariance_voigt(p[:num_points])
+                        for p in self._data["train"]["points"]
+                    ],
                     axis=0,
                 )
                 self.stats = {
@@ -200,13 +239,82 @@ class ModelNet40InertiaDataset(Dataset):
         # Guard against zero std.
         self.stats["std"] = np.maximum(self.stats["std"], 1e-8)
 
+        # The target transform is fixed and independent of graph augmentation.
+        # CartesianTensor.from_cartesian has substantial per-call overhead for a
+        # six-component target, so apply the exact same linear transform once to
+        # the whole split rather than once per sample on every epoch.
+        targets_voigt_norm, target_mean, target_std = _scalar_normalize_voigt(
+            np.asarray(self.targets_voigt), self.stats
+        )
+        self.targets_irreps = voigt_to_irreps(targets_voigt_norm).contiguous()
+        self.target_mean = target_mean
+        self.target_std = target_std
+
+        default_graph_cache = default_modelnet40_graph_cache_path(
+            cache_path, num_points, num_neighbors
+        )
+        requested_graph_cache = (
+            Path(graph_cache_path).expanduser()
+            if graph_cache_path is not None
+            else default_graph_cache
+        )
+        if requested_graph_cache.is_file():
+            graph_cache = self._load_graph_cache(requested_graph_cache)
+            self.neighbors = self._validate_graph_cache(graph_cache)
+            self.graph_cache_path: Path | None = requested_graph_cache
+            self.edge_source = torch.arange(
+                num_points, dtype=torch.long
+            ).repeat_interleave(num_neighbors)
+        elif graph_cache_path is not None:
+            raise FileNotFoundError(
+                f"precomputed graph cache not found: {requested_graph_cache}"
+            )
+        else:
+            self.neighbors = None
+            self.graph_cache_path = None
+            self.edge_source = None
+
     @staticmethod
-    def _load_cache(cache_path: str) -> dict[str, Any]:
+    @lru_cache(maxsize=2)
+    def _load_cache(cache_path: str | Path) -> dict[str, Any]:
         try:
             return joblib.load(cache_path)
         except Exception:
             with open(cache_path, "rb") as f:
                 return pickle.load(f)
+
+    @staticmethod
+    @lru_cache(maxsize=2)
+    def _load_graph_cache(graph_cache_path: str | Path) -> dict[str, Any]:
+        return torch.load(graph_cache_path, map_location="cpu", weights_only=True)
+
+    def _validate_graph_cache(self, graph_cache: dict[str, Any]) -> torch.Tensor:
+        if graph_cache.get("format_version") != 1:
+            raise ValueError("unsupported ModelNet40 graph-cache format")
+        if graph_cache.get("num_points") != self.num_points:
+            raise ValueError("graph cache num_points does not match the dataset")
+        if graph_cache.get("num_neighbors") != self.num_neighbors:
+            raise ValueError("graph cache num_neighbors does not match the dataset")
+        if graph_cache.get("source_name") != self.cache_path.name:
+            raise ValueError("graph cache was built from a different source cache")
+        if graph_cache.get("source_size") != self.cache_path.stat().st_size:
+            raise ValueError("graph cache source size does not match the dataset cache")
+        splits = graph_cache.get("splits")
+        if not isinstance(splits, dict) or self.split not in splits:
+            raise ValueError(f"graph cache is missing split {self.split!r}")
+        neighbors = splits[self.split]
+        expected_shape = (len(self.points), self.num_points, self.num_neighbors)
+        if not isinstance(neighbors, torch.Tensor):
+            raise TypeError("graph-cache neighbors must be a torch.Tensor")
+        if neighbors.dtype != torch.uint16:
+            raise TypeError("graph-cache neighbors must use torch.uint16")
+        if tuple(neighbors.shape) != expected_shape:
+            raise ValueError(
+                f"graph-cache shape {tuple(neighbors.shape)} != {expected_shape}"
+            )
+        if int(neighbors.numpy().max()) >= self.num_points:
+            raise ValueError("graph-cache neighbor index is out of range")
+        return neighbors
 
     def __len__(self) -> int:
         return len(self.points)
@@ -214,9 +322,12 @@ class ModelNet40InertiaDataset(Dataset):
     def __getitem__(self, idx: int) -> Data:
         return _point_cloud_to_data(
             self.points[idx],
-            self.targets_voigt[idx],
+            self.targets_irreps[idx],
             int(self.labels[idx]),
-            self.stats,
+            self.target_mean,
+            self.target_std,
+            None if self.neighbors is None else self.neighbors[idx],
+            self.edge_source,
             self.num_points,
             self.num_neighbors,
             self.max_radius,
@@ -226,7 +337,7 @@ class ModelNet40InertiaDataset(Dataset):
 
 
 def get_modelnet40_inertia_loaders(
-    cache_path: str = DEFAULT_CACHE_PATH,
+    cache_path: str | Path | None = None,
     target_type: str = "inertia",
     batch_size: int = 16,
     num_points: int = 1024,
@@ -234,6 +345,7 @@ def get_modelnet40_inertia_loaders(
     max_radius: float = 2.0,
     num_basis: int = 8,
     lmax: int = 2,
+    graph_cache_path: str | Path | None = None,
     num_workers: int = 0,
     persistent_workers: bool = False,
     pin_memory: bool = False,
@@ -255,6 +367,7 @@ def get_modelnet40_inertia_loaders(
         max_radius=max_radius,
         num_basis=num_basis,
         lmax=lmax,
+        graph_cache_path=graph_cache_path,
     )
     test_dataset = ModelNet40InertiaDataset(
         cache_path=cache_path,
@@ -265,6 +378,7 @@ def get_modelnet40_inertia_loaders(
         max_radius=max_radius,
         num_basis=num_basis,
         lmax=lmax,
+        graph_cache_path=graph_cache_path,
     )
 
     n_val = int(len(full_train) * val_frac)
@@ -284,13 +398,25 @@ def get_modelnet40_inertia_loaders(
         loader_kwargs["prefetch_factor"] = prefetch_factor
 
     train_loader = PyGDataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True, drop_last=True, **loader_kwargs
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        drop_last=True,
+        **loader_kwargs,
     )
     val_loader = PyGDataLoader(
-        val_dataset, batch_size=batch_size, shuffle=False, drop_last=False, **loader_kwargs
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        drop_last=False,
+        **loader_kwargs,
     )
     test_loader = PyGDataLoader(
-        test_dataset, batch_size=batch_size, shuffle=False, drop_last=False, **loader_kwargs
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        drop_last=False,
+        **loader_kwargs,
     )
 
     return train_loader, val_loader, test_loader

@@ -1,6 +1,7 @@
 """Model components: backbones, heads, and structured predictors."""
 
 from models.backbone import EquivariantBackbone
+from models.pooling import GraphOutputHead
 from models.mean_head import EquivariantMeanHead
 from models.covariance_head import (
     O3EquivariantSymmetricOperatorHead,
@@ -17,6 +18,7 @@ from models.baseline_predictor import BaselineProbabilisticPredictor
 
 __all__ = [
     "EquivariantBackbone",
+    "GraphOutputHead",
     "EquivariantMeanHead",
     "O3EquivariantSymmetricOperatorHead",
     "O3QuadraticSymmetricOperatorHead",

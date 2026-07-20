@@ -14,7 +14,6 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from scipy.stats import chi2
 from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -23,7 +22,7 @@ from data.dielectric_dataset import get_dielectric_irreps_loaders
 from data.tensor_conversions import irreps_to_km
 from distributions import GaussianNLL
 from evaluation.calibration import calibration_error, qq_data
-from evaluation.metrics import empirical_coverage, mahalanobis_distance_squared
+from evaluation.metrics import empirical_coverage
 from models import (
     EquivariantBackbone,
     EquivariantMeanHead,
@@ -56,7 +55,9 @@ def load_model(checkpoint_dir: Path, device: str):
         num_basis=args.num_basis,
     )
     mean_head = EquivariantMeanHead(backbone.irreps_out, output_spec.irreps, pool=True)
-    cov_head = O3EquivariantSymmetricOperatorHead(backbone.irreps_out, output_spec, pool=True)
+    cov_head = O3EquivariantSymmetricOperatorHead(
+        backbone.irreps_out, output_spec, pool=True
+    )
 
     model = StructuredProbabilisticPredictor(
         backbone=backbone,
@@ -165,7 +166,9 @@ def plot_parity(pred_km: np.ndarray, target_km: np.ndarray, save_path: Path) -> 
     plt.close(fig)
 
 
-def plot_calibration(mu: torch.Tensor, y: torch.Tensor, scale: torch.Tensor, save_path: Path) -> None:
+def plot_calibration(
+    mu: torch.Tensor, y: torch.Tensor, scale: torch.Tensor, save_path: Path
+) -> None:
     """Coverage calibration and Q-Q plot for Mahalanobis distances."""
     setup_tpami_style()
 
@@ -175,10 +178,25 @@ def plot_calibration(mu: torch.Tensor, y: torch.Tensor, scale: torch.Tensor, sav
     # Left: confidence level vs empirical coverage.
     levels = np.linspace(0.1, 0.95, 10)
     coverages = empirical_coverage(mu, y, scale, levels=levels.tolist())
-    observed = [coverages[f"coverage_{int(l * 100):02d}"] for l in levels]
+    observed = [coverages[f"coverage_{int(level * 100):02d}"] for level in levels]
 
-    ax_cov.plot(levels, levels, "--", color=COLORS["dark_gray"], linewidth=1.2, label="Perfect calibration")
-    ax_cov.plot(levels, observed, "o-", color=PALETTE[0], linewidth=2.0, markersize=5, label="Model")
+    ax_cov.plot(
+        levels,
+        levels,
+        "--",
+        color=COLORS["dark_gray"],
+        linewidth=1.2,
+        label="Perfect calibration",
+    )
+    ax_cov.plot(
+        levels,
+        observed,
+        "o-",
+        color=PALETTE[0],
+        linewidth=2.0,
+        markersize=5,
+        label="Model",
+    )
     ax_cov.fill_between(levels, levels, observed, alpha=0.15, color=PALETTE[0])
     ax_cov.set_xlabel("Confidence level")
     ax_cov.set_ylabel("Empirical coverage")
@@ -189,9 +207,24 @@ def plot_calibration(mu: torch.Tensor, y: torch.Tensor, scale: torch.Tensor, sav
 
     # Right: Q-Q plot.
     theoretical, empirical = qq_data(mu, y, scale, num_quantiles=100)
-    ax_qq.plot(theoretical, empirical, "o", color=PALETTE[0], markersize=4, alpha=0.7, label="Empirical")
+    ax_qq.plot(
+        theoretical,
+        empirical,
+        "o",
+        color=PALETTE[0],
+        markersize=4,
+        alpha=0.7,
+        label="Empirical",
+    )
     max_val = max(theoretical.max(), empirical.max())
-    ax_qq.plot([0, max_val], [0, max_val], "--", color=COLORS["dark_gray"], linewidth=1.2, label="Reference")
+    ax_qq.plot(
+        [0, max_val],
+        [0, max_val],
+        "--",
+        color=COLORS["dark_gray"],
+        linewidth=1.2,
+        label="Reference",
+    )
     ax_qq.set_xlabel(r"Theoretical $\chi^2$ quantile")
     ax_qq.set_ylabel(r"Empirical Mahalanobis$^2$ quantile")
     ax_qq.set_title("Q-Q Calibration")
@@ -203,7 +236,9 @@ def plot_calibration(mu: torch.Tensor, y: torch.Tensor, scale: torch.Tensor, sav
     plt.close(fig)
 
 
-def plot_risk_coverage(mu: torch.Tensor, y: torch.Tensor, scale: torch.Tensor, save_path: Path) -> None:
+def plot_risk_coverage(
+    mu: torch.Tensor, y: torch.Tensor, scale: torch.Tensor, save_path: Path
+) -> None:
     """Risk-coverage curve: coverage vs MAE when retaining most confident fraction."""
     setup_tpami_style()
 
@@ -221,7 +256,13 @@ def plot_risk_coverage(mu: torch.Tensor, y: torch.Tensor, scale: torch.Tensor, s
 
     fig, ax = plt.subplots(figsize=cm2inch(10, 7))
     ax.plot(fractions * 100, risks, "-", color=PALETTE[0], linewidth=2.5)
-    ax.axhline(risks[-1], color=COLORS["dark_gray"], linestyle="--", linewidth=1.2, label="Full-set MAE")
+    ax.axhline(
+        risks[-1],
+        color=COLORS["dark_gray"],
+        linestyle="--",
+        linewidth=1.2,
+        label="Full-set MAE",
+    )
     ax.set_xlabel("Coverage (%)")
     ax.set_ylabel("MAE")
     ax.set_title("Risk-Coverage Curve")
@@ -235,9 +276,17 @@ def plot_risk_coverage(mu: torch.Tensor, y: torch.Tensor, scale: torch.Tensor, s
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--checkpoint_dir", default="checkpoints_dielectric", help="Directory with trained model.")
-    parser.add_argument("--output_dir", default="figures/dielectric", help="Where figures are saved.")
-    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument(
+        "--checkpoint_dir",
+        default="checkpoints_dielectric",
+        help="Directory with trained model.",
+    )
+    parser.add_argument(
+        "--output_dir", default="figures/dielectric", help="Where figures are saved."
+    )
+    parser.add_argument(
+        "--device", default="cuda" if torch.cuda.is_available() else "cpu"
+    )
     args = parser.parse_args()
 
     checkpoint_dir = Path(args.checkpoint_dir)
@@ -245,7 +294,9 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if not (checkpoint_dir / "args.json").exists():
-        raise FileNotFoundError(f"args.json not found in {checkpoint_dir}. Run train_dielectric.py first.")
+        raise FileNotFoundError(
+            f"args.json not found in {checkpoint_dir}. Run train_dielectric.py first."
+        )
     if not (checkpoint_dir / "best_model.pt").exists():
         raise FileNotFoundError(f"best_model.pt not found in {checkpoint_dir}.")
 
@@ -265,12 +316,26 @@ def main():
 
     plot_training_curves(history, output_dir / "dielectric_training_curves")
     plot_parity(pred_km, target_km, output_dir / "dielectric_parity")
-    plot_calibration(preds["mu_irreps"], preds["y_irreps"], preds["scale_irreps"], output_dir / "dielectric_calibration")
-    plot_risk_coverage(preds["mu_irreps"], preds["y_irreps"], preds["scale_irreps"], output_dir / "dielectric_risk_coverage")
+    plot_calibration(
+        preds["mu_irreps"],
+        preds["y_irreps"],
+        preds["scale_irreps"],
+        output_dir / "dielectric_calibration",
+    )
+    plot_risk_coverage(
+        preds["mu_irreps"],
+        preds["y_irreps"],
+        preds["scale_irreps"],
+        output_dir / "dielectric_risk_coverage",
+    )
 
     # Print test calibration metrics.
-    cal_err = calibration_error(preds["mu_irreps"], preds["y_irreps"], preds["scale_irreps"])
-    coverage = empirical_coverage(preds["mu_irreps"], preds["y_irreps"], preds["scale_irreps"])
+    cal_err = calibration_error(
+        preds["mu_irreps"], preds["y_irreps"], preds["scale_irreps"]
+    )
+    coverage = empirical_coverage(
+        preds["mu_irreps"], preds["y_irreps"], preds["scale_irreps"]
+    )
     print(f"ECE: {cal_err['ece']:.4f}, ACE: {cal_err['ace']:.4f}")
     print(f"Coverage: {coverage}")
     print(f"Figures saved to {output_dir}")
