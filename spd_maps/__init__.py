@@ -8,6 +8,8 @@ from spd_maps.precision_exp import PrecisionExponentialMap
 from spd_maps.low_rank import LowRankPlusIsotropicMap
 from spd_maps.isotropic import IsotropicMap
 from spd_maps.irrep_block_diag import IrrepBlockDiagonalMap
+from spd_maps.isotypic_block import IsotypicBlockMap
+from spd_maps.graph_precision import GraphStructuredPrecisionMap
 
 __all__ = [
     "SPDMap",
@@ -18,4 +20,6 @@ __all__ = [
     "LowRankPlusIsotropicMap",
     "IsotropicMap",
     "IrrepBlockDiagonalMap",
+    "IsotypicBlockMap",
+    "GraphStructuredPrecisionMap",
 ]

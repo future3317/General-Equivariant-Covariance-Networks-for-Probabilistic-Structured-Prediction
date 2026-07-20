@@ -1,4 +1,4 @@
-"""Generate TNNLS figures for the synthetic covariance-recovery benchmark.
+"""Generate TPAMI figures for the synthetic covariance-recovery benchmark.
 
 This script loads metrics produced by ``experiments/synthetic_covariance_recovery.py``
 (or runs the experiment if a configuration is missing) and creates publication-ready
@@ -25,7 +25,7 @@ from plotting import (
     get_color,
     label_panels,
     save_figure,
-    setup_tnnls_style,
+    setup_tpami_style,
 )
 
 
@@ -78,7 +78,7 @@ def load_or_run(config: dict, results_root: Path) -> dict:
 
 def plot_metric_comparison(metrics_list: list[dict], save_path: str | Path) -> None:
     """Bar chart comparing final metrics across output representations."""
-    setup_tnnls_style()
+    setup_tpami_style()
 
     names = [m["_name"] for m in metrics_list]
     x = np.arange(len(names))
@@ -110,7 +110,7 @@ def plot_metric_comparison(metrics_list: list[dict], save_path: str | Path) -> N
 
 def plot_coverage_calibration(metrics_list: list[dict], save_path: str | Path) -> None:
     """Coverage comparison and whitened residual covariance across configs."""
-    setup_tnnls_style()
+    setup_tpami_style()
 
     fig, axes = plt.subplots(1, 2, figsize=cm2inch(16, 6))
     ax_cov, ax_white = axes

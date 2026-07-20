@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import torch
-from e3nn import o3
+from compatibility.e3nn import o3
 from torch.utils.data import Dataset
-from torch_geometric.loader import DataLoader as PyGDataLoader
+from compatibility.torch_geometric import PyGDataLoader
 
 from dielectric_data_loader import DielectricDataset
 from data.tensor_conversions import km_to_irreps

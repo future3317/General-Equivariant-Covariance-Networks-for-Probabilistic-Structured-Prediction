@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import torch
-from e3nn import o3
+from compatibility.e3nn import CartesianTensor, o3
 
 from representations.base import OrthogonalRepresentationSpec
 from representations.symmetric_square import O3SymmetricOperatorBasis
@@ -20,10 +20,30 @@ class O3IrrepsSpec(OrthogonalRepresentationSpec):
     groups, but only ``O3IrrepsSpec`` is fully supported in this release.
     """
 
-    def __init__(self, irreps: o3.Irreps):
+    def __init__(
+        self,
+        irreps: o3.Irreps,
+        *,
+        cartesian_formula: str | None = None,
+    ):
         self.irreps = o3.Irreps(irreps)
+        self.cartesian_formula = cartesian_formula
+        self._cartesian = (
+            CartesianTensor(cartesian_formula) if cartesian_formula is not None else None
+        )
+        if self._cartesian is not None and o3.Irreps(self._cartesian) != self.irreps:
+            raise ValueError(
+                f"irreps {self.irreps} do not match Cartesian symmetry "
+                f"'{cartesian_formula}' ({o3.Irreps(self._cartesian)})"
+            )
         self._dim = self.irreps.dim
         self._symmetric_square = O3SymmetricOperatorBasis(self.irreps)
+
+    @classmethod
+    def from_cartesian(cls, formula: str) -> "O3IrrepsSpec":
+        """Compile a Cartesian permutation-symmetry formula to O(3) irreps."""
+        cartesian = CartesianTensor(formula)
+        return cls(o3.Irreps(cartesian), cartesian_formula=formula)
 
     @property
     def dim(self) -> int:
@@ -48,3 +68,15 @@ class O3IrrepsSpec(OrthogonalRepresentationSpec):
     def symmetric_square(self) -> O3SymmetricOperatorBasis:
         """Return the symmetric-square basis for this representation."""
         return self._symmetric_square
+
+    def from_cartesian_tensor(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Convert a Cartesian tensor to the compiled irrep coordinates."""
+        if self._cartesian is None:
+            raise ValueError("this output specification has no Cartesian formula")
+        return self._cartesian.from_cartesian(tensor)
+
+    def to_cartesian_tensor(self, coefficients: torch.Tensor) -> torch.Tensor:
+        """Convert compiled irrep coordinates back to a Cartesian tensor."""
+        if self._cartesian is None:
+            raise ValueError("this output specification has no Cartesian formula")
+        return self._cartesian.to_cartesian(coefficients)

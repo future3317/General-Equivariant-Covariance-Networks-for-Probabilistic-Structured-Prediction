@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import itertools
 import torch
-from e3nn import o3
-from e3nn.io import CartesianTensor
+from compatibility.e3nn import CartesianTensor, o3
 
 from voigt_utils import (
     voigt_to_tensor,

@@ -1,149 +1,144 @@
-# General Equivariant Covariance Networks for Probabilistic Structured Prediction
+# Representation-Compiled Equivariant Probabilistic Networks
 
-Core implementation for the TNNLS manuscript *General Equivariant Covariance Networks for Probabilistic Structured Prediction*.
+TPAMI submission implementation for *A Representation Compiler for Equivariant
+Probabilistic Structured Prediction*.
 
-This repository contains a clean, modular implementation that separates representation theory, SPD maps, and probabilistic losses across top-level modules.
+The main abstraction is a representation compiler. Given a finite-dimensional
+orthogonal `O(3)` output representation `V` (or a Cartesian tensor symmetry
+formula), it constructs
 
-## Architecture
+```text
+T(V) = Irreps(V + Sym^2(V))
+```
 
-The library is organized into four layers:
+and compiles a target-directed Clebsch--Gordan graph whose final feature space
+covers every required angular momentum, parity, and irrep multiplicity. The
+same compilation result creates the shared mean/covariance head, covariance
+basis, SPD parameterization, and proper Gaussian or Student-t objective.
 
-1. **Output representations** (`representations/`)
-   - `O3IrrepsSpec`: finite-dimensional orthogonal `O(3)` representations via `e3nn` irreps.
-   - `O3SymmetricOperatorBasis`: automatic construction of `Sym²(V)` using `e3nn.o3.ReducedTensorProducts("ij=ji", ...)`.
+## What is automatic
 
-2. **Equivariant symmetric operators** (`models/covariance_head.py`)
-   - `O3EquivariantSymmetricOperatorHead`: predicts the coefficients of `A(x) ∈ Sym(V)`.
-   - `O3EquivariantLowRankCovarianceHead`: predicts a low-rank-plus-isotropic structured parameterization.
+- `Sym^2(V)` decomposition and an orthonormal symmetric-operator basis.
+- Shortest CG paths from the backbone representation to `T(V)`.
+- Parity reachability checks and exact final irrep multiplicities.
+- Cartesian tensor symmetries such as `ij=ji` and
+  `ijkl=jikl=ijlk=klij`.
+- Graph-level (`global`) or element-level (`dense`) output.
+- `full`, isotypic `block`, `low_rank`, graph-structured precision, or
+  budget-driven `auto` covariance.
+- Matrix-exponential full covariance, multiplicity-space block covariance, or
+  low-rank-plus-isotropic covariance.
+- Proper multivariate Gaussian and Student-t negative log-likelihoods.
 
-3. **SPD maps** (`spd_maps/`)
-   - `MatrixExponentialMap`: `S = exp(A)` (default, bijective).
-   - `SpectralSoftplusMap`: spectral softplus with Löwner divided-difference autograd.
-   - `SquarePlusIdentityMap`: `S = A² + εI`.
-   - `PrecisionExponentialMap`: `S = exp(-B)` (log-precision coordinate).
-   - `LowRankPlusIsotropicMap`: `S = σ²I + LLᵀ`.
+For repeated variables with a known graph, the compiler predicts equivariant
+unary and relational SPD precision potentials and assembles
 
-4. **Probabilistic losses** (`distributions/`)
-   - `GaussianNLL`: proper multivariate Gaussian negative log-likelihood.
-   - `StudentTNLL`: proper multivariate Student-t negative log-likelihood with explicit scale/covariance distinction.
-   - `RobustSurrogateLoss`: LE-ESO-like robust surrogate, explicitly **not** claimed as a likelihood.
+```text
+Q = BlockDiag(U) + (B kron I)^T BlockDiag(W) (B kron I),  Sigma = Q^{-1}.
+```
 
-5. **Baselines** (`models/baselines.py`)
-   - `DeterministicHead`: mean-only baseline.
-   - `IsotropicCovarianceHead`: isotropic Gaussian covariance.
-   - `IrrepBlockDiagonalCovarianceHead`: one variance per irrep block.
+Training evaluates `logdet(Q)` and `r^T Q r` directly; covariance is formed
+only for reporting or sampling. For ITOP this reduces the active uncertainty
+output from 1,035 full-covariance parameters to `6 * (15 + 14) = 174` while
+retaining a generally dense marginal covariance.
 
-6. **Evaluation** (`evaluation/`)
-   - `metrics.py`: MAE, RMSE, :math:`R^2`, coverage, NLL, Energy Score, covariance error.
-   - `calibration.py`: calibration error, Q-Q data, sharpness.
-   - `equivariance.py`: numerical equivariance error under random rotations.
-
-## File guide
-
-| Path | Purpose |
-|------|---------|
-| `representations/` | Orthogonal representation specs and `Sym²(V)` basis construction. |
-| `spd_maps/` | Structure-preserving maps from symmetric operators to SPD matrices. |
-| `distributions/` | Gaussian, Student-t, and robust-surrogate losses. |
-| `models/` | Backbone, mean/covariance heads, structured predictor, and baseline heads. |
-| `scripts/` | Training scripts for dielectric tensor and elasticity tensor tasks. |
-| `experiments/` | Synthetic covariance-recovery experiment. |
-| `evaluation/` | Metrics, calibration diagnostics, and equivariance validators. |
-| `tests/` | Unit tests for representations, equivariance, SPD maps, distributions, baselines, evaluation, tensor conversions, and synthetic experiment. |
-| `voigt_utils.py` | Voigt / Kelvin-Mandel utilities used by tensor conversions. |
-| `matrix_log_transform.py` | Matrix log/exp utilities used by the dielectric pipeline. |
-| `atom_features.py` | Atom feature builder used by the data loaders. |
-| `dielectric_data_loader.py` | Precomputed-graph dielectric loader wrapped by `data/dielectric_dataset.py`. |
+For structured covariance modes, the compiler records both the canonical full
+target and the cheaper active target in `compilation.as_dict()`. Approximation
+is therefore explicit and auditable.
 
 ## Quick start
 
-1. Install in editable mode:
-   ```bash
-   pip install -e .
-   ```
+```python
+from models import EquivariantBackbone
+from representations import CompilerConfig, O3RepresentationCompiler
 
-2. Run the test suite:
-   ```bash
-   python -m pytest tests/ -v
-   ```
+backbone = EquivariantBackbone(hidden_dim=32, lmax=2, num_layers=2)
 
-3. Build a predictor programmatically:
-   ```python
-   from representations import O3IrrepsSpec
-   from spd_maps import MatrixExponentialMap
-   from distributions import GaussianNLL
-   from models import (
-       EquivariantBackbone, EquivariantMeanHead,
-       O3EquivariantSymmetricOperatorHead, StructuredProbabilisticPredictor,
-   )
+# A symmetric rank-2 Cartesian output. This compiles to V = 0e + 2e,
+# Sym^2(V) = 2x0e + 2x2e + 4e, and one quadratic lifting edge.
+compiler = O3RepresentationCompiler.from_cartesian(
+    "ij=ji",
+    CompilerConfig(
+        covariance="auto",
+        parameter_budget=192,
+        output_scope="global",
+        objective="gaussian",
+    ),
+)
+compilation = compiler.compile(backbone.irreps_out)
+model = compilation.build_model(backbone)
 
-   output_spec = O3IrrepsSpec("0e + 2e")  # symmetric rank-2 output
-   backbone = EquivariantBackbone(
-       hidden_dim=16, lmax=2, num_layers=2,
-       atom_feature_dim=49, num_basis=8,
-   )
-   mean_head = EquivariantMeanHead(backbone.irreps_out, output_spec.irreps, pool=True)
-   cov_head = O3EquivariantSymmetricOperatorHead(
-       backbone.irreps_out, output_spec, pool=True,
-   )
-   model = StructuredProbabilisticPredictor(
-       backbone=backbone,
-       output_spec=output_spec,
-       mean_head=mean_head,
-       covariance_head=cov_head,
-       spd_map=MatrixExponentialMap(),
-       distribution=GaussianNLL(),
-   )
-   ```
-
-## Training scripts
-
-Three end-to-end scripts are provided under `scripts/` and `experiments/`.
-
-### Dielectric tensor (`0e + 2e` output, full-rank covariance)
-
-```bash
-python scripts/train_dielectric.py \
-  --data_dir data/mp_dielectric \
-  --save_dir checkpoints_dielectric \
-  --hidden_dim 32 --lmax 2 --num_layers 2 \
-  --num_epochs 100 --device cuda
+print(compilation.as_dict())
 ```
 
-The script predicts the dielectric tensor in log-Kelvin-Mandel / `0e + 2e` irrep
-space using `MatrixExponentialMap` + `GaussianNLL`, and reports physical-space
-MAE by mapping predictions back through the matrix exponential.
+For the 21-dimensional elasticity representation, the same API discovers a
+canonical full-covariance target up to `8e`. With an `lmax=2` seed this requires
+three CG edges. Under the default parameter budget, the active graph selects a
+rank-8 covariance instead of materializing all 231 symmetric-operator
+parameters.
 
-### Elasticity tensor (rank-4 output, low-rank covariance)
+## Training
 
 ```bash
-python scripts/train_elasticity.py \
+# Rank-2 dielectric output; full covariance is selected explicitly.
+python -m scripts.train_dielectric --data_dir data/mp_dielectric --device cuda
+
+# Rank-4 elasticity output; choose auto/full/block/low_rank.
+python -m scripts.train_elasticity \
   --data_dir data/mp_elastic \
-  --save_dir checkpoints_elasticity \
-  --hidden_dim 48 --lmax 4 --num_layers 2 --rank 8 \
-  --num_epochs 100 --device cuda
+  --lmax 2 --covariance auto --parameter_budget 192 --rank 8 \
+  --objective gaussian --device cuda
+
+# ModelNet40 inertia or shape-covariance target.
+python -m scripts.train_modelnet40_inertia \
+  --target_type inertia --device cuda
+
+# Download only ITOP depth/label files, compact labels, and skip point clouds.
+python -m scripts.download_itop --data_dir data/ITOP --view side
+
+# ITOP standard side-view protocol with graph precision selected at B=192.
+python -m scripts.train_itop \
+  --data_dir data/ITOP --protocol side --covariance auto \
+  --parameter_budget 192 --num_points 1024 --device cuda
+
+# Cross-view OOD protocols use the same entry point.
+python -m scripts.train_itop --data_dir data/ITOP --protocol side_to_top --device cuda
 ```
 
-This uses the 21D elasticity-tensor output with a
-`LowRankPlusIsotropicMap(rank=8)` covariance, suitable for the high-dimensional
-rank-4 target.
+The ITOP loader reconstructs XYZ points from the documented depth calibration,
+centers only by the observable point-cloud centroid, filters invalid frames,
+and preserves joint visibility for visible/occluded calibration analysis. It
+supports depth noise, point dropout, synthetic occlusion, and 256--2048 point
+input budgets without using ground-truth torso centering.
 
-### Synthetic covariance recovery
+Each training run writes `compilation.json` beside its checkpoint so the exact
+representation target, lifting stages, covariance complexity, and objective
+are reproducible.
+
+## Layout
+
+| Path | Purpose |
+|---|---|
+| `representations/compiler.py` | Representation compiler and shared output head |
+| `representations/adaptive_lifting.py` | Shortest-path CG graph planning and execution |
+| `representations/symmetric_square.py` | `Sym^2(V)` decomposition and covariance basis |
+| `representations/graph_structure.py` | Typed repeated-variable output graphs |
+| `spd_maps/` | Full, block, low-rank, and graph-precision SPD maps |
+| `data/itop_dataset.py` | ITOP depth reconstruction, label compaction, and loaders |
+| `evaluation/pose.py` | Pose accuracy, calibration, risk-coverage, and sampling metrics |
+| `distributions/` | Proper Gaussian and Student-t objectives |
+| `models/` | Equivariant backbone and structured predictor |
+| `scripts/` | Reproducible task training entry points |
+| `tests/` | Representation, equivariance, SPD, objective, and integration tests |
+
+## Verification
 
 ```bash
-python experiments/synthetic_covariance_recovery.py \
-  --output_irreps "0e + 2e" \
-  --num_train 2000 --num_test 500 \
-  --num_epochs 200 --device cuda
+conda activate EGNN
+python -m pytest tests -q -W error
 ```
 
-A controlled experiment where a ground-truth covariance field
-`S(x) = exp(A(x))` is generated from a fixed linear map and the model is trained
-to recover it. Supported output representations include `"1o"`, `"0e + 2e"`,
-and other `O(3)` irreps.
-
-## Notes for reviewers
-
-- The top-level modules separate representation theory, SPD maps, and probabilistic losses. They avoid anisotropic eigenvalue jitter, random-noise fallbacks, and improper likelihood claims.
-- The code currently provides a full `O3IrrepsSpec` implementation; the abstract `OrthogonalRepresentationSpec` interface leaves room for other compact groups.
-- All SPD maps are tested for positive definiteness, finite gradients, and (for the full predictor) `O(3)` equivariance.
+The compiler tests cover rank-2 and rank-4 outputs, highest angular momentum,
+parity failures, multiplicity coverage, Cartesian round trips, dense/global
+heads, complexity selection, equivariance, finite gradients, SPD validity,
+graph-precision algebra, and real depth-to-point-cloud data contracts.

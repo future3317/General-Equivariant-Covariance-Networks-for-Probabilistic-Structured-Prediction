@@ -1,4 +1,4 @@
-"""Unified plotting style for TNNLS paper figures.
+"""Unified plotting style for TPAMI paper figures.
 
 This module centralizes fonts, colors, sizes and helper utilities so that
 all result figures in the repository share the same publication-ready look.
@@ -51,7 +51,7 @@ DEFAULT_RC = {
     "mathtext.fontset": "cm",
     "axes.unicode_minus": False,
 
-    # Sizes (suitable for TNNLS single-column ~3.5in and double-column ~7in)
+    # Sizes suitable for IEEE TPAMI single- and double-column figures.
     "figure.dpi": 300,
     "savefig.dpi": 300,
     "axes.labelsize": 12,
@@ -85,8 +85,8 @@ DEFAULT_RC = {
 }
 
 
-def setup_tnnls_style() -> None:
-    """Apply the unified TNNLS style to matplotlib."""
+def setup_tpami_style() -> None:
+    """Apply the unified IEEE TPAMI style to matplotlib."""
     plt.style.use("default")
     rcParams.update(DEFAULT_RC)
 

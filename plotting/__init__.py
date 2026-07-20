@@ -1,4 +1,4 @@
-"""Plotting utilities and figure generation for TNNLS paper."""
+"""Plotting utilities and figure generation for the TPAMI submission."""
 
 from plotting.style import (
     COLORS,
@@ -7,7 +7,7 @@ from plotting.style import (
     get_color,
     label_panels,
     save_figure,
-    setup_tnnls_style,
+    setup_tpami_style,
 )
 
 __all__ = [
@@ -17,5 +17,5 @@ __all__ = [
     "get_color",
     "label_panels",
     "save_figure",
-    "setup_tnnls_style",
+    "setup_tpami_style",
 ]

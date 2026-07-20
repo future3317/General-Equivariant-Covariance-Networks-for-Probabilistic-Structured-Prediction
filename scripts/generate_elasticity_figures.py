@@ -1,4 +1,4 @@
-"""Generate TNNLS figures for the elasticity tensor benchmark.
+"""Generate TPAMI figures for the elasticity tensor benchmark.
 
 Loads a trained low-rank covariance checkpoint from ``scripts/train_elasticity.py``
 and produces publication-ready diagnostic figures using the unified ``plotting`` style.
@@ -35,7 +35,7 @@ from plotting import (
     cm2inch,
     label_panels,
     save_figure,
-    setup_tnnls_style,
+    setup_tpami_style,
 )
 from representations import O3IrrepsSpec, rank4_elasticity_irreps
 from spd_maps import LowRankPlusIsotropicMap
@@ -99,7 +99,7 @@ def collect_predictions(model, dataloader, device):
 
 def plot_training_curves(history: list[dict], save_path: Path) -> None:
     """Plot train/val loss and validation MAE over epochs."""
-    setup_tnnls_style()
+    setup_tpami_style()
 
     epochs = [h["epoch"] for h in history]
     train_loss = [h["train_loss"] for h in history]
@@ -129,7 +129,7 @@ def plot_training_curves(history: list[dict], save_path: Path) -> None:
 
 def plot_parity(pred_21d: np.ndarray, target_21d: np.ndarray, save_path: Path, n_show: int = 6) -> None:
     """Parity plot for selected independent elasticity components."""
-    setup_tnnls_style()
+    setup_tpami_style()
 
     # Show first n_show components (3 diagonal + 3 representative off-diagonal).
     components = list(range(n_show))
@@ -161,7 +161,7 @@ def plot_parity(pred_21d: np.ndarray, target_21d: np.ndarray, save_path: Path, n
 
 def plot_calibration(mu: torch.Tensor, y: torch.Tensor, scale: torch.Tensor, save_path: Path) -> None:
     """Coverage calibration and Q-Q plot for Mahalanobis distances."""
-    setup_tnnls_style()
+    setup_tpami_style()
 
     fig, axes = plt.subplots(1, 2, figsize=cm2inch(16, 6))
     ax_cov, ax_qq = axes
@@ -197,7 +197,7 @@ def plot_calibration(mu: torch.Tensor, y: torch.Tensor, scale: torch.Tensor, sav
 
 def plot_risk_coverage(mu: torch.Tensor, y: torch.Tensor, scale: torch.Tensor, save_path: Path) -> None:
     """Risk-coverage curve: coverage vs MAE when retaining most confident fraction."""
-    setup_tnnls_style()
+    setup_tpami_style()
 
     residual = torch.abs(mu - y)
     mae_per_sample = residual.mean(dim=-1)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import torch
-from torch_geometric.data import Data
+from compatibility.torch_geometric import Data
 
 
 def _rotate_data(data: Data, R: torch.Tensor, max_radius: float = 3.0, num_basis: int = 8, lmax: int = 2):

@@ -11,12 +11,10 @@ import os
 import logging
 import pickle
 import pandas as pd
-from e3nn import o3
-from e3nn.math import soft_one_hot_linspace
+from compatibility.e3nn import o3, soft_one_hot_linspace
 from ase.neighborlist import neighbor_list
 import ase.io
-from torch_geometric.data import Data
-from torch_geometric.loader import DataLoader as PyGDataLoader
+from compatibility.torch_geometric import Data, PyGDataLoader
 from ase import Atoms
 from voigt_utils import sym_matrix_log_voigt, voigt_to_kelvin_mandel
 from atom_features import create_composite_atom_features

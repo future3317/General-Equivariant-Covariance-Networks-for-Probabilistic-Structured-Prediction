@@ -47,6 +47,10 @@ class SPDMap(torch.nn.Module, abc.ABC):
         """
         ...
 
+    def precision(self, A: torch.Tensor) -> torch.Tensor:
+        """Return the precision matrix, computed lazily by default."""
+        return torch.linalg.inv(self.forward(A))
+
 
 def symmetrize(A: torch.Tensor) -> torch.Tensor:
     """Numerical symmetrization."""

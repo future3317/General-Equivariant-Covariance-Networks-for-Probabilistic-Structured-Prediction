@@ -12,7 +12,7 @@ from models import (
     O3EquivariantLowRankCovarianceHead,
     StructuredProbabilisticPredictor,
 )
-from representations import O3IrrepsSpec
+from representations import O3IrrepsSpec, rank4_elasticity_irreps
 from spd_maps import MatrixExponentialMap, LowRankPlusIsotropicMap
 from distributions import GaussianNLL
 
@@ -181,6 +181,70 @@ def test_lowrank_factor_equivariance():
     h = hidden_irreps.randn(1, -1)
     R = torch.tensor([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
     rho_hidden = o3.Irreps(hidden_irreps).D_from_matrix(R)
+    h_rot = (rho_hidden @ h.unsqueeze(-1)).squeeze(-1)
+
+    with torch.no_grad():
+        params = cov_head(h, batch=None)
+        params_rot = cov_head(h_rot, batch=None)
+        S = spd_map(params)
+        S_rot = spd_map(params_rot)
+
+    rho_R = output_spec.representation_matrix(R)
+    S_rot_expected = rho_R @ S @ rho_R.T
+
+    err = torch.norm(S_rot - S_rot_expected, dim=(-2, -1))
+    norm = torch.norm(S, dim=(-2, -1)) + 1e-12
+    assert (err / norm).max().item() < 1e-4
+
+
+def test_lowrank_factor_layout_rank4():
+    """Low-rank factor packing must be correct for rank-4 elasticity output."""
+    output_spec = O3IrrepsSpec(rank4_elasticity_irreps())
+    rank = 4
+    head = O3EquivariantLowRankCovarianceHead(
+        hidden_irreps="32x0e + 16x1o + 16x2e",
+        output_spec=output_spec,
+        rank=rank,
+        pool=False,
+    )
+
+    expected = o3.Irreps([(mul * rank, ir) for mul, ir in output_spec.irreps])
+    assert head.factor_irreps == expected
+
+    h = torch.randn(2, head.factor_head.irreps_in.dim)
+    params = head(h, batch=None)
+    dim = output_spec.dim
+    assert params.shape == (2, dim * rank + 1)
+
+    coeffs = torch.randn(2, head.factor_irreps.dim)
+    L = head._pack_factors(coeffs)
+    assert L.shape == (2, dim, rank)
+
+    # Each column must contain the full output representation V.
+    # We check this by ensuring the slice sizes match the irrep dimensions
+    # scaled by their multiplicities.
+    cursor = 0
+    for rank_slot in range(rank):
+        row_cursor = 0
+        for mul, ir in output_spec.irreps:
+            for _ in range(mul):
+                width = ir.dim
+                assert L[0, row_cursor : row_cursor + width, rank_slot].numel() == width
+                row_cursor += width
+        assert row_cursor == dim
+
+
+def test_lowrank_factor_equivariance_rank4():
+    """Low-rank scale S must be equivariant for rank-4 elasticity output."""
+    torch.manual_seed(2)
+    output_spec = O3IrrepsSpec(rank4_elasticity_irreps())
+    hidden_irreps = o3.Irreps("32x0e + 16x1o + 16x2e")
+    cov_head = O3EquivariantLowRankCovarianceHead(hidden_irreps, output_spec, rank=4, pool=False)
+    spd_map = LowRankPlusIsotropicMap(dim=output_spec.dim, rank=4)
+
+    h = hidden_irreps.randn(1, -1)
+    R = torch.tensor([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
+    rho_hidden = hidden_irreps.D_from_matrix(R)
     h_rot = (rho_hidden @ h.unsqueeze(-1)).squeeze(-1)
 
     with torch.no_grad():

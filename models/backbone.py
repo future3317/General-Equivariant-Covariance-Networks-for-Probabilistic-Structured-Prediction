@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import math
 import torch
-from e3nn import o3
-from e3nn.math import soft_one_hot_linspace
-from e3nn.nn import FullyConnectedNet, Gate
+from compatibility.e3nn import FullyConnectedNet, Gate, o3, soft_one_hot_linspace
 from torch_scatter import scatter, scatter_softmax
 
 

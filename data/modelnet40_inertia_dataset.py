@@ -26,76 +26,19 @@ from typing import Any
 import joblib
 import numpy as np
 import torch
-from e3nn import o3
-from e3nn.math import soft_one_hot_linspace
 from torch.utils.data import Dataset
-from torch_geometric.data import Data
-from torch_geometric.loader import DataLoader as PyGDataLoader
+from compatibility.torch_geometric import Data, PyGDataLoader
 
 from data.tensor_conversions import voigt_to_irreps
+from data.point_cloud_graph import compute_edge_features, knn_graph
+
+# Backward-compatible names for existing experiment utilities and tests. The
+# implementations live in one shared module and are not duplicated here.
+_knn_graph = knn_graph
+_compute_edge_features = compute_edge_features
 
 
 DEFAULT_CACHE_PATH = "data/modelnet40/cache/modelnet40_inertia_dataset.pkl"
-
-
-def _knn_graph(pos: torch.Tensor, k: int) -> torch.Tensor:
-    """Pure-PyTorch k-NN graph (no torch-cluster dependency).
-
-    Args:
-        pos: (N, 3) point coordinates.
-        k: Number of nearest neighbors.
-
-    Returns:
-        edge_index: (2, N*k) tensor of directed edges.
-    """
-    N = pos.shape[0]
-    distances = torch.cdist(pos, pos)
-    distances.fill_diagonal_(float("inf"))
-    _, knn_indices = torch.topk(distances, k=k, largest=False, dim=-1)
-    src = torch.arange(N, device=pos.device).repeat_interleave(k)
-    dst = knn_indices.flatten()
-    return torch.stack([src, dst], dim=0)
-
-
-def _compute_edge_features(
-    pos: torch.Tensor,
-    edge_index: torch.Tensor,
-    max_radius: float,
-    num_basis: int,
-    lmax: int,
-) -> dict[str, torch.Tensor]:
-    """Compute edge vectors, spherical harmonics, RBF, and cutoff weights."""
-    row, col = edge_index
-    edge_vec = pos[col] - pos[row]
-    edge_len = edge_vec.norm(dim=-1)
-
-    irreps_sh = o3.Irreps.spherical_harmonics(lmax)
-    edge_sh = o3.spherical_harmonics(
-        irreps_sh,
-        edge_vec,
-        normalize=True,
-        normalization="component",
-    )
-
-    edge_rbf = soft_one_hot_linspace(
-        edge_len,
-        start=0.0,
-        end=max_radius,
-        number=num_basis,
-        basis="gaussian",
-        cutoff=False,
-    )
-
-    # Smooth cutoff that goes to zero at max_radius.
-    edge_weights = 0.5 * (torch.cos(np.pi * edge_len / max_radius) + 1.0)
-    edge_weights = edge_weights * (edge_len < max_radius).float()
-
-    return {
-        "edge_vec": edge_vec,
-        "edge_sh": edge_sh,
-        "edge_rbf": edge_rbf,
-        "edge_weights": edge_weights,
-    }
 
 
 def _shape_covariance_voigt(points: np.ndarray) -> np.ndarray:
@@ -148,9 +91,9 @@ def _point_cloud_to_data(
     pos = torch.from_numpy(points).float()
 
     # k-NN graph. Equivariant: rotating the cloud rotates edge_vec.
-    edge_index = _knn_graph(pos, k=num_neighbors)
+    edge_index = knn_graph(pos, k=num_neighbors)
 
-    edge_features = _compute_edge_features(
+    edge_features = compute_edge_features(
         pos, edge_index, max_radius, num_basis, lmax
     )
 

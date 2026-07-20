@@ -17,7 +17,7 @@ import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from e3nn import o3
+from compatibility.e3nn import o3
 from scipy.stats import chi2
 
 from representations import O3IrrepsSpec

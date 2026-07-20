@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
     name="gecn",
     version="0.1.0",
-    description="General Equivariant Covariance Networks for Probabilistic Structured Prediction",
+    description="Representation-compiled equivariant probabilistic structured prediction",
     packages=find_packages(exclude=["tests", "tests.*"]),
     python_requires=">=3.9",
     install_requires=[
@@ -14,7 +14,8 @@ setup(
         "torch-geometric>=2.3.0",
         "torch-scatter>=2.1.0",
         "torchmetrics>=0.11.0",
-        "e3nn>=0.5.0",
+        "e3nn>=0.5.7",
+        "h5py>=3.8.0",
         "ase>=3.22.0",
         "pymatgen>=2023.0.0",
         "tqdm>=4.65.0",

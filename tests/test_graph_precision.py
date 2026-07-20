@@ -1,0 +1,175 @@
+"""Tests for graph-structured equivariant precision models."""
+
+import math
+
+import torch
+from e3nn import o3
+
+from distributions import GaussianNLL, StudentTNLL
+from representations import (
+    CompilerConfig,
+    EquivariantOutputGraph,
+    O3RepresentationCompiler,
+)
+from spd_maps import GraphStructuredPrecisionMap
+
+
+EDGES = ((0, 1), (1, 2), (1, 3))
+
+
+def _graph() -> EquivariantOutputGraph:
+    return EquivariantOutputGraph(num_nodes=4, edges=EDGES, node_irrep="1o")
+
+
+def _symmetric_params(batch: int = 2) -> torch.Tensor:
+    graph = _graph()
+    raw = torch.randn(batch, graph.num_potentials, 3, 3)
+    return 0.5 * (raw + raw.transpose(-1, -2))
+
+
+def test_graph_structure_incidence_and_parameter_count():
+    graph = _graph()
+    incidence = graph.incidence_matrix()
+    assert incidence.shape == (3, 4)
+    assert torch.allclose(incidence.sum(-1), torch.zeros(3))
+    assert graph.output_dim == 12
+    assert graph.num_potentials * 6 == 42
+
+
+def test_graph_precision_is_spd_and_covariance_is_dense():
+    graph = _graph()
+    spd_map = GraphStructuredPrecisionMap(graph)
+    params = _symmetric_params()
+    precision = spd_map.precision(params)
+    covariance = spd_map(params)
+    assert torch.linalg.eigvalsh(precision).min().item() > 0.0
+    assert torch.linalg.eigvalsh(covariance).min().item() > 0.0
+    identity = precision @ covariance
+    assert torch.allclose(identity, torch.eye(graph.output_dim), atol=2e-5, rtol=2e-5)
+    # End nodes are not adjacent, yet marginalization generally couples them.
+    assert covariance[..., 0:3, 9:12].abs().max().item() > 1e-6
+
+
+def test_local_precision_action_and_logdet_match_dense_algebra():
+    graph = _graph()
+    spd_map = GraphStructuredPrecisionMap(graph)
+    params = _symmetric_params()
+    residual = torch.randn(2, graph.output_dim)
+    precision = spd_map.precision(params)
+    expected_action = torch.einsum("bi,bij,bj->b", residual, precision, residual)
+    expected_logdet = -torch.linalg.slogdet(precision).logabsdet
+    assert torch.allclose(
+        spd_map.precision_action(params, residual), expected_action, atol=2e-5, rtol=2e-5
+    )
+    assert torch.allclose(spd_map.logdet(params), expected_logdet, atol=2e-5, rtol=2e-5)
+
+
+def test_graph_precision_equivariance():
+    torch.manual_seed(4)
+    graph = _graph()
+    spd_map = GraphStructuredPrecisionMap(graph)
+    params = _symmetric_params(batch=1)
+    rotation = o3.rand_matrix()
+    transformed_params = rotation @ params @ rotation.T
+    representation = graph.representation_matrix(rotation)
+
+    precision = spd_map.precision(params)
+    transformed_precision = spd_map.precision(transformed_params)
+    expected_precision = representation @ precision @ representation.T
+    assert torch.allclose(
+        transformed_precision, expected_precision, atol=2e-4, rtol=2e-4
+    )
+
+    covariance = spd_map(params)
+    transformed_covariance = spd_map(transformed_params)
+    expected_covariance = representation @ covariance @ representation.T
+    assert torch.allclose(
+        transformed_covariance, expected_covariance, atol=2e-4, rtol=2e-4
+    )
+
+
+def test_precision_coordinate_gaussian_and_student_t_objectives():
+    graph = _graph()
+    spd_map = GraphStructuredPrecisionMap(graph)
+    params = _symmetric_params()
+    mean = torch.randn(2, graph.output_dim)
+    target = torch.randn_like(mean)
+    residual = target - mean
+    precision = spd_map.precision(params)
+    quad = torch.einsum("bi,bij,bj->b", residual, precision, residual)
+    logdet_precision = torch.linalg.slogdet(precision).logabsdet
+
+    gaussian, _ = GaussianNLL()(mean, params, target, spd_map)
+    expected_gaussian = (
+        0.5 * graph.output_dim * math.log(2.0 * math.pi)
+        - 0.5 * logdet_precision
+        + 0.5 * quad
+    ).mean()
+    assert torch.allclose(gaussian, expected_gaussian, atol=2e-5, rtol=2e-5)
+
+    student, _ = StudentTNLL(nu=7.0)(mean, params, target, spd_map)
+    assert torch.isfinite(student)
+
+
+def test_graph_precision_gradients_and_sampling():
+    graph = _graph()
+    spd_map = GraphStructuredPrecisionMap(graph)
+    params = _symmetric_params().requires_grad_()
+    residual = torch.randn(2, graph.output_dim)
+    loss = spd_map.logdet(params).mean() + spd_map.precision_action(params, residual).mean()
+    loss.backward()
+    assert params.grad is not None
+    assert torch.isfinite(params.grad).all()
+
+    samples = spd_map.sample(torch.zeros(2, graph.output_dim), params.detach(), 5)
+    assert samples.shape == (2, graph.output_dim, 5)
+    assert torch.isfinite(samples).all()
+
+
+def test_compiler_selects_graph_precision_for_itop_budget():
+    graph = EquivariantOutputGraph(
+        num_nodes=15,
+        edges=tuple((index, index + 1) for index in range(14)),
+        node_irrep="1o",
+    )
+    seed = o3.Irreps("8x0e + 4x1o + 4x2e")
+    compilation = O3RepresentationCompiler.for_graph(
+        graph,
+        CompilerConfig(covariance="auto", parameter_budget=192),
+    ).compile(seed)
+    assert compilation.covariance_mode == "graph"
+    assert compilation.output_spec.dim == 45
+    assert compilation.output_spec.symmetric_square().operator_dim == 1035
+    assert compilation.covariance_parameter_count == 174
+    assert compilation.canonical_plan.depth == 1
+    assert compilation.active_plan.depth == 0
+
+
+def test_compiled_graph_head_and_precision_are_equivariant():
+    torch.manual_seed(5)
+    graph = _graph()
+    seed = o3.Irreps("8x0e + 4x1o + 4x2e")
+    compilation = O3RepresentationCompiler.for_graph(graph).compile(seed)
+    head = compilation.build_head()
+    spd_map = compilation.build_spd_map()
+    features = seed.randn(5, -1)
+    batch = torch.tensor([0, 0, 0, 1, 1])
+    rotation = o3.rand_matrix()
+    transformed_features = features @ seed.D_from_matrix(rotation).T
+
+    mean, params = head(features, batch)
+    transformed_mean, transformed_params = head(transformed_features, batch)
+    output_representation = graph.representation_matrix(rotation)
+    expected_mean = mean @ output_representation.T
+    assert torch.allclose(transformed_mean, expected_mean, atol=2e-4, rtol=2e-4)
+
+    expected_params = rotation @ params @ rotation.T
+    assert torch.allclose(
+        transformed_params, expected_params, atol=2e-4, rtol=2e-4
+    )
+    precision = spd_map.precision(params)
+    transformed_precision = spd_map.precision(transformed_params)
+    expected_precision = output_representation @ precision @ output_representation.T
+    assert torch.allclose(
+        transformed_precision, expected_precision, atol=3e-4, rtol=3e-4
+    )

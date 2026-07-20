@@ -1,4 +1,4 @@
-"""Train the equivariant covariance model on elasticity tensor prediction with low-rank covariance."""
+"""Train a representation-compiled probabilistic elasticity model."""
 
 from __future__ import annotations
 
@@ -12,15 +12,12 @@ import torch
 import torch.optim as optim
 from tqdm import tqdm
 
-from representations import O3IrrepsSpec, rank4_elasticity_irreps
-from spd_maps import LowRankPlusIsotropicMap
-from distributions import GaussianNLL
-from models import (
-    EquivariantBackbone,
-    EquivariantMeanHead,
-    O3EquivariantLowRankCovarianceHead,
-    StructuredProbabilisticPredictor,
+from representations import (
+    CompilerConfig,
+    O3RepresentationCompiler,
+    rank4_elasticity_irreps,
 )
+from models import EquivariantBackbone
 from data.elasticity_dataset import get_elasticity_irreps_loaders
 from data.tensor_conversions import irreps_to_elasticity_21d
 
@@ -115,10 +112,18 @@ def main():
     parser.add_argument("--data_dir", default="data/mp_elastic")
     parser.add_argument("--save_dir", default="checkpoints_elasticity")
     parser.add_argument("--hidden_dim", type=int, default=48)
-    parser.add_argument("--lmax", type=int, default=4)
+    parser.add_argument("--lmax", type=int, default=2)
     parser.add_argument("--num_layers", type=int, default=2)
     parser.add_argument("--num_basis", type=int, default=8)
     parser.add_argument("--rank", type=int, default=8)
+    parser.add_argument(
+        "--covariance",
+        choices=["auto", "full", "block", "low_rank"],
+        default="auto",
+    )
+    parser.add_argument("--parameter_budget", type=int, default=192)
+    parser.add_argument("--objective", choices=["gaussian", "student_t"], default="gaussian")
+    parser.add_argument("--student_t_dof", type=float, default=5.0)
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--lr", type=float, default=5e-4)
     parser.add_argument("--weight_decay", type=float, default=1e-4)
@@ -136,7 +141,7 @@ def main():
 
     logger, experiment_name = setup_logger(args.save_dir)
     logger.info("=" * 60)
-    logger.info("GECN elasticity training (low-rank covariance)")
+    logger.info("Representation-compiled elasticity training")
     logger.info("=" * 60)
     for k, v in vars(args).items():
         logger.info(f"  {k}: {v}")
@@ -150,6 +155,7 @@ def main():
         pin_memory=args.pin_memory,
         prefetch_factor=args.prefetch_factor,
         lmax=args.lmax,
+        num_basis=args.num_basis,
     )
 
     # Train stats for unnormalization during validation.
@@ -160,7 +166,6 @@ def main():
     mean_21d = torch.tensor(train_dataset.mean_21d, dtype=torch.float32)
     std_21d = torch.tensor(train_dataset.std_21d, dtype=torch.float32)
 
-    output_spec = O3IrrepsSpec(rank4_elasticity_irreps())
     backbone = EquivariantBackbone(
         hidden_dim=args.hidden_dim,
         lmax=args.lmax,
@@ -169,22 +174,29 @@ def main():
         num_basis=args.num_basis,
         atom_features=args.atom_features,
     )
-    mean_head = EquivariantMeanHead(backbone.irreps_out, output_spec.irreps, pool=True)
-    cov_head = O3EquivariantLowRankCovarianceHead(
-        backbone.irreps_out, output_spec, rank=args.rank, pool=True
+    compiler = O3RepresentationCompiler(
+        rank4_elasticity_irreps(),
+        CompilerConfig(
+            covariance=args.covariance,
+            output_scope="global",
+            objective=args.objective,
+            parameter_budget=args.parameter_budget,
+            low_rank=args.rank,
+            student_t_dof=args.student_t_dof,
+        ),
     )
-
-    model = StructuredProbabilisticPredictor(
-        backbone=backbone,
-        output_spec=output_spec,
-        mean_head=mean_head,
-        covariance_head=cov_head,
-        spd_map=LowRankPlusIsotropicMap(dim=output_spec.dim, rank=args.rank),
-        distribution=GaussianNLL(),
-    ).to(args.device)
+    compilation = compiler.compile(backbone.irreps_out)
+    model = compilation.build_model(backbone).to(args.device)
 
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(f"Model parameters: {num_params:,}")
+    logger.info(
+        "Compiled covariance: mode=%s, parameters=%d, canonical_depth=%d, active_depth=%d",
+        compilation.covariance_mode,
+        compilation.covariance_parameter_count,
+        compilation.canonical_plan.depth,
+        compilation.active_plan.depth,
+    )
 
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=5)
@@ -229,6 +241,8 @@ def main():
 
     with open(os.path.join(args.save_dir, "args.json"), "w") as f:
         json.dump(vars(args), f, indent=2)
+    with open(os.path.join(args.save_dir, "compilation.json"), "w") as f:
+        json.dump(compilation.as_dict(), f, indent=2)
     with open(os.path.join(args.save_dir, "history.json"), "w") as f:
         json.dump(history, f, indent=2)
     with open(os.path.join(args.save_dir, "test_metrics.json"), "w") as f:

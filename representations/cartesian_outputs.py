@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from e3nn import o3
-from e3nn.io import CartesianTensor
+from compatibility.e3nn import CartesianTensor, o3
 
 
 def rank2_symmetric_irreps() -> o3.Irreps:

@@ -25,6 +25,19 @@ from evaluation.equivariance import (
     scale_equivariance_error,
     average_equivariance_error,
 )
+from evaluation.pose import (
+    as_joint_positions,
+    bone_length_error,
+    calibration_absolute_error,
+    joint_errors,
+    joint_mahalanobis_squared,
+    marginal_joint_covariances,
+    mpjpe,
+    occlusion_uncertainty_ratio,
+    pck,
+    risk_coverage_auc,
+    visible_occluded_mpjpe,
+)
 
 __all__ = [
     "mean_absolute_error",
@@ -46,4 +59,15 @@ __all__ = [
     "mean_equivariance_error",
     "scale_equivariance_error",
     "average_equivariance_error",
+    "as_joint_positions",
+    "bone_length_error",
+    "calibration_absolute_error",
+    "joint_errors",
+    "joint_mahalanobis_squared",
+    "marginal_joint_covariances",
+    "mpjpe",
+    "occlusion_uncertainty_ratio",
+    "pck",
+    "risk_coverage_auc",
+    "visible_occluded_mpjpe",
 ]

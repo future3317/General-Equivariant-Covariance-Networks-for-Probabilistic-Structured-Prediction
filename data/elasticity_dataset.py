@@ -7,11 +7,9 @@ import itertools
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-from torch_geometric.data import Data
-from torch_geometric.loader import DataLoader as PyGDataLoader
+from compatibility.torch_geometric import Data, PyGDataLoader
 from pymatgen.core import Structure
-from e3nn import o3
-from e3nn.math import soft_one_hot_linspace
+from compatibility.e3nn import o3, soft_one_hot_linspace
 
 from atom_features import create_composite_atom_features
 from data.tensor_conversions import elasticity_21d_to_irreps
@@ -59,10 +57,12 @@ class ElasticityIrrepsDataset(Dataset):
         num_neighbors: int = 20,
         train_stats: tuple[np.ndarray, np.ndarray] | None = None,
         lmax: int | None = None,
+        num_basis: int = 8,
     ):
         self.max_radius = max_radius
         self.num_neighbors = num_neighbors
         self.lmax = lmax
+        self.num_basis = num_basis
         self._edge_sh_dim = o3.Irreps.spherical_harmonics(lmax).dim if lmax is not None else None
 
         with open(data_path, "rb") as f:
@@ -123,9 +123,10 @@ class ElasticityIrrepsDataset(Dataset):
         neighbor_list = structure.get_neighbor_list(self.max_radius)
 
         if len(neighbor_list) == 0 or neighbor_list[0].shape[0] == 0:
+            sh_dim = self._edge_sh_dim if self._edge_sh_dim is not None else 25
             edge_index = torch.tensor([[0], [0]], dtype=torch.long)
-            edge_sh = torch.zeros(1, 25)
-            edge_rbf = torch.zeros(1, 8)
+            edge_sh = torch.zeros(1, sh_dim)
+            edge_rbf = torch.zeros(1, self.num_basis)
             edge_weights = torch.ones(1)
         else:
             center_indices = torch.tensor(neighbor_list[0], dtype=torch.long)
@@ -134,8 +135,9 @@ class ElasticityIrrepsDataset(Dataset):
             edge_distances = torch.tensor(neighbor_list[3], dtype=torch.float32)
 
             edge_index = torch.stack([center_indices, neighbor_indices])
+            lmax_sh = self.lmax if self.lmax is not None else 4
             edge_sh = o3.spherical_harmonics(
-                o3.Irreps.spherical_harmonics(4),
+                o3.Irreps.spherical_harmonics(lmax_sh),
                 edge_vectors,
                 normalize=True,
                 normalization="component",
@@ -144,7 +146,7 @@ class ElasticityIrrepsDataset(Dataset):
                 edge_distances,
                 start=0.0,
                 end=self.max_radius,
-                number=8,
+                number=self.num_basis,
                 basis="smooth_finite",
                 cutoff=True,
             )
@@ -170,6 +172,7 @@ def get_elasticity_irreps_loaders(
     pin_memory: bool = False,
     prefetch_factor: int | None = None,
     lmax: int | None = None,
+    num_basis: int = 8,
 ):
     """Create PyG data loaders for irrep-space elasticity targets."""
     train_path = f"{data_dir}/train.pkl"
@@ -177,15 +180,15 @@ def get_elasticity_irreps_loaders(
     test_path = f"{data_dir}/test.pkl"
 
     train_dataset = ElasticityIrrepsDataset(
-        train_path, "train", max_radius=max_radius, lmax=lmax
+        train_path, "train", max_radius=max_radius, lmax=lmax, num_basis=num_basis
     )
     train_stats = (train_dataset.mean_21d, train_dataset.std_21d)
 
     val_dataset = ElasticityIrrepsDataset(
-        val_path, "val", max_radius=max_radius, train_stats=train_stats, lmax=lmax
+        val_path, "val", max_radius=max_radius, train_stats=train_stats, lmax=lmax, num_basis=num_basis
     )
     test_dataset = ElasticityIrrepsDataset(
-        test_path, "test", max_radius=max_radius, train_stats=train_stats, lmax=lmax
+        test_path, "test", max_radius=max_radius, train_stats=train_stats, lmax=lmax, num_basis=num_basis
     )
 
     if train_subset is not None and train_subset < len(train_dataset):

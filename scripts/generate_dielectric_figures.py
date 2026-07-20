@@ -1,4 +1,4 @@
-"""Generate TNNLS figures for the dielectric tensor benchmark.
+"""Generate TPAMI figures for the dielectric tensor benchmark.
 
 Loads a trained checkpoint from ``scripts/train_dielectric.py`` and produces
 publication-ready diagnostic figures using the unified ``plotting`` style.
@@ -36,7 +36,7 @@ from plotting import (
     cm2inch,
     label_panels,
     save_figure,
-    setup_tnnls_style,
+    setup_tpami_style,
 )
 from representations import O3IrrepsSpec
 from spd_maps import MatrixExponentialMap
@@ -101,7 +101,7 @@ def collect_predictions(model, dataloader, device):
 
 def plot_training_curves(history: list[dict], save_path: Path) -> None:
     """Plot train/val loss and validation MAEs over epochs."""
-    setup_tnnls_style()
+    setup_tpami_style()
 
     epochs = [h["epoch"] for h in history]
     train_loss = [h["train_loss"] for h in history]
@@ -134,7 +134,7 @@ def plot_training_curves(history: list[dict], save_path: Path) -> None:
 
 def plot_parity(pred_km: np.ndarray, target_km: np.ndarray, save_path: Path) -> None:
     """Parity plot per Kelvin-Mandel component."""
-    setup_tnnls_style()
+    setup_tpami_style()
 
     d = pred_km.shape[-1]
     n_cols = 3
@@ -167,7 +167,7 @@ def plot_parity(pred_km: np.ndarray, target_km: np.ndarray, save_path: Path) -> 
 
 def plot_calibration(mu: torch.Tensor, y: torch.Tensor, scale: torch.Tensor, save_path: Path) -> None:
     """Coverage calibration and Q-Q plot for Mahalanobis distances."""
-    setup_tnnls_style()
+    setup_tpami_style()
 
     fig, axes = plt.subplots(1, 2, figsize=cm2inch(16, 6))
     ax_cov, ax_qq = axes
@@ -205,7 +205,7 @@ def plot_calibration(mu: torch.Tensor, y: torch.Tensor, scale: torch.Tensor, sav
 
 def plot_risk_coverage(mu: torch.Tensor, y: torch.Tensor, scale: torch.Tensor, save_path: Path) -> None:
     """Risk-coverage curve: coverage vs MAE when retaining most confident fraction."""
-    setup_tnnls_style()
+    setup_tpami_style()
 
     residual = torch.abs(mu - y)
     mae_per_sample = residual.mean(dim=-1)

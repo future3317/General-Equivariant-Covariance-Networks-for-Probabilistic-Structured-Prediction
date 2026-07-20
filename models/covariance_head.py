@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import torch
-from e3nn import o3
+from compatibility.e3nn import o3
 from torch_scatter import scatter
 
 from representations import O3IrrepsSpec, O3SymmetricOperatorBasis

@@ -9,8 +9,7 @@ import os
 import json
 import torch
 from torch.utils.data import Dataset
-from torch_geometric.data import Data
-from torch_geometric.loader import DataLoader as PyGDataLoader
+from compatibility.torch_geometric import Data, PyGDataLoader
 
 
 class DielectricDataset(Dataset):

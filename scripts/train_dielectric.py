@@ -12,15 +12,8 @@ import torch
 import torch.optim as optim
 from tqdm import tqdm
 
-from representations import O3IrrepsSpec
-from spd_maps import MatrixExponentialMap
-from distributions import GaussianNLL
-from models import (
-    EquivariantBackbone,
-    EquivariantMeanHead,
-    O3QuadraticSymmetricOperatorHead,
-    StructuredProbabilisticPredictor,
-)
+from representations import CompilerConfig, O3RepresentationCompiler
+from models import EquivariantBackbone
 from data.dielectric_dataset import get_dielectric_irreps_loaders
 from data.tensor_conversions import irreps_to_km, irreps_to_matrix_exp_voigt
 from voigt_utils import kelvin_mandel_to_voigt
@@ -63,7 +56,7 @@ def log_mae(pred_irreps: torch.Tensor, target_km: torch.Tensor) -> torch.Tensor:
     return torch.mean(torch.abs(pred_km - target_km))
 
 
-def train_epoch(model, dataloader, optimizer, device, distribution, warmup_mse_weight: float = 0.0, non_blocking: bool = False):
+def train_epoch(model, dataloader, optimizer, device, warmup_mse_weight: float = 0.0, non_blocking: bool = False):
     model.train()
     total_loss = torch.tensor(0.0, device=device)
     num_samples = 0
@@ -164,7 +157,6 @@ def main():
         lmax=args.lmax,
     )
 
-    output_spec = O3IrrepsSpec("0e + 2e")
     backbone = EquivariantBackbone(
         hidden_dim=args.hidden_dim,
         lmax=args.lmax,
@@ -173,20 +165,15 @@ def main():
         num_basis=args.num_basis,
         atom_features=args.atom_features,
     )
-    mean_head = EquivariantMeanHead(backbone.irreps_out, output_spec.irreps, pool=True)
-    cov_head = O3QuadraticSymmetricOperatorHead(backbone.irreps_out, output_spec, pool=True)
-
-    model = StructuredProbabilisticPredictor(
-        backbone=backbone,
-        output_spec=output_spec,
-        mean_head=mean_head,
-        covariance_head=cov_head,
-        spd_map=MatrixExponentialMap(),
-        distribution=GaussianNLL(),
-    ).to(args.device)
+    compilation = O3RepresentationCompiler(
+        "0e + 2e",
+        CompilerConfig(covariance="full", output_scope="global", objective="gaussian"),
+    ).compile(backbone.irreps_out)
+    model = compilation.build_model(backbone).to(args.device)
 
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(f"Model parameters: {num_params:,}")
+    logger.info("Compiled lifting depth: %d", compilation.active_plan.depth)
 
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=5)
@@ -199,7 +186,7 @@ def main():
     for epoch in range(args.num_epochs):
         warmup_mse = 0.1 if epoch < args.warmup_epochs else 0.0
         train_loss = train_epoch(
-            model, train_loader, optimizer, args.device, GaussianNLL(), warmup_mse,
+            model, train_loader, optimizer, args.device, warmup_mse,
             non_blocking=non_blocking,
         )
         val_metrics = validate(model, val_loader, args.device, non_blocking=non_blocking)
@@ -232,6 +219,8 @@ def main():
 
     with open(os.path.join(args.save_dir, "args.json"), "w") as f:
         json.dump(vars(args), f, indent=2)
+    with open(os.path.join(args.save_dir, "compilation.json"), "w") as f:
+        json.dump(compilation.as_dict(), f, indent=2)
     with open(os.path.join(args.save_dir, "history.json"), "w") as f:
         json.dump(history, f, indent=2)
     with open(os.path.join(args.save_dir, "test_metrics.json"), "w") as f:
