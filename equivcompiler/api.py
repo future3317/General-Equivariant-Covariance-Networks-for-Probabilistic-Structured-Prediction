@@ -58,6 +58,8 @@ def compile_readout(
     cost: CostPolicy = PreferExecutor(),
     student_t_dof: float = 5.0,
     output_scope: Literal["global", "node", "edge"] = "global",
+    lifting_backend: Literal["e3nn", "cueq"] = "e3nn",
+    cueq_method: Literal["naive", "fused_tp"] = "naive",
     device: torch.device | str | None = None,
     dtype: torch.dtype | None = None,
 ) -> tuple[torch.nn.Module, CompilationReport]:
@@ -72,6 +74,8 @@ def compile_readout(
         distribution=distribution,
         student_t_dof=student_t_dof,
         output_scope=output_scope,
+        lifting_backend=lifting_backend,
+        cueq_method=cueq_method,
     )
     readout = plan.build_readout(device=device, dtype=dtype)
     return readout, plan.report_for(readout)
@@ -88,6 +92,8 @@ def compile_predictor(
     cost: CostPolicy = PreferExecutor(),
     student_t_dof: float = 5.0,
     output_scope: Literal["global", "node", "edge"] = "global",
+    lifting_backend: Literal["e3nn", "cueq"] = "e3nn",
+    cueq_method: Literal["naive", "fused_tp"] = "naive",
 ) -> tuple[torch.nn.Module, CompilationReport]:
     """Compile and bind a complete predictor to a concrete backbone."""
     seed = FeatureSpec.from_backbone(backbone)
@@ -101,6 +107,8 @@ def compile_predictor(
         distribution=distribution,
         student_t_dof=student_t_dof,
         output_scope=output_scope,
+        lifting_backend=lifting_backend,
+        cueq_method=cueq_method,
     )
     predictor = plan.bind(backbone)
     return predictor, plan.report_for(predictor)

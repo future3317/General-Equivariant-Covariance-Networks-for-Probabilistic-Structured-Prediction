@@ -85,6 +85,23 @@ def test_planning_is_separate_from_materialization():
     assert next(readout.parameters()).dtype == torch.float64
 
 
+def test_cueq_is_an_explicit_lifting_backend():
+    pytest.importorskip("cuequivariance")
+    pytest.importorskip("cuequivariance_torch")
+    seed = FeatureSpec.from_irreps(SEED, scope="global")
+    plan = plan_readout(
+        seed,
+        output="ij=ji",
+        covariance=FullCovariance(),
+        lifting_backend="cueq",
+    )
+    assert plan.report.backend_selection_basis["lifting_backend"] == "cueq"
+    readout = plan.build_readout()
+    features = torch.randn(2, seed.irreps.dim)
+    result = readout(features, target=torch.randn(2, 6))
+    assert torch.isfinite(result["loss"])
+
+
 def test_budget_subfamily_is_not_reported_as_lowering_approximation():
     seed = FeatureSpec.from_irreps(SEED, scope="global")
     _, report = compile_readout(

@@ -360,6 +360,13 @@ def test_unknown_operator_node_cannot_claim_spd_or_equivariance():
         OperatorIR.node("unknown", positivity="spd", equivariance="certified")
     certificate = OperatorIR.node("unknown").verify()
     assert not certificate.valid
+
+
+def test_typed_leaf_is_not_a_semantic_operator_certificate():
+    certificate = OperatorIR.parameter("missing").verify()
+    assert not certificate.valid
+    assert certificate.positivity.value == "unknown"
+    assert certificate.equivariance.value == "unknown"
     assert certificate.positivity.value == "unknown"
     assert certificate.equivariance.value == "unknown"
 
@@ -555,6 +562,23 @@ def test_same_dimension_different_irreps_do_not_share_tuning_signature():
     )
     assert left_signature != right_signature
     assert left_signature.feature_fingerprint != right_signature.feature_fingerprint
+
+
+def test_lifting_backend_is_part_of_tuning_signature():
+    e3nn_plan = plan_readout(SEED, output="ij=ji", covariance=FullCovariance())
+    cueq_plan = plan_readout(
+        SEED,
+        output="ij=ji",
+        covariance=FullCovariance(),
+        lifting_backend="cueq",
+    )
+    e3nn_signature = execution_signature_for_plan(
+        e3nn_plan, batch_shape=(16, 96), dtype="float32", device="cpu"
+    )
+    cueq_signature = execution_signature_for_plan(
+        cueq_plan, batch_shape=(16, 96), dtype="float32", device="cpu"
+    )
+    assert e3nn_signature.semantic_plan_hash != cueq_signature.semantic_plan_hash
 
 
 def test_core_rejects_executor_decision_for_a_different_feature_contract():

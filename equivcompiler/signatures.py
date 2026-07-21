@@ -55,6 +55,7 @@ def plan_fingerprints(
     active_plan_record: dict,
     operator_record: dict,
     distribution_record: dict,
+    lowering_record: dict | None = None,
 ) -> dict[str, str]:
     active_plan_hash = _hash(active_plan_record)
     operator_program_hash = _hash(operator_record)
@@ -65,6 +66,7 @@ def plan_fingerprints(
             "active_plan_hash": active_plan_hash,
             "operator_program_hash": operator_program_hash,
             "distribution": distribution_record,
+            "lowering": lowering_record or {},
         }
     )
     return {
@@ -92,6 +94,10 @@ def execution_signature_for_plan(
         active_plan_record=plan.compilation.active_plan.as_dict(),
         operator_record=plan.compilation.operator_family.assembly.semantic_dict(),
         distribution_record=plan.distribution_spec.as_dict(),
+        lowering_record={
+            "lifting_backend": plan.compilation.config.lifting_backend,
+            "cueq_method": plan.compilation.config.cueq_method,
+        },
     )
     return ExecutionSignature(
         semantic_plan_hash=fingerprints["semantic_plan_hash"],

@@ -94,7 +94,16 @@ class OperatorVerification:
 
     @property
     def valid(self) -> bool:
-        return not self.unknown_instructions and not self.errors
+        # A certificate is valid only when the closed rule set established both
+        # semantic properties needed by an operator lowering.  A well-typed
+        # parameter leaf intentionally has unknown positivity, so it must not
+        # be mistaken for a proof merely because no syntax error was found.
+        return (
+            not self.unknown_instructions
+            and not self.errors
+            and self.positivity is not Positivity.UNKNOWN
+            and self.equivariance is Equivariance.VERIFIED
+        )
 
     def as_dict(self) -> dict[str, Any]:
         return {

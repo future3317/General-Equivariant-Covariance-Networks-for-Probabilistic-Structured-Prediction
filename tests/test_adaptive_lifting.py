@@ -102,6 +102,28 @@ def test_lifting_forward_backward_and_equivariance():
     assert torch.isfinite(features.grad).all()
 
 
+def test_cueq_lifting_matches_spherical_cg():
+    pytest.importorskip("cuequivariance")
+    pytest.importorskip("cuequivariance_torch")
+    from representations.adaptive_lifting import _O3LiftingStage
+
+    torch.manual_seed(13)
+    stage_e3nn = _O3LiftingStage(SEED, SEED, o3.Irreps("3x0e + 3x2e + 1x4e"))
+    stage_cueq = _O3LiftingStage(
+        SEED,
+        SEED,
+        o3.Irreps("3x0e + 3x2e + 1x4e"),
+        tensor_product_backend="cueq",
+    )
+    stage_cueq.linear.load_state_dict(stage_e3nn.linear.state_dict())
+    stage_cueq.tensor_product.weight.data.copy_(stage_e3nn.tensor_product.weight.data)
+    hidden = SEED.randn(4, -1)
+    seed = SEED.randn(4, -1)
+    expected = stage_e3nn(hidden, seed)
+    actual = stage_cueq(hidden, seed)
+    torch.testing.assert_close(actual, expected, atol=2e-6, rtol=2e-5)
+
+
 def test_cartesian_symmetry_is_compiled_and_round_trips():
     spec = O3IrrepsSpec.from_cartesian("ij=ji")
     assert str(spec.irreps) == "1x0e+1x2e"

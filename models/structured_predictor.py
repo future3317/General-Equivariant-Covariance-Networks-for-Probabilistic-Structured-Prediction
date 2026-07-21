@@ -140,6 +140,13 @@ class StructuredProbabilisticPredictor(torch.nn.Module):
         which the backbone runs under autocast while operator assembly and the
         proper likelihood remain in FP32.
         """
+        # Autocast is intentionally scoped to the backbone.  Enforce the
+        # readout parameter dtype here as well, so callers using cached BF16
+        # features cannot accidentally send reduced-precision coordinates into
+        # CG projection, matrix exponential, Cholesky, or an NLL.
+        readout_parameter = next(self.parameters(), None)
+        if readout_parameter is not None and node_features.dtype != readout_parameter.dtype:
+            node_features = node_features.to(dtype=readout_parameter.dtype)
         mu, params = self._predict(node_features, batch)
         result: dict[str, torch.Tensor | dict[str, torch.Tensor]] = {"mu": mu}
 
@@ -155,6 +162,8 @@ class StructuredProbabilisticPredictor(torch.nn.Module):
         result["params"] = params
 
         if target is not None:
+            if target.dtype != mu.dtype:
+                target = target.to(dtype=mu.dtype)
             loss, components = self.distribution(mu, params, target, self.spd_map)
             result["loss"] = loss
             result["components"] = components

@@ -12,9 +12,11 @@ frontier width, instruction count, FLOPs, or parameters.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import importlib.util
 from typing import Iterable
 
 import torch
+from compatibility.cuequivariance import load_cuequivariance
 from compatibility.e3nn import o3
 
 from representations.dense_projector import MultiplicityFirstDenseTensorProduct
@@ -349,12 +351,17 @@ class O3AdaptiveLifting(torch.nn.Module):
         plan: O3LiftingPlan | None = None,
         tensor_product_backend: str = "spherical_cg",
         contraction_rank: int | None = None,
+        cueq_method: str = "naive",
     ):
         super().__init__()
-        if tensor_product_backend not in {"spherical_cg", "dense_projector"}:
+        if tensor_product_backend not in {"spherical_cg", "dense_projector", "cueq"}:
             raise ValueError(
-                "tensor_product_backend must be spherical_cg or dense_projector"
+                "tensor_product_backend must be spherical_cg, cueq, or dense_projector"
             )
+        if cueq_method not in {"naive", "fused_tp"}:
+            raise ValueError("cueq_method must be naive or fused_tp")
+        if tensor_product_backend != "cueq" and cueq_method != "naive":
+            raise ValueError("cueq_method is only valid with tensor_product_backend='cueq'")
         self.plan = plan or plan_lifting_graph(seed_irreps, target_irreps)
         if o3.Irreps(seed_irreps) != self.plan.seed_irreps:
             raise ValueError("seed_irreps does not match the supplied lifting plan")
@@ -373,6 +380,7 @@ class O3AdaptiveLifting(torch.nn.Module):
                     stage.irreps_out,
                     tensor_product_backend=tensor_product_backend,
                     contraction_rank=contraction_rank,
+                    cueq_method=cueq_method,
                 )
             )
         self.final_linear = (
@@ -407,6 +415,7 @@ class _O3LiftingStage(torch.nn.Module):
         *,
         tensor_product_backend: str = "spherical_cg",
         contraction_rank: int | None = None,
+        cueq_method: str = "naive",
     ):
         super().__init__()
         self.linear = o3.Linear(irreps_in, irreps_out)
@@ -416,6 +425,32 @@ class _O3LiftingStage(torch.nn.Module):
                 seed_irreps,
                 irreps_out,
                 contraction_rank=contraction_rank,
+            )
+        elif tensor_product_backend == "cueq":
+            try:
+                cue, cuet = load_cuequivariance()
+            except ImportError as error:
+                raise RuntimeError(
+                    "tensor_product_backend='cueq' requires cuequivariance and "
+                    "cuequivariance-torch"
+                ) from error
+            if (
+                cueq_method == "fused_tp"
+                and importlib.util.find_spec("cuequivariance_ops_torch")
+                is None
+            ):
+                raise RuntimeError(
+                    "cueq_method='fused_tp' requires cuequivariance_ops_torch"
+                )
+            self.tensor_product = cuet.FullyConnectedTensorProduct(
+                cue.Irreps(cue.O3, str(irreps_in)),
+                cue.Irreps(cue.O3, str(seed_irreps)),
+                cue.Irreps(cue.O3, str(irreps_out)),
+                layout=cue.mul_ir,
+                internal_weights=True,
+                shared_weights=True,
+                use_fallback=cueq_method == "naive",
+                method=cueq_method,
             )
         else:
             self.tensor_product = o3.FullyConnectedTensorProduct(

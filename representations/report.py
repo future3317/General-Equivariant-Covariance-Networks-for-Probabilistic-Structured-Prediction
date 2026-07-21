@@ -462,6 +462,8 @@ def build_compilation_report(
     }
     backend_selection_record = {
         "selected_executor": compilation.backend,
+        "lifting_backend": compilation.config.lifting_backend,
+        "cueq_method": compilation.config.cueq_method,
         **compilation.executor_decision.selection_basis,
         "capability_certificate": (compilation.executor_decision.capability.as_dict()),
     }

@@ -222,6 +222,15 @@ parameterization.
   e3nn-compatible `mul_ir` layout through the Windows Triton path. On WSL,
   `--cueq_method fused_tp` selects NVIDIA's native CUDA kernels. Missing fused
   ops raise immediately instead of silently changing the requested method.
+- The staged compiler also exposes the lifting tensor-product backend as an
+  explicit lowering choice. Pass `lifting_backend="cueq"` and
+  `cueq_method="fused_tp"` to `plan_readout` on Linux/WSL when the native ops
+  wheel is installed; `"naive"` is the portable eager path. This choice is
+  included in the compatibility hash and report, and has an exact e3nn-layout
+  regression test. It is independent of the Cartesian-STF operator executor.
+- Compare the three tensor-product kernels on the actual server GPU with
+  `python scripts/benchmark_tp_backends.py`; the script records numerical
+  error, forward/forward-backward latency, and the complete shape contract.
 - Dielectric graphs can be converted to cache-friendly shards with
   `python -m scripts.shard_dielectric_graphs`. Use
   `--dataset_storage shards` to enable shard-aware batching.

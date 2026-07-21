@@ -46,12 +46,20 @@ class LoweringConfig:
 
     output_scope: OutputScope = "global"
     parameter_budget: int | None = None
+    lifting_backend: Literal["e3nn", "cueq"] = "e3nn"
+    cueq_method: Literal["naive", "fused_tp"] = "naive"
 
     def __post_init__(self):
         if self.output_scope not in {"global", "dense"}:
             raise ValueError(f"unknown output scope: {self.output_scope}")
         if self.parameter_budget is not None and self.parameter_budget < 1:
             raise ValueError("parameter_budget must be positive")
+        if self.lifting_backend not in {"e3nn", "cueq"}:
+            raise ValueError("lifting_backend must be e3nn or cueq")
+        if self.cueq_method not in {"naive", "fused_tp"}:
+            raise ValueError("cueq_method must be naive or fused_tp")
+        if self.lifting_backend != "cueq" and self.cueq_method != "naive":
+            raise ValueError("cueq_method is only valid with lifting_backend='cueq'")
 
 
 def _isotypic_parameter_count(output_irreps: o3.Irreps) -> int:
@@ -353,11 +361,16 @@ class O3CompiledOutputHead(torch.nn.Module):
             active_irreps,
             plan=compilation.active_plan,
             tensor_product_backend=(
-                "dense_projector"
-                if compilation.backend == "cartesian_stf"
-                else "spherical_cg"
+                "cueq"
+                if compilation.config.lifting_backend == "cueq"
+                else (
+                    "dense_projector"
+                    if compilation.backend == "cartesian_stf"
+                    else "spherical_cg"
+                )
             ),
             contraction_rank=compilation.stf_contraction_rank,
+            cueq_method=compilation.config.cueq_method,
         )
         self.mean_projection = o3.Linear(active_irreps, self.output_spec.irreps)
         install_parameter_projections(self)

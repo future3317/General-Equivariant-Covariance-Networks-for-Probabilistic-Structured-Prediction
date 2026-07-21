@@ -374,6 +374,8 @@ def _compatibility_hash(
     executor: ExecutorPolicy,
     cost: CostPolicy,
     output_scope: OutputScope,
+    lifting_backend: str,
+    cueq_method: str,
 ) -> str:
     payload = {
         "compiler_version": COMPILER_VERSION,
@@ -385,6 +387,8 @@ def _compatibility_hash(
         "executor_policy": _policy_record(executor),
         "cost_policy": _policy_record(cost),
         "output_scope": output_scope,
+        "lifting_backend": lifting_backend,
+        "cueq_method": cueq_method,
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -516,6 +520,8 @@ def plan_readout(
     cost: CostPolicy = PreferExecutor(),
     student_t_dof: float = 5.0,
     output_scope: OutputScope = "global",
+    lifting_backend: str = "e3nn",
+    cueq_method: str = "naive",
 ) -> CompilationPlan:
     """Analyze semantics/reachability and select an independently costed lowering."""
     fidelity_policy = fidelity or ExactOnly()
@@ -556,9 +562,17 @@ def plan_readout(
         )
         backend_selection_basis = executor_decision.selection_basis
 
+    backend_selection_basis = {
+        **backend_selection_basis,
+        "lifting_backend": lifting_backend,
+        "cueq_method": cueq_method,
+    }
+
     config = LoweringConfig(
         output_scope="global" if pool_input else "dense",
         parameter_budget=getattr(covariance, "max_parameters", family.parameter_count),
+        lifting_backend=lifting_backend,
+        cueq_method=cueq_method,
     )
     compiler = O3ProgramCompiler(
         semantics.output_spec,
@@ -584,6 +598,8 @@ def plan_readout(
         executor,
         cost,
         output_scope,
+        lifting_backend,
+        cueq_method,
     )
     report = _decorate_report(
         compilation.report(),
