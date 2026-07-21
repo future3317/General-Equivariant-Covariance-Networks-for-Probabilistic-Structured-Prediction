@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 import torch
-from torch.utils.data import DataLoader, Dataset, Subset
+from torch.utils.data import DataLoader, Dataset, RandomSampler, Subset
 
 from data.itop_dataset import itop_train_validation_indices
 
@@ -78,8 +78,17 @@ def get_itop_feature_loaders(
         "pin_memory": pin_memory,
         "persistent_workers": num_workers > 0,
     }
+    train_sampler = RandomSampler(
+        train,
+        generator=torch.Generator().manual_seed(seed),
+    )
     return (
-        DataLoader(train, shuffle=True, **kwargs),
+        DataLoader(
+            train,
+            sampler=train_sampler,
+            generator=torch.Generator().manual_seed(seed + 1),
+            **kwargs,
+        ),
         DataLoader(validation, shuffle=False, **kwargs),
         DataLoader(side_test, shuffle=False, **kwargs),
         DataLoader(top_test, shuffle=False, **kwargs),

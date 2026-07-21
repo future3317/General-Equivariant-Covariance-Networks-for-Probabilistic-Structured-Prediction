@@ -427,6 +427,14 @@ calibration, risk--coverage, occlusion, and residual-correlation metrics. The
 development/final point budgets are 256/512; no ground-truth torso centering is
 used.
 
+Training writes an atomic `history.json` after every epoch with train/validation
+losses, proper-NLL components, learning rates, and gradient norms. Non-finite
+targets, losses, components, gradients, and early-stopping criteria fail
+immediately. `last_state.pt` stores model/optimizer/scheduler state, early-stop
+state, history, and Python/NumPy/Torch/CUDA RNG streams; the shuffled sample
+order is an explicit function of seed and epoch, so an interrupted cached-data
+study resumes at the next epoch without changing its sample order.
+
 Each training run writes `compilation.json` beside its checkpoint so the exact
 representation target, lifting stages, covariance complexity, execution
 backend/exactness, and objective are reproducible.

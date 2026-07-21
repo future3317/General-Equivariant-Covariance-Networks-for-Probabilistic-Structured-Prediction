@@ -156,6 +156,88 @@ def _save_checkpoint(payload: dict[str, Any], path: Path) -> None:
     temporary.replace(path)
 
 
+def _write_json(payload: Any, path: Path) -> None:
+    """Atomically publish a human-readable run artifact."""
+    temporary = path.with_suffix(path.suffix + ".partial")
+    temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
+def _capture_rng_state() -> dict[str, Any]:
+    """Capture process-level RNG streams used by the training program."""
+    numpy_state = np.random.get_state()
+    return {
+        "python": random.getstate(),
+        "numpy": {
+            "bit_generator": numpy_state[0],
+            "state": numpy_state[1].tolist(),
+            "position": int(numpy_state[2]),
+            "has_gauss": int(numpy_state[3]),
+            "cached_gaussian": float(numpy_state[4]),
+        },
+        "torch_cpu": torch.get_rng_state(),
+        "torch_cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else [],
+    }
+
+
+def _restore_rng_state(state: dict[str, Any]) -> None:
+    """Restore an exact RNG snapshot, refusing incompatible CUDA topology."""
+    required = {"python", "numpy", "torch_cpu", "torch_cuda"}
+    if not isinstance(state, dict) or not required.issubset(state):
+        raise ValueError("resume checkpoint does not contain a complete RNG state")
+    random.setstate(state["python"])
+    numpy_state = state["numpy"]
+    np.random.set_state(
+        (
+            numpy_state["bit_generator"],
+            np.asarray(numpy_state["state"], dtype=np.uint32),
+            int(numpy_state["position"]),
+            int(numpy_state["has_gauss"]),
+            float(numpy_state["cached_gaussian"]),
+        )
+    )
+    torch.set_rng_state(state["torch_cpu"])
+    cuda_states = state["torch_cuda"]
+    if cuda_states:
+        if not torch.cuda.is_available():
+            raise ValueError("CUDA RNG state cannot be restored without CUDA")
+        if len(cuda_states) != torch.cuda.device_count():
+            raise ValueError(
+                "CUDA device count differs from resume checkpoint: "
+                f"saved={len(cuda_states)}, current={torch.cuda.device_count()}"
+            )
+        torch.cuda.set_rng_state_all(cuda_states)
+
+
+def _set_loader_epoch(loader, *, seed: int, epoch: int) -> None:
+    """Make the shuffled training order a pure function of seed and epoch."""
+    generator = getattr(getattr(loader, "sampler", None), "generator", None)
+    if not isinstance(generator, torch.Generator):
+        raise TypeError("training loader must expose a generator-backed sampler")
+    generator.manual_seed(seed * 1_000_003 + epoch)
+
+
+def _require_finite_tensor(name: str, value: torch.Tensor) -> None:
+    if not bool(torch.isfinite(value.detach()).all()):
+        raise FloatingPointError(f"non-finite {name} detected")
+
+
+def _require_finite_number(name: str, value: float) -> float:
+    value = float(value)
+    if not math.isfinite(value):
+        raise FloatingPointError(f"non-finite {name} detected: {value}")
+    return value
+
+
+def _update_early_stopping(
+    criterion: float, best: float, stale: int
+) -> tuple[float, int, bool]:
+    criterion = _require_finite_number("validation criterion", criterion)
+    if criterion < best:
+        return criterion, 0, True
+    return best, stale + 1, False
+
+
 def _configure_initialization(model, args: argparse.Namespace) -> bool:
     if args.phase == "deterministic":
         if args.model != "deterministic":
@@ -238,15 +320,20 @@ def train_epoch(
     *,
     frozen_backbone: bool,
     use_bf16: bool,
-) -> float:
+) -> dict[str, float]:
     model.train()
     if frozen_backbone:
         model.backbone.eval()
     total = 0.0
     count = 0
+    steps = 0
+    gradient_norm_total = 0.0
+    gradient_norm_max = 0.0
+    component_totals: dict[str, float] = {}
     for batch in tqdm(loader, desc="train", leave=False):
         batch = _to_device(batch, device)
         target = _batch_field(batch, "target" if isinstance(batch, dict) else "y_pose")
+        _require_finite_tensor("training target", target)
         optimizer.zero_grad(set_to_none=True)
         result = _forward(
             model,
@@ -256,16 +343,36 @@ def train_epoch(
             use_bf16=use_bf16,
         )
         loss = result["loss"]
+        _require_finite_tensor("training loss", loss)
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(
+        gradient_norm = torch.nn.utils.clip_grad_norm_(
             (parameter for parameter in model.parameters() if parameter.requires_grad),
             1.0,
+            error_if_nonfinite=True,
+        )
+        gradient_norm_value = _require_finite_number(
+            "gradient norm", float(gradient_norm.detach())
         )
         optimizer.step()
         batch_size = target.shape[0]
         total += float(loss.detach()) * batch_size
+        for name, value in result.get("components", {}).items():
+            _require_finite_tensor(f"training component {name}", value)
+            component_totals[name] = (
+                component_totals.get(name, 0.0) + float(value) * batch_size
+            )
         count += batch_size
-    return total / max(count, 1)
+        steps += 1
+        gradient_norm_total += gradient_norm_value
+        gradient_norm_max = max(gradient_norm_max, gradient_norm_value)
+    if count == 0:
+        raise ValueError("training loader produced no samples")
+    return {
+        "loss": total / count,
+        "gradient_norm_mean": gradient_norm_total / steps,
+        "gradient_norm_max": gradient_norm_max,
+        **{name: value / count for name, value in component_totals.items()},
+    }
 
 
 def _energy_and_bone_error(
@@ -323,6 +430,7 @@ def evaluate(
     parameters: list[torch.Tensor] = []
     frame_indices: list[torch.Tensor] = []
     view_ids: list[torch.Tensor] = []
+    component_totals: dict[str, float] = {}
     is_student = model_kind == "graph_student_t"
 
     for batch in tqdm(loader, desc="evaluate", leave=False):
@@ -330,6 +438,7 @@ def evaluate(
         target_batch = _batch_field(
             batch, "target" if isinstance(batch, dict) else "y_pose"
         )
+        _require_finite_tensor("evaluation target", target_batch)
         visible_batch = _batch_field(batch, "visible_joints")
         result = _forward(
             model,
@@ -339,7 +448,14 @@ def evaluate(
             use_bf16=use_bf16,
         )
         batch_size = target_batch.shape[0]
+        _require_finite_tensor("evaluation loss", result["loss"])
+        _require_finite_tensor("evaluation mean", result["mu"])
         total_loss += float(result["loss"]) * batch_size
+        for name, value in result.get("components", {}).items():
+            _require_finite_tensor(f"evaluation component {name}", value)
+            component_totals[name] = (
+                component_totals.get(name, 0.0) + float(value) * batch_size
+            )
         count += batch_size
         means.append(result["mu"].float().cpu())
         targets.append(target_batch.cpu())
@@ -348,6 +464,7 @@ def evaluate(
         view_ids.append(_batch_field(batch, "view_id").cpu())
         if detailed and model_kind != "deterministic":
             scatter = result["scale"].float()
+            _require_finite_tensor("evaluation scale", scatter)
             covariance = (
                 (student_t_dof / (student_t_dof - 2.0)) * scatter
                 if is_student
@@ -370,13 +487,16 @@ def evaluate(
             total_energy += float(energy) * batch_size
             total_bone += float(bone) * batch_size
 
+    if count == 0:
+        raise ValueError("evaluation loader produced no samples")
     mean = torch.cat(means)
     target = torch.cat(targets)
     visible = torch.cat(visibility).bool()
     errors = joint_errors(mean, target)
     metrics: dict[str, Any] = {
-        "loss": total_loss / max(count, 1),
+        "loss": total_loss / count,
         "mpjpe_cm": float(errors.mean().item() * 100.0),
+        **{name: value / count for name, value in component_totals.items()},
     }
     for centimeters in (5, 10, 15):
         metrics[f"pck_{centimeters}cm"] = float(
@@ -489,19 +609,28 @@ def _ood_metrics(
     }
 
 
-def _checkpoint_payload(model, args, epoch: int, validation: dict[str, Any]) -> dict:
+def _checkpoint_payload(
+    model,
+    args,
+    epoch: int,
+    validation: dict[str, Any],
+    *,
+    criterion_name: str,
+    criterion_value: float,
+) -> dict:
     mean_head = (
         model.joint_head
         if args.model == "deterministic"
         else model.joint_head.mean_head
     )
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "model_kind": args.model,
         "phase": args.phase,
         "seed": args.seed,
         "epoch": epoch,
         "validation": validation,
+        "selection": {"criterion": criterion_name, "value": criterion_value},
         "model_state": model.state_dict(),
         "backbone_state": model.backbone.state_dict(),
         "mean_head_state": mean_head.state_dict(),
@@ -521,7 +650,7 @@ def _last_state_payload(
     history: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "model_state": model.state_dict(),
         "optimizer_state": optimizer.state_dict(),
         "scheduler_state": scheduler.state_dict(),
@@ -530,6 +659,7 @@ def _last_state_payload(
         "best": best,
         "stale": stale,
         "history": history,
+        "rng_state": _capture_rng_state(),
     }
 
 
@@ -678,6 +808,10 @@ def main() -> None:
     last_state_path = run_dir / "last_state.pt"
     if args.continue_run and last_state_path.is_file():
         state = _load_checkpoint(last_state_path)
+        if state.get("schema_version") != 2:
+            raise ValueError(
+                "last_state.pt predates exact RNG resume support; restart this stage"
+            )
         _validate_resume_args(state["args"], args)
         model.load_state_dict(state["model_state"], strict=True)
         optimizer.load_state_dict(state["optimizer_state"])
@@ -686,13 +820,16 @@ def main() -> None:
         best = float(state["best"])
         stale = int(state["stale"])
         history = list(state["history"])
+        _restore_rng_state(state["rng_state"])
         logger.info("resume next_epoch=%d best=%.8g stale=%d", start_epoch, best, stale)
     elif args.continue_run:
         logger.info("no last_state.pt found; restarting stage before its first epoch")
     if stale >= args.patience:
         start_epoch = args.num_epochs + 1
     for epoch in range(start_epoch, args.num_epochs + 1):
-        train_loss = train_epoch(
+        _set_loader_epoch(train_loader, seed=args.seed, epoch=epoch)
+        learning_rate = float(optimizer.param_groups[0]["lr"])
+        train_stats = train_epoch(
             model,
             train_loader,
             optimizer,
@@ -714,18 +851,40 @@ def main() -> None:
             if args.model == "deterministic"
             else validation["loss"]
         )
+        criterion_name = (
+            "validation_mpjpe_cm"
+            if args.model == "deterministic"
+            else "validation_nll"
+        )
+        criterion = _require_finite_number(criterion_name, criterion)
         scheduler.step(criterion)
-        record = {"epoch": epoch, "train_loss": train_loss, **validation}
+        record = {
+            "epoch": epoch,
+            "learning_rate": learning_rate,
+            "next_learning_rate": float(optimizer.param_groups[0]["lr"]),
+            "train_loss": train_stats["loss"],
+            **{
+                f"train_{name}": value
+                for name, value in train_stats.items()
+                if name != "loss"
+            },
+            **validation,
+        }
         history.append(record)
         logger.info("epoch=%d %s", epoch, json.dumps(record, sort_keys=True))
-        if criterion < best:
-            best = criterion
-            stale = 0
+        best, stale, improved = _update_early_stopping(criterion, best, stale)
+        if improved:
             _save_checkpoint(
-                _checkpoint_payload(model, args, epoch, validation), best_path
+                _checkpoint_payload(
+                    model,
+                    args,
+                    epoch,
+                    validation,
+                    criterion_name=criterion_name,
+                    criterion_value=criterion,
+                ),
+                best_path,
             )
-        else:
-            stale += 1
         _save_checkpoint(
             _last_state_payload(
                 model,
@@ -739,10 +898,15 @@ def main() -> None:
             ),
             last_state_path,
         )
+        _write_json(history, run_dir / "history.json")
         if stale >= args.patience:
             logger.info("early_stop epoch=%d stale=%d", epoch, stale)
             break
 
+    if not best_path.is_file():
+        raise RuntimeError(
+            "training produced no best_model.pt; inspect train.log and last_state.pt"
+        )
     payload = _load_checkpoint(best_path)
     model.load_state_dict(payload["model_state"], strict=True)
     side_metrics, side_artifact = evaluate(
@@ -775,9 +939,7 @@ def main() -> None:
         "metrics.json": results,
     }
     for filename, record in records.items():
-        (run_dir / filename).write_text(
-            json.dumps(record, indent=2) + "\n", encoding="utf-8"
-        )
+        _write_json(record, run_dir / filename)
     torch.save(side_artifact, run_dir / "predictions_side.pt")
     torch.save(top_artifact, run_dir / "predictions_top.pt")
 

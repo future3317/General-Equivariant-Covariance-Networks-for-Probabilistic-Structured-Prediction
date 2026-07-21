@@ -9,7 +9,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 import torch
-from torch.utils.data import Dataset, Subset
+from torch.utils.data import Dataset, RandomSampler, Subset
 
 from compatibility.torch_geometric import Data, PyGDataLoader
 from data.point_cloud_graph import compute_edge_features, knn_graph
@@ -525,9 +525,17 @@ def get_itop_loaders(
     }
     if num_workers > 0 and prefetch_factor is not None:
         loader_kwargs["prefetch_factor"] = prefetch_factor
+    train_sampler = RandomSampler(
+        train_dataset,
+        generator=torch.Generator().manual_seed(seed),
+    )
     return (
         PyGDataLoader(
-            train_dataset, batch_size=batch_size, shuffle=True, **loader_kwargs
+            train_dataset,
+            batch_size=batch_size,
+            sampler=train_sampler,
+            generator=torch.Generator().manual_seed(seed + 1),
+            **loader_kwargs,
         ),
         PyGDataLoader(
             validation_dataset, batch_size=batch_size, shuffle=False, **loader_kwargs
