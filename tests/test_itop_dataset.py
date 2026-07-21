@@ -12,7 +12,9 @@ from data.itop_dataset import (
     ITOP_OUTPUT_GRAPH,
     compact_itop_labels,
     depth_to_point_cloud,
+    get_itop_split_loader,
     itop_train_validation_indices,
+    require_itop_file,
 )
 from data.itop_features import get_itop_feature_loaders
 from equivcompiler import FeatureSpec, GraphPrecision, plan_readout
@@ -61,7 +63,16 @@ def test_label_compaction_omits_segmentation(tmp_path):
     with np.load(compact_path) as compact:
         assert "real_world_coordinates" in compact
         assert "visible_joints" in compact
+        assert "image_coordinates" not in compact
         assert "segmentation" not in compact
+
+
+def test_nested_hdf5_layout_is_rejected(tmp_path):
+    destination = tmp_path / "ITOP_side_test_depth_map.h5"
+    destination.mkdir()
+    (destination / destination.name).touch()
+    with pytest.raises(FileNotFoundError, match="required ITOP file"):
+        require_itop_file(destination)
 
 
 def test_itop_dataset_centers_observable_cloud_without_label_leakage(tmp_path):
@@ -73,7 +84,6 @@ def test_itop_dataset_centers_observable_cloud_without_label_leakage(tmp_path):
         view="side",
         num_points=8,
         num_neighbors=2,
-        training=False,
     )
     assert len(dataset) == 1
     sample = dataset[0]
@@ -100,8 +110,6 @@ def test_itop_sample_runs_through_compiled_graph_precision_model(tmp_path):
         view="side",
         num_points=8,
         num_neighbors=2,
-        num_basis=4,
-        training=False,
     )
     sample = dataset[0]
     sample.batch = torch.zeros(sample.pos.shape[0], dtype=torch.long)
@@ -167,6 +175,10 @@ def test_precomputed_itop_geometry_is_exact_and_gpu_featurizable(tmp_path):
     expected_labels = root / "ITOP_side_train_labels.h5"
     depth_path.replace(expected_depth)
     labels_path.replace(expected_labels)
+    compact_itop_labels(
+        expected_labels,
+        root / "ITOP_side_train_labels_compact.npz",
+    )
     cache = write_itop_geometry_cache(
         root,
         view="side",
@@ -196,6 +208,18 @@ def test_precomputed_itop_geometry_is_exact_and_gpu_featurizable(tmp_path):
     node_features, batch = backbone(sample)
     assert node_features.shape[0] == 8
     assert batch.shape == (8,)
+
+
+def test_split_loader_requires_precomputed_geometry(tmp_path):
+    with pytest.raises(FileNotFoundError, match="metadata.json"):
+        get_itop_split_loader(
+            tmp_path / "ITOP",
+            view="side",
+            split="train",
+            batch_size=2,
+            num_points=256,
+            num_neighbors=16,
+        )
 
 
 def _write_feature_cache(root, checkpoint, *, checkpoint_hash):

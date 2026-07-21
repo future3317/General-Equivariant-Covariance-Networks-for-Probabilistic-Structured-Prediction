@@ -56,19 +56,25 @@ def main() -> None:
         "--device", default="cuda" if torch.cuda.is_available() else "cpu"
     )
     args = parser.parse_args()
-    args.output_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_hash = sha256_file(args.checkpoint)
     metadata_path = args.output_dir / "metadata.json"
-    if metadata_path.is_file():
+    if args.output_dir.exists():
+        if not args.output_dir.is_dir():
+            raise NotADirectoryError(args.output_dir)
+        if not metadata_path.is_file():
+            raise FileExistsError(
+                f"feature cache directory is incomplete: {args.output_dir}"
+            )
         existing = json.loads(metadata_path.read_text(encoding="utf-8"))
-        if existing.get("backbone_checkpoint_sha256") != checkpoint_hash:
+        if existing["backbone_checkpoint_sha256"] != checkpoint_hash:
             raise ValueError("output directory belongs to a different checkpoint")
         for name in ("side_train", "side_test", "top_test"):
             ITOPFeatureDataset(args.output_dir / f"{name}.pt")
         print(f"complete feature cache already exists: {args.output_dir}")
         return
+    args.output_dir.mkdir(parents=True)
     checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
-    if checkpoint.get("model_kind") != "deterministic":
+    if checkpoint["model_kind"] != "deterministic":
         raise ValueError("backbone feature cache requires a deterministic checkpoint")
     training_args = Namespace(**checkpoint["args"])
     if args.data_dir is not None:
@@ -82,14 +88,10 @@ def main() -> None:
         batch_size=args.batch_size,
         num_points=training_args.num_points,
         num_neighbors=training_args.num_neighbors,
-        max_radius=training_args.max_radius,
-        num_basis=training_args.num_basis,
-        lmax=training_args.lmax,
         num_workers=args.num_workers,
         pin_memory=device.type == "cuda",
         persistent_workers=args.num_workers > 0,
         prefetch_factor=2,
-        use_cache=not training_args.no_cache,
     )
     splits = {
         "side_train": ("side", "train"),
@@ -99,10 +101,6 @@ def main() -> None:
     counts = {}
     for name, (view, split) in splits.items():
         output_path = args.output_dir / f"{name}.pt"
-        if output_path.is_file():
-            cached = ITOPFeatureDataset(output_path)
-            counts[name] = len(cached)
-            continue
         loader = get_itop_split_loader(view=view, split=split, **loader_kwargs)
         payload = _extract(
             backbone,

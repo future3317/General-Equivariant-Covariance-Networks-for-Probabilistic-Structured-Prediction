@@ -434,6 +434,12 @@ immediately. `last_state.pt` stores model/optimizer/scheduler state, early-stop
 state, history, and Python/NumPy/Torch/CUDA RNG streams; the shuffled sample
 order is an explicit function of seed and epoch, so an interrupted cached-data
 study resumes at the next epoch without changing its sample order.
+Training and frozen-feature extraction require the immutable geometry caches;
+there is no online raw-HDF5 fallback. Raw depth and compact-label files are read
+only by the explicit geometry-precomputation stage and must use the canonical
+direct-file layout. `--continue_run` likewise requires a schema-v3
+`last_state.pt`; an old checkpoint or an incomplete run directory without that
+state is rejected instead of restarted implicitly.
 
 Each training run writes `compilation.json` beside its checkpoint so the exact
 representation target, lifting stages, covariance complexity, execution

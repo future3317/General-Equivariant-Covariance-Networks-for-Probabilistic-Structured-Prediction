@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -17,6 +18,7 @@ from scripts.train_itop import (
     _update_early_stopping,
     train_epoch,
 )
+from scripts.run_itop_study import _training_command
 from torch.utils.data import DataLoader, RandomSampler, TensorDataset
 
 
@@ -139,6 +141,37 @@ def test_training_sample_order_is_seed_and_epoch_addressable():
 
     torch.testing.assert_close(resumed, first, rtol=0.0, atol=0.0)
     assert not torch.equal(next_epoch, first)
+
+
+def test_existing_run_directory_requires_resumable_state(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    args = SimpleNamespace(
+        data_dir=tmp_path / "ITOP",
+        num_points=256,
+        batch_size=4,
+        num_workers=0,
+    )
+    with pytest.raises(FileExistsError, match="no resumable state"):
+        _training_command(
+            args,
+            run_dir=run_dir,
+            model="deterministic",
+            phase="deterministic",
+            seed=42,
+            epochs=2,
+        )
+
+    (run_dir / "last_state.pt").touch()
+    command = _training_command(
+        args,
+        run_dir=run_dir,
+        model="deterministic",
+        phase="deterministic",
+        seed=42,
+        epochs=2,
+    )
+    assert command[-1] == "--continue_run"
 
 
 def test_rng_checkpoint_round_trip_is_exact(tmp_path):

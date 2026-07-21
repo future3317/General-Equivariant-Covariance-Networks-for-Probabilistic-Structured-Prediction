@@ -44,7 +44,6 @@ def write_itop_geometry_cache(
         view=view,
         num_points=num_points,
         num_neighbors=num_neighbors,
-        training=False,
     )
     count = len(source)
     arrays = {

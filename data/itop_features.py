@@ -60,7 +60,7 @@ def get_itop_feature_loaders(
     root = Path(cache_dir)
     metadata = json.loads((root / "metadata.json").read_text(encoding="utf-8"))
     actual_hash = sha256_file(backbone_checkpoint)
-    if metadata.get("backbone_checkpoint_sha256") != actual_hash:
+    if metadata["backbone_checkpoint_sha256"] != actual_hash:
         raise ValueError(
             "feature cache was produced by a different backbone checkpoint"
         )

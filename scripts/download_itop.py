@@ -69,9 +69,13 @@ def _download(entry: dict, destination: Path) -> None:
 
 
 def _decompress(source: Path, destination: Path) -> None:
-    if destination.exists():
+    if destination.is_file():
         print(f"keeping existing {destination.name}")
         return
+    if destination.exists():
+        raise FileExistsError(
+            f"ITOP destination must be a direct file, not a directory: {destination}"
+        )
     temporary = destination.with_suffix(destination.suffix + ".part")
     with gzip.open(source, "rb") as compressed, temporary.open("wb") as target:
         with tqdm(

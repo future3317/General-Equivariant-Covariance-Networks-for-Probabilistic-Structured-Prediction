@@ -102,7 +102,11 @@ def _training_command(
         command.extend(("--feature_cache", str(feature_cache)))
     if resume_checkpoint is not None:
         command.extend(("--resume_checkpoint", str(resume_checkpoint)))
-    if run_dir.is_dir():
+    if run_dir.is_dir() and not (run_dir / "last_state.pt").is_file():
+        raise FileExistsError(
+            f"incomplete run directory has no resumable state: {run_dir}"
+        )
+    if (run_dir / "last_state.pt").is_file():
         command.append("--continue_run")
     return command
 

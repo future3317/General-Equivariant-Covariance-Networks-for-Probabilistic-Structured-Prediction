@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import defaultdict
 import json
 import logging
 import math
@@ -20,7 +21,7 @@ from data.itop_dataset import (
     ITOP_INDEPENDENT_GRAPH,
     ITOP_OUTPUT_GRAPH,
     get_itop_loaders,
-    get_itop_test_loader,
+    get_itop_split_loader,
 )
 from data.itop_features import get_itop_feature_loaders
 from data.paths import dataset_dir
@@ -329,7 +330,7 @@ def train_epoch(
     steps = 0
     gradient_norm_total = 0.0
     gradient_norm_max = 0.0
-    component_totals: dict[str, float] = {}
+    component_totals: defaultdict[str, float] = defaultdict(float)
     for batch in tqdm(loader, desc="train", leave=False):
         batch = _to_device(batch, device)
         target = _batch_field(batch, "target" if isinstance(batch, dict) else "y_pose")
@@ -356,11 +357,9 @@ def train_epoch(
         optimizer.step()
         batch_size = target.shape[0]
         total += float(loss.detach()) * batch_size
-        for name, value in result.get("components", {}).items():
+        for name, value in result["components"].items():
             _require_finite_tensor(f"training component {name}", value)
-            component_totals[name] = (
-                component_totals.get(name, 0.0) + float(value) * batch_size
-            )
+            component_totals[name] += float(value) * batch_size
         count += batch_size
         steps += 1
         gradient_norm_total += gradient_norm_value
@@ -430,7 +429,7 @@ def evaluate(
     parameters: list[torch.Tensor] = []
     frame_indices: list[torch.Tensor] = []
     view_ids: list[torch.Tensor] = []
-    component_totals: dict[str, float] = {}
+    component_totals: defaultdict[str, float] = defaultdict(float)
     is_student = model_kind == "graph_student_t"
 
     for batch in tqdm(loader, desc="evaluate", leave=False):
@@ -451,11 +450,9 @@ def evaluate(
         _require_finite_tensor("evaluation loss", result["loss"])
         _require_finite_tensor("evaluation mean", result["mu"])
         total_loss += float(result["loss"]) * batch_size
-        for name, value in result.get("components", {}).items():
+        for name, value in result["components"].items():
             _require_finite_tensor(f"evaluation component {name}", value)
-            component_totals[name] = (
-                component_totals.get(name, 0.0) + float(value) * batch_size
-            )
+            component_totals[name] += float(value) * batch_size
         count += batch_size
         means.append(result["mu"].float().cpu())
         targets.append(target_batch.cpu())
@@ -624,7 +621,7 @@ def _checkpoint_payload(
         else model.joint_head.mean_head
     )
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "model_kind": args.model,
         "phase": args.phase,
         "seed": args.seed,
@@ -650,7 +647,7 @@ def _last_state_payload(
     history: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "model_state": model.state_dict(),
         "optimizer_state": optimizer.state_dict(),
         "scheduler_state": scheduler.state_dict(),
@@ -665,10 +662,11 @@ def _last_state_payload(
 
 def _validate_resume_args(saved: dict[str, Any], current: argparse.Namespace) -> None:
     ignored = {"continue_run", "num_epochs"}
+    current_args = vars(current)
     mismatches = {
-        name: {"saved": value, "current": vars(current).get(name)}
+        name: {"saved": value, "current": current_args[name]}
         for name, value in saved.items()
-        if name not in ignored and vars(current).get(name) != value
+        if name not in ignored and current_args[name] != value
     }
     if mismatches:
         raise ValueError(f"resume arguments do not match run contract: {mismatches}")
@@ -710,7 +708,6 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--backbone_precision", choices=("bf16", "fp32"), default="bf16"
     )
-    parser.add_argument("--no_cache", action="store_true")
     add_tensor_product_arguments(parser)
     parser.add_argument(
         "--device", default="cuda" if torch.cuda.is_available() else "cpu"
@@ -732,6 +729,11 @@ def main() -> None:
         torch.backends.cudnn.benchmark = False
     _set_seed(args.seed)
     run_dir = Path(args.run_dir)
+    last_state_path = run_dir / "last_state.pt"
+    if args.continue_run and not last_state_path.is_file():
+        raise FileNotFoundError(
+            f"--continue_run requires checkpoint: {last_state_path}"
+        )
     logger = _logger(run_dir, continuing=args.continue_run)
     model, plan = _build_model(args)
     frozen_backbone = _configure_initialization(model, args)
@@ -745,14 +747,10 @@ def main() -> None:
         batch_size=args.batch_size,
         num_points=args.num_points,
         num_neighbors=args.num_neighbors,
-        max_radius=args.max_radius,
-        num_basis=args.num_basis,
-        lmax=args.lmax,
         num_workers=args.num_workers,
         pin_memory=device.type == "cuda",
         persistent_workers=args.num_workers > 0,
         prefetch_factor=args.prefetch_factor,
-        use_cache=not args.no_cache,
     )
     feature_cache_metadata = None
     if args.feature_cache is not None:
@@ -776,7 +774,9 @@ def main() -> None:
         train_loader, validation_loader, side_loader = get_itop_loaders(
             train_view="side", test_view="side", seed=args.seed, **loader_kwargs
         )
-        top_loader = get_itop_test_loader(view="top", **loader_kwargs)
+        top_loader = get_itop_split_loader(
+            view="top", split="test", **loader_kwargs
+        )
 
     compilation = plan.compilation.as_dict() if plan is not None else None
     logger.info("args=%s", json.dumps(vars(args), sort_keys=True))
@@ -805,12 +805,12 @@ def main() -> None:
     history: list[dict[str, Any]] = []
     start_epoch = 1
     best_path = run_dir / "best_model.pt"
-    last_state_path = run_dir / "last_state.pt"
-    if args.continue_run and last_state_path.is_file():
+    if args.continue_run:
         state = _load_checkpoint(last_state_path)
-        if state.get("schema_version") != 2:
+        if state["schema_version"] != 3:
             raise ValueError(
-                "last_state.pt predates exact RNG resume support; restart this stage"
+                "last_state.pt does not match the schema-v3 training contract; "
+                "restart this stage"
             )
         _validate_resume_args(state["args"], args)
         model.load_state_dict(state["model_state"], strict=True)
@@ -822,8 +822,6 @@ def main() -> None:
         history = list(state["history"])
         _restore_rng_state(state["rng_state"])
         logger.info("resume next_epoch=%d best=%.8g stale=%d", start_epoch, best, stale)
-    elif args.continue_run:
-        logger.info("no last_state.pt found; restarting stage before its first epoch")
     if stale >= args.patience:
         start_epoch = args.num_epochs + 1
     for epoch in range(start_epoch, args.num_epochs + 1):
