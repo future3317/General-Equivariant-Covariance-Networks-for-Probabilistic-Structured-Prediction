@@ -17,6 +17,22 @@ same compilation result selects an execution basis, creates the mean/covariance
 head, covariance basis, SPD parameterization, and proper Gaussian or Student-t
 objective.
 
+## Scope and current status
+
+The compiler contract is group-agnostic for finite-dimensional orthogonal output
+representations. The released executable backend is currently validated for
+orthonormal `O(3)` contracts using e3nn-real layouts; extending the semantic IR
+to another compact orthogonal group does not imply that a numerical backend for
+that group is already shipped. This distinction is intentional: the compiler
+can reject an unreachable or unsupported lowering with a certificate instead of
+silently changing the requested representation or probabilistic family.
+
+The repository contains the complete ITOP data interface, geometry/feature
+cache builders, single-GPU study runner, and metric/evaluation code. It does
+not claim a completed ITOP training result yet. The experiments described below
+are the reproducible protocol to run next, not reported accuracy or calibration
+numbers.
+
 ## What is automatic
 
 - `Sym^2(V)` decomposition and an orthonormal symmetric-operator basis.
@@ -141,10 +157,22 @@ plan = plan_readout(
     output="ij=ji",
     covariance=FullCovariance(),
     fidelity=ExactOnly(),
+    # Optional native cuEquivariance lowering (Linux/WSL + fused ops wheel).
+    lifting_backend="cueq",
+    cueq_method="fused_tp",
 )
 plan.report.save("compilation.json")
 readout = plan.build_readout(device="cuda")
 ```
+
+`lifting_backend` is a compiler lowering choice and is independent of the
+backbone's message-passing `tp_backend`. Both choices are included in the
+execution/compatibility signature. cuEquivariance accelerates Clebsch--Gordan
+tensor products only; it does not replace SPD assembly, matrix exponential or
+Cholesky, log-determinant/Mahalanobis evaluation, or the proper likelihood.
+The fused method requires `cuequivariance_ops_torch` (installed by the WSL and
+server lock files). If it is unavailable, `cueq_method="fused_tp"` fails
+explicitly; the compiler never silently falls back to another kernel.
 
 The report includes:
 
@@ -238,6 +266,23 @@ parameterization.
 These paths preserve the mathematical model. Compiled kernels and native
 scatter reductions can reorder floating-point operations, so equivalence is
 tested with numerical tolerances rather than claimed bitwise identity.
+
+### Measured cuEquivariance status
+
+The checked-in benchmark record
+[`audit_results/cuequivariance_tp_benchmark_4090.json`](audit_results/cuequivariance_tp_benchmark_4090.json)
+was produced on one NVIDIA RTX 4090 (CUDA 12.6, PyTorch 2.6). For the recorded
+`3x0e+2x1o` by `1x0e+1x1o` tensor product, the fused kernel was about `2.20x`
+faster in forward and `1.41x` faster in forward/backward than the e3nn eager
+reference, with maximum absolute output error below `2e-6`. The naive
+cuEquivariance path is retained as a portable correctness path and was slower
+for this configuration; performance is not assumed to transfer across widths
+or GPUs.
+
+The latest isolated server regression run completed with `217 passed, 12
+skipped`. Skips are dependency/device-gated tests (for example, fused CUDA
+tests on a CPU-only checkout), not silently selected fallbacks. No training was
+started as part of this validation.
 
 ## Quick start
 
@@ -455,8 +500,19 @@ equiv-compiler convert-checkpoint \
 ## Verification
 
 ```bash
+# Local CPU/EGNN checks (cuEquivariance and fused CUDA tests are skipped when
+# their optional dependencies or a CUDA device are absent).
 conda activate EGNN
-python -m pytest tests -q -W error
+python -m pytest tests -q
+
+# The authoritative CUDA regression is run on the lab server in the
+# `equivcompiler` environment, with one physical GPU exposed to the process.
+conda activate equivcompiler
+CUDA_VISIBLE_DEVICES=0 python -m pytest tests -q
+
+# Reproduce the tensor-product measurement recorded above.
+CUDA_VISIBLE_DEVICES=0 python scripts/benchmark_tp_backends.py \
+  --output audit_results/cuequivariance_tp_benchmark_4090.json
 ```
 
 The compiler tests cover rank-2 and rank-4 outputs, highest angular momentum,
