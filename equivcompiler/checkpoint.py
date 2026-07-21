@@ -231,7 +231,10 @@ def convert_checkpoint(
         "covariance_rank",
     )
     mismatches = {
-        field: [str(getattr(source_compilation, field)), str(getattr(target_compilation, field))]
+        field: [
+            str(getattr(source_compilation, field)),
+            str(getattr(target_compilation, field)),
+        ]
         for field in compatibility_fields
         if getattr(source_compilation, field) != getattr(target_compilation, field)
     }
@@ -282,9 +285,7 @@ def convert_checkpoint(
         ),
     }
 
-    removed = [
-        key for key in state if _deterministic_backend_buffer(key, prefix)
-    ]
+    removed = [key for key in state if _deterministic_backend_buffer(key, prefix)]
     converted_state = {
         key: value for key, value in state.items() if key not in set(removed)
     }

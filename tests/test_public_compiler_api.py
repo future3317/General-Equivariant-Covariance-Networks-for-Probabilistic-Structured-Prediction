@@ -165,18 +165,17 @@ def test_truncated_execution_has_separate_approximation_certificate():
     assert report.family["relation_to_canonical"] == "canonical_full"
     assert report.execution_fidelity["exactness"] == "approximate_for_active_family"
     assert report.execution_fidelity["checkpoint_mapping"] == "not_available"
-    assert report.execution_fidelity["approximation"]["kind"] == "truncated_multiplicity_rank"
+    assert (
+        report.execution_fidelity["approximation"]["kind"]
+        == "truncated_multiplicity_rank"
+    )
     assert "truncated_contraction" in _certificate_codes(report)
 
 
 def test_compatibility_hash_covers_scope_and_layout():
     common = dict(output="ij=ji", covariance=FullCovariance())
-    global_plan = plan_readout(
-        FeatureSpec.from_irreps(SEED, scope="global"), **common
-    )
-    node_plan = plan_readout(
-        FeatureSpec.from_irreps(SEED, scope="node"), **common
-    )
+    global_plan = plan_readout(FeatureSpec.from_irreps(SEED, scope="global"), **common)
+    node_plan = plan_readout(FeatureSpec.from_irreps(SEED, scope="node"), **common)
     assert global_plan.compatibility_hash != node_plan.compatibility_hash
 
 

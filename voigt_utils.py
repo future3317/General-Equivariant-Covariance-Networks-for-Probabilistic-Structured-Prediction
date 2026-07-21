@@ -3,6 +3,7 @@ voigt_utils.py
 -------------
 Utilities for Voigt representation and E(3)-equivariant transformations.
 """
+
 import torch
 import numpy as np
 
@@ -32,14 +33,17 @@ def tensor_to_voigt(C):
     # Ensure symmetry
     C = 0.5 * (C + C.transpose(-2, -1))
 
-    return torch.stack([
-        C[..., 0, 0],
-        C[..., 1, 1],
-        C[..., 2, 2],
-        C[..., 1, 2],
-        C[..., 0, 2],
-        C[..., 0, 1],
-    ], dim=-1)
+    return torch.stack(
+        [
+            C[..., 0, 0],
+            C[..., 1, 1],
+            C[..., 2, 2],
+            C[..., 1, 2],
+            C[..., 0, 2],
+            C[..., 0, 1],
+        ],
+        dim=-1,
+    )
 
 
 def tensor_to_kelvin_mandel(C):
@@ -58,14 +62,17 @@ def tensor_to_kelvin_mandel(C):
     C = 0.5 * (C + C.transpose(-2, -1))
 
     sqrt2 = torch.sqrt(torch.tensor(2.0, device=C.device, dtype=C.dtype))
-    return torch.stack([
-        C[..., 0, 0],
-        C[..., 1, 1],
-        C[..., 2, 2],
-        sqrt2 * C[..., 1, 2],
-        sqrt2 * C[..., 0, 2],
-        sqrt2 * C[..., 0, 1],
-    ], dim=-1)
+    return torch.stack(
+        [
+            C[..., 0, 0],
+            C[..., 1, 1],
+            C[..., 2, 2],
+            sqrt2 * C[..., 1, 2],
+            sqrt2 * C[..., 0, 2],
+            sqrt2 * C[..., 0, 1],
+        ],
+        dim=-1,
+    )
 
 
 def tensor_to_kelvin_mandel_log(C):
@@ -101,14 +108,17 @@ def tensor_to_kelvin_mandel_log(C):
 
     # Direct conversion to Kelvin-Mandel (no intermediate Voigt)
     sqrt2 = torch.sqrt(torch.tensor(2.0, device=C.device, dtype=C.dtype))
-    return torch.stack([
-        C_log[..., 0, 0],
-        C_log[..., 1, 1],
-        C_log[..., 2, 2],
-        sqrt2 * C_log[..., 1, 2],
-        sqrt2 * C_log[..., 0, 2],
-        sqrt2 * C_log[..., 0, 1],
-    ], dim=-1)
+    return torch.stack(
+        [
+            C_log[..., 0, 0],
+            C_log[..., 1, 1],
+            C_log[..., 2, 2],
+            sqrt2 * C_log[..., 1, 2],
+            sqrt2 * C_log[..., 0, 2],
+            sqrt2 * C_log[..., 0, 1],
+        ],
+        dim=-1,
+    )
 
 
 def voigt_to_kelvin_mandel(voigt):
@@ -183,7 +193,9 @@ def voigt_to_matrix_batch(voigt_vectors):
         Tensor of shape [batch_size, 3, 3] representing symmetric 3x3 matrices
     """
     batch_size = voigt_vectors.shape[0]
-    matrices = torch.zeros(batch_size, 3, 3, device=voigt_vectors.device, dtype=voigt_vectors.dtype)
+    matrices = torch.zeros(
+        batch_size, 3, 3, device=voigt_vectors.device, dtype=voigt_vectors.dtype
+    )
 
     # Fill diagonal components
     matrices[:, 0, 0] = voigt_vectors[:, 0]  # c11
@@ -235,14 +247,17 @@ def sym_matrix_log_voigt(voigt_tensor):
     # 5. Matrix -> Voigt
     # 提取下三角部分
     # xx, yy, zz, yz, xz, xy
-    res = torch.stack([
-        matrices_log[:, 0, 0],
-        matrices_log[:, 1, 1],
-        matrices_log[:, 2, 2],
-        matrices_log[:, 1, 2],
-        matrices_log[:, 0, 2],
-        matrices_log[:, 0, 1]
-    ], dim=1).to(orig_dtype)
+    res = torch.stack(
+        [
+            matrices_log[:, 0, 0],
+            matrices_log[:, 1, 1],
+            matrices_log[:, 2, 2],
+            matrices_log[:, 1, 2],
+            matrices_log[:, 0, 2],
+            matrices_log[:, 0, 1],
+        ],
+        dim=1,
+    ).to(orig_dtype)
 
     return res
 
@@ -272,14 +287,17 @@ def sym_matrix_exp_voigt(voigt_tensor):
 
     matrices_exp = Q @ torch.diag_embed(L_exp) @ Q.transpose(-2, -1)
 
-    res = torch.stack([
-        matrices_exp[:, 0, 0],
-        matrices_exp[:, 1, 1],
-        matrices_exp[:, 2, 2],
-        matrices_exp[:, 1, 2],
-        matrices_exp[:, 0, 2],
-        matrices_exp[:, 0, 1]
-    ], dim=1).to(orig_dtype)
+    res = torch.stack(
+        [
+            matrices_exp[:, 0, 0],
+            matrices_exp[:, 1, 1],
+            matrices_exp[:, 2, 2],
+            matrices_exp[:, 1, 2],
+            matrices_exp[:, 0, 2],
+            matrices_exp[:, 0, 1],
+        ],
+        dim=1,
+    ).to(orig_dtype)
 
     return res
 
@@ -373,7 +391,9 @@ def get_voigt_rotation_matrix(R):
     # Optional: validate invertibility in batch mode for debugging
     if __debug__ and batch_shape == (1,):  # Only validate for small batches
         dets = torch.linalg.det(rho)
-        assert torch.all(torch.abs(dets) > 1e-6), f"rho should be invertible, got det={dets}"
+        assert torch.all(torch.abs(dets) > 1e-6), (
+            f"rho should be invertible, got det={dets}"
+        )
 
     return rho
 
@@ -426,12 +446,14 @@ def get_kelvin_mandel_rotation_matrix(R):
             identity = identity.unsqueeze(0).expand(rho_km.shape[0], -1, -1)
 
         max_error = (identity_check - identity).abs().max().item()
-        assert max_error < 1e-5, f"KM rotation matrix not orthogonal: max error = {max_error:.2e}"
+        assert max_error < 1e-5, (
+            f"KM rotation matrix not orthogonal: max error = {max_error:.2e}"
+        )
 
     return rho_km
 
 
-def random_rotation_matrix(batch_size=1, device='cpu', squeeze_single=False):
+def random_rotation_matrix(batch_size=1, device="cpu", squeeze_single=False):
     """
     Generate random rotation matrices with numerical stability guarantees.
 
@@ -502,7 +524,9 @@ def test_voigt_transformations():
     voigt = tensor_to_voigt(C)
     C_reconstructed = voigt_to_tensor(voigt)
 
-    assert torch.allclose(C, C_reconstructed, atol=1e-6), "Tensor-Voigt conversion failed"
+    assert torch.allclose(C, C_reconstructed, atol=1e-6), (
+        "Tensor-Voigt conversion failed"
+    )
     print("PASS: Tensor-Voigt conversion works correctly")
 
     # Test single rotation matrix
@@ -533,7 +557,9 @@ def test_voigt_transformations():
     # Test KM rotation matrix orthogonality
     rho_km = get_kelvin_mandel_rotation_matrix(R)
     identity_km = rho_km @ rho_km.T
-    assert torch.allclose(identity_km, torch.eye(6), atol=1e-6), "KM rotation matrix should be orthogonal"
+    assert torch.allclose(identity_km, torch.eye(6), atol=1e-6), (
+        "KM rotation matrix should be orthogonal"
+    )
     print("PASS: Single KM rotation matrix is orthogonal")
 
     # Test batch rotation matrices
@@ -544,7 +570,9 @@ def test_voigt_transformations():
 
     # Verify orthogonality for all matrices in batch
     for i in range(batch_size):
-        assert torch.allclose(R_batch[i] @ R_batch[i].T, torch.eye(3), atol=1e-6), f"R[{i}] should be orthogonal"
+        assert torch.allclose(R_batch[i] @ R_batch[i].T, torch.eye(3), atol=1e-6), (
+            f"R[{i}] should be orthogonal"
+        )
         assert torch.abs(torch.det(R_batch[i]) - 1.0) < 1e-6, f"det(R[{i}]) should be 1"
 
         # Check rho invertibility
@@ -561,7 +589,9 @@ def test_voigt_transformations():
     voigt_rot_batch = tensor_to_voigt(C_rot_batch)
     voigt_rot_batch2 = torch.bmm(rho_batch, voigt_batch.unsqueeze(-1)).squeeze(-1)
 
-    assert torch.allclose(voigt_rot_batch, voigt_rot_batch2, atol=1e-6), "Batch Voigt rotation failed"
+    assert torch.allclose(voigt_rot_batch, voigt_rot_batch2, atol=1e-6), (
+        "Batch Voigt rotation failed"
+    )
     print("PASS: Batch Voigt rotation works correctly")
 
     print("\nAll tests passed!")
@@ -584,13 +614,16 @@ def test_tensor_to_km_log():
     km_log_traditional = voigt_to_kelvin_mandel(voigt_log)
 
     # Compare results
-    assert torch.allclose(km_log_direct, km_log_traditional, atol=1e-5), \
+    assert torch.allclose(km_log_direct, km_log_traditional, atol=1e-5), (
         f"Direct and traditional methods differ: {km_log_direct - km_log_traditional}"
+    )
 
     print("PASS: tensor_to_kelvin_mandel_log produces same results as traditional path")
     print(f"  Direct method:    {km_log_direct}")
     print(f"  Traditional:      {km_log_traditional}")
-    print(f"  Max difference:   {(km_log_direct - km_log_traditional).abs().max().item():.2e}")
+    print(
+        f"  Max difference:   {(km_log_direct - km_log_traditional).abs().max().item():.2e}"
+    )
 
 
 if __name__ == "__main__":

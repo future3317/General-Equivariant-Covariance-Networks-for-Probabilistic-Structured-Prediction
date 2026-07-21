@@ -30,7 +30,9 @@ def _make_data(num_graphs=2, num_nodes=6):
     edge_vec = pos[edge_index[1]] - pos[edge_index[0]]
     edge_length = edge_vec.norm(dim=-1)
     irreps_sh = o3.Irreps.spherical_harmonics(2)
-    edge_sh = o3.spherical_harmonics(irreps_sh, edge_vec, normalize=True, normalization="component")
+    edge_sh = o3.spherical_harmonics(
+        irreps_sh, edge_vec, normalize=True, normalization="component"
+    )
     edge_rbf = soft_one_hot_linspace(
         edge_length, start=0.0, end=3.0, number=8, basis="gaussian", cutoff=False
     )
@@ -50,10 +52,16 @@ def _make_data(num_graphs=2, num_nodes=6):
 def test_full_rank_rank2_forward_backward():
     output_spec = O3IrrepsSpec("0e + 2e")
     backbone = EquivariantBackbone(
-        hidden_dim=16, lmax=2, num_layers=1, atom_feature_dim=49, num_basis=8,
+        hidden_dim=16,
+        lmax=2,
+        num_layers=1,
+        atom_feature_dim=49,
+        num_basis=8,
     )
     mean_head = EquivariantMeanHead(backbone.irreps_out, output_spec.irreps, pool=True)
-    cov_head = O3EquivariantSymmetricOperatorHead(backbone.irreps_out, output_spec, pool=True)
+    cov_head = O3EquivariantSymmetricOperatorHead(
+        backbone.irreps_out, output_spec, pool=True
+    )
     model = StructuredProbabilisticPredictor(
         backbone=backbone,
         output_spec=output_spec,
@@ -73,10 +81,16 @@ def test_full_rank_rank2_forward_backward():
 def test_low_rank_rank2_forward_backward():
     output_spec = O3IrrepsSpec("0e + 2e")
     backbone = EquivariantBackbone(
-        hidden_dim=16, lmax=2, num_layers=1, atom_feature_dim=49, num_basis=8,
+        hidden_dim=16,
+        lmax=2,
+        num_layers=1,
+        atom_feature_dim=49,
+        num_basis=8,
     )
     mean_head = EquivariantMeanHead(backbone.irreps_out, output_spec.irreps, pool=True)
-    cov_head = O3EquivariantLowRankCovarianceHead(backbone.irreps_out, output_spec, rank=4, pool=True)
+    cov_head = O3EquivariantLowRankCovarianceHead(
+        backbone.irreps_out, output_spec, rank=4, pool=True
+    )
     model = StructuredProbabilisticPredictor(
         backbone=backbone,
         output_spec=output_spec,
@@ -96,10 +110,16 @@ def test_low_rank_rank2_forward_backward():
 def test_vector_output_forward_backward():
     output_spec = O3IrrepsSpec("1o")
     backbone = EquivariantBackbone(
-        hidden_dim=16, lmax=2, num_layers=1, atom_feature_dim=49, num_basis=8,
+        hidden_dim=16,
+        lmax=2,
+        num_layers=1,
+        atom_feature_dim=49,
+        num_basis=8,
     )
     mean_head = EquivariantMeanHead(backbone.irreps_out, output_spec.irreps, pool=True)
-    cov_head = O3EquivariantSymmetricOperatorHead(backbone.irreps_out, output_spec, pool=True)
+    cov_head = O3EquivariantSymmetricOperatorHead(
+        backbone.irreps_out, output_spec, pool=True
+    )
     model = StructuredProbabilisticPredictor(
         backbone=backbone,
         output_spec=output_spec,
@@ -119,11 +139,17 @@ def test_vector_output_forward_backward():
 def test_learnable_atom_features_forward_backward():
     output_spec = O3IrrepsSpec("1o")
     backbone = EquivariantBackbone(
-        hidden_dim=16, lmax=2, num_layers=1, atom_feature_dim=49, num_basis=8,
+        hidden_dim=16,
+        lmax=2,
+        num_layers=1,
+        atom_feature_dim=49,
+        num_basis=8,
         atom_features="learnable",
     )
     mean_head = EquivariantMeanHead(backbone.irreps_out, output_spec.irreps, pool=True)
-    cov_head = O3EquivariantSymmetricOperatorHead(backbone.irreps_out, output_spec, pool=True)
+    cov_head = O3EquivariantSymmetricOperatorHead(
+        backbone.irreps_out, output_spec, pool=True
+    )
     model = StructuredProbabilisticPredictor(
         backbone=backbone,
         output_spec=output_spec,

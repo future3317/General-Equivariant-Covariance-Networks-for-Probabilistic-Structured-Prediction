@@ -33,7 +33,9 @@ def _convert_parser(subparsers) -> None:
         default="global",
         help="'dense' is a legacy alias for the declared feature scope",
     )
-    parser.add_argument("--distribution", choices=("gaussian", "student_t"), default="gaussian")
+    parser.add_argument(
+        "--distribution", choices=("gaussian", "student_t"), default="gaussian"
+    )
     parser.add_argument("--budget", type=int, default=192)
     parser.add_argument("--low-rank", type=int, default=8)
     parser.add_argument("--audit-path")

@@ -17,16 +17,16 @@ from matplotlib import rcParams
 # Color palette (soft, color-blind friendly, consistent with ICML figures)
 # ---------------------------------------------------------------------------
 COLORS = {
-    "primary": "#E07A5F",      # muted coral / salmon
-    "secondary": "#81B29A",    # sage green
-    "tertiary": "#3D405B",     # dark slate
-    "accent": "#F2CC8F",       # warm yellow
-    "teal": "#5FBDBD",         # soft teal
-    "purple": "#9D8DF1",       # light purple
-    "olive": "#A3A847",        # olive green
-    "gray": "#A8A8A8",         # neutral gray
-    "light_gray": "#D9D9D9",   # light gray
-    "dark_gray": "#4A4A4A",    # dark gray
+    "primary": "#E07A5F",  # muted coral / salmon
+    "secondary": "#81B29A",  # sage green
+    "tertiary": "#3D405B",  # dark slate
+    "accent": "#F2CC8F",  # warm yellow
+    "teal": "#5FBDBD",  # soft teal
+    "purple": "#9D8DF1",  # light purple
+    "olive": "#A3A847",  # olive green
+    "gray": "#A8A8A8",  # neutral gray
+    "light_gray": "#D9D9D9",  # light gray
+    "dark_gray": "#4A4A4A",  # dark gray
 }
 
 # Sequential palette for methods / lines
@@ -50,7 +50,6 @@ DEFAULT_RC = {
     "font.serif": ["Times New Roman", "DejaVu Serif", "serif"],
     "mathtext.fontset": "cm",
     "axes.unicode_minus": False,
-
     # Sizes suitable for IEEE TPAMI single- and double-column figures.
     "figure.dpi": 300,
     "savefig.dpi": 300,
@@ -60,24 +59,20 @@ DEFAULT_RC = {
     "ytick.labelsize": 10,
     "legend.fontsize": 10,
     "figure.titlesize": 14,
-
     # Lines / markers
     "lines.linewidth": 2.0,
     "lines.markersize": 6,
     "axes.linewidth": 0.8,
     "xtick.major.width": 0.8,
     "ytick.major.width": 0.8,
-
     # Grid
     "axes.grid": True,
     "grid.alpha": 0.3,
     "grid.linewidth": 0.6,
-
     # Legend
     "legend.frameon": True,
     "legend.framealpha": 0.95,
     "legend.edgecolor": "#CCCCCC",
-
     # Saving
     "savefig.bbox": "tight",
     "savefig.pad_inches": 0.02,
@@ -118,7 +113,9 @@ def label_panels(
         labels = [f"({s})" for s in string.ascii_lowercase]
     for ax, label in zip(axes, labels):
         ax.text(
-            x, y, label,
+            x,
+            y,
+            label,
             transform=ax.transAxes,
             fontsize=fontsize,
             fontweight=fontweight,

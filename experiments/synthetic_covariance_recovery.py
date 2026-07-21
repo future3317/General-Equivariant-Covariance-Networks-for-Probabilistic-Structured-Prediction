@@ -191,6 +191,7 @@ class SyntheticDataset:
 
 def _make_data_object(x: torch.Tensor):
     """Wrap feature vector in a minimal PyG-like Data object."""
+
     class Data:
         pass
 
@@ -204,12 +205,16 @@ def _make_data_object(x: torch.Tensor):
     return data
 
 
-def coverage(y: torch.Tensor, mu: torch.Tensor, S: torch.Tensor, alpha: float = 0.9) -> float:
+def coverage(
+    y: torch.Tensor, mu: torch.Tensor, S: torch.Tensor, alpha: float = 0.9
+) -> float:
     """Empirical coverage of the alpha-level confidence ellipsoid."""
     d = y.shape[-1]
     residual = y - mu
     L = torch.linalg.cholesky(S)
-    z = torch.linalg.solve_triangular(L, residual.unsqueeze(-1), upper=False).squeeze(-1)
+    z = torch.linalg.solve_triangular(L, residual.unsqueeze(-1), upper=False).squeeze(
+        -1
+    )
     q = (z * z).sum(dim=-1)
     threshold = chi2.ppf(alpha, df=float(d))
     return (q < threshold).float().mean().item()
@@ -231,18 +236,26 @@ def principal_subspace_angle(S1: torch.Tensor, S2: torch.Tensor, k: int = 2) -> 
 def evaluate(pred_mu, pred_A, y, true_mu, true_A, true_S):
     pred_S = torch.linalg.matrix_exp(0.5 * (pred_A + pred_A.transpose(-1, -2)))
 
-    rel_cov = (torch.norm(pred_S - true_S, dim=(-2, -1)) / torch.norm(true_S, dim=(-2, -1))).mean().item()
+    rel_cov = (
+        (torch.norm(pred_S - true_S, dim=(-2, -1)) / torch.norm(true_S, dim=(-2, -1)))
+        .mean()
+        .item()
+    )
     log_eucl = torch.norm(pred_A - true_A, dim=(-2, -1)).mean().item()
 
     true_eig = torch.linalg.eigvalsh(true_S)
     pred_eig = torch.linalg.eigvalsh(pred_S)
     eig_err = torch.mean(torch.abs(pred_eig - true_eig), dim=-1).mean().item()
 
-    subspace_angle = principal_subspace_angle(pred_S, true_S, k=min(2, true_S.shape[-1]))
+    subspace_angle = principal_subspace_angle(
+        pred_S, true_S, k=min(2, true_S.shape[-1])
+    )
 
     residual = y - pred_mu
     L = torch.linalg.cholesky(pred_S)
-    z = torch.linalg.solve_triangular(L, residual.unsqueeze(-1), upper=False).squeeze(-1)
+    z = torch.linalg.solve_triangular(L, residual.unsqueeze(-1), upper=False).squeeze(
+        -1
+    )
     whitened_cov = (z.unsqueeze(-1) @ z.unsqueeze(-2)).mean(dim=0)
 
     cov_50 = coverage(y, pred_mu, pred_S, alpha=0.5)
@@ -266,7 +279,11 @@ def evaluate(pred_mu, pred_A, y, true_mu, true_A, true_S):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output_irreps", default="0e + 2e", help="e.g. '1o', '0e + 2e', '0e + 2e + 2o'")
+    parser.add_argument(
+        "--output_irreps",
+        default="0e + 2e",
+        help="e.g. '1o', '0e + 2e', '0e + 2e + 2o'",
+    )
     parser.add_argument("--input_irreps", default=DEFAULT_INPUT_IRREPS)
     parser.add_argument("--use_quadratic_teacher", action="store_true", default=True)
     parser.add_argument("--num_train", type=int, default=2000)
@@ -277,7 +294,9 @@ def main():
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--save_dir", default="results/synthetic_covariance_recovery")
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument(
+        "--device", default="cuda" if torch.cuda.is_available() else "cpu"
+    )
     args = parser.parse_args()
 
     os.makedirs(args.save_dir, exist_ok=True)
@@ -292,8 +311,12 @@ def main():
     ).to(args.device)
 
     backbone = SyntheticBackbone(input_irreps, args.hidden_irreps)
-    mean_head = EquivariantMeanHead(backbone.hidden_irreps, output_spec.irreps, pool=True)
-    cov_head = O3QuadraticSymmetricOperatorHead(backbone.hidden_irreps, output_spec, pool=True)
+    mean_head = EquivariantMeanHead(
+        backbone.hidden_irreps, output_spec.irreps, pool=True
+    )
+    cov_head = O3QuadraticSymmetricOperatorHead(
+        backbone.hidden_irreps, output_spec, pool=True
+    )
 
     model = StructuredProbabilisticPredictor(
         backbone=backbone,
@@ -304,8 +327,12 @@ def main():
         distribution=GaussianNLL(),
     ).to(args.device)
 
-    train_ds = SyntheticDataset(args.output_irreps, args.num_train, teacher, seed=args.seed)
-    test_ds = SyntheticDataset(args.output_irreps, args.num_test, teacher, seed=args.seed + 1)
+    train_ds = SyntheticDataset(
+        args.output_irreps, args.num_train, teacher, seed=args.seed
+    )
+    test_ds = SyntheticDataset(
+        args.output_irreps, args.num_test, teacher, seed=args.seed + 1
+    )
 
     optimizer = optim.AdamW(model.parameters(), lr=args.lr)
 
@@ -339,7 +366,9 @@ def main():
             num_samples += batch_size
 
         if (epoch + 1) % 20 == 0:
-            print(f"Epoch {epoch + 1}: train_loss={total_loss.item() / num_samples:.4f}")
+            print(
+                f"Epoch {epoch + 1}: train_loss={total_loss.item() / num_samples:.4f}"
+            )
 
     model.eval()
     with torch.inference_mode():

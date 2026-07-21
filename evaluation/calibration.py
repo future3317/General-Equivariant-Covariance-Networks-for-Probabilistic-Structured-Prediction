@@ -109,5 +109,7 @@ def sharpness(scale: torch.Tensor) -> dict[str, float]:
     """
     return {
         "mean_logdet": float(torch.logdet(scale).mean().item()),
-        "mean_trace": float(torch.diagonal(scale, dim1=-2, dim2=-1).sum(-1).mean().item()),
+        "mean_trace": float(
+            torch.diagonal(scale, dim1=-2, dim2=-1).sum(-1).mean().item()
+        ),
     }

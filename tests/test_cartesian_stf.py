@@ -27,9 +27,7 @@ from representations import (
 
 
 SEED = o3.Irreps("4x0e + 2x1o + 2x2e")
-MIXED_PARITY_SEED = o3.Irreps(
-    "4x0e + 2x1e + 2x1o + 2x2e + 2x2o"
-)
+MIXED_PARITY_SEED = o3.Irreps("4x0e + 2x1e + 2x1o + 2x2e + 2x2o")
 OPERATOR_IRREPS = o3.Irreps("2x0e + 2x2e + 1x4e")
 
 
@@ -106,9 +104,7 @@ def test_cartesian_abpqh_formula_is_bijective_and_matches_spherical_basis():
 def test_exact_multiplicity_first_square_matches_cg_and_all_gradients():
     torch.manual_seed(1)
     spherical = o3.TensorSquare(SEED, irreps_out=OPERATOR_IRREPS).double()
-    cartesian = MultiplicityFirstCartesianTensorSquare(
-        SEED, OPERATOR_IRREPS
-    ).double()
+    cartesian = MultiplicityFirstCartesianTensorSquare(SEED, OPERATOR_IRREPS).double()
     cartesian.load_e3nn_weights(spherical)
 
     spherical_input = SEED.randn(5, -1, dtype=torch.float64).requires_grad_()
@@ -125,9 +121,7 @@ def test_exact_multiplicity_first_square_matches_cg_and_all_gradients():
         (cartesian_input, cartesian.weight),
     )
 
-    torch.testing.assert_close(
-        cartesian_output, spherical_output, atol=2e-7, rtol=2e-7
-    )
+    torch.testing.assert_close(cartesian_output, spherical_output, atol=2e-7, rtol=2e-7)
     for actual, expected in zip(cartesian_gradients, spherical_gradients):
         torch.testing.assert_close(actual, expected, atol=2e-7, rtol=2e-7)
 
@@ -181,9 +175,7 @@ def test_cartesian_stf_operator_is_o3_equivariant(matrix):
     transformed_operator = basis.assemble(square(transformed))
     rho = O3IrrepsSpec("0e + 2e").representation_matrix(matrix)
     expected = rho @ operator @ rho.T
-    torch.testing.assert_close(
-        transformed_operator, expected, atol=8e-7, rtol=8e-7
-    )
+    torch.testing.assert_close(transformed_operator, expected, atol=8e-7, rtol=8e-7)
 
 
 def test_mapped_heads_match_per_sample_output_and_loss_gradients():
@@ -208,9 +200,14 @@ def test_mapped_heads_match_per_sample_output_and_loss_gradients():
     cartesian_input = spherical_input.detach().clone().requires_grad_()
     spherical_operator = spherical(spherical_input)
     cartesian_operator = cartesian(cartesian_input)
-    assert torch.linalg.matrix_norm(
-        spherical_operator - cartesian_operator, ord="fro", dim=(-2, -1)
-    ).max().item() < 1e-6
+    assert (
+        torch.linalg.matrix_norm(
+            spherical_operator - cartesian_operator, ord="fro", dim=(-2, -1)
+        )
+        .max()
+        .item()
+        < 1e-6
+    )
 
     cotangent = torch.randn_like(spherical_operator)
     spherical_loss = (torch.matrix_exp(spherical_operator) * cotangent).sum()
@@ -223,9 +220,7 @@ def test_mapped_heads_match_per_sample_output_and_loss_gradients():
         cartesian_loss,
         (cartesian_input, cartesian.square.weight),
     )
-    torch.testing.assert_close(
-        cartesian_loss, spherical_loss, atol=2e-6, rtol=2e-7
-    )
+    torch.testing.assert_close(cartesian_loss, spherical_loss, atol=2e-6, rtol=2e-7)
     for actual, expected in zip(cartesian_gradients, spherical_gradients):
         torch.testing.assert_close(actual, expected, atol=3e-6, rtol=3e-6)
 

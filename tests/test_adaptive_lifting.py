@@ -57,10 +57,13 @@ def test_rank4_full_covariance_needs_three_edges_from_lmax2():
     compilation = _compile(rank4_elasticity_irreps())
     assert compilation.canonical_plan.depth == 3
     assert max(ir.l for _, ir in compilation.covariance_irreps) == 8
-    assert coverage_deficit(
-        compilation.canonical_plan.irreps_out,
-        compilation.canonical_target_irreps,
-    ) == {}
+    assert (
+        coverage_deficit(
+            compilation.canonical_plan.irreps_out,
+            compilation.canonical_target_irreps,
+        )
+        == {}
+    )
 
 
 def test_plan_tracks_parity_and_rejects_unreachable_target():
@@ -89,7 +92,9 @@ def test_lifting_forward_backward_and_equivariance():
     output = lifting(features)
     transformed_output = lifting(transformed)
     expected = output @ target.D_from_matrix(rotation).T
-    relative_error = (transformed_output - expected).norm() / output.norm().clamp_min(1e-12)
+    relative_error = (transformed_output - expected).norm() / output.norm().clamp_min(
+        1e-12
+    )
     assert relative_error.item() < 2e-4
 
     output.square().mean().backward()
@@ -112,9 +117,7 @@ def test_auto_complexity_selects_full_then_low_rank():
         LowRankCovariance(8),
         IsotypicBlockCovariance(),
     )
-    rank2 = _compile(
-        "0e + 2e", FirstFeasible(192, rank2_candidates)
-    )
+    rank2 = _compile("0e + 2e", FirstFeasible(192, rank2_candidates))
     elasticity = _compile(
         rank4_elasticity_irreps(),
         FirstFeasible(192, rank2_candidates),
@@ -126,7 +129,9 @@ def test_auto_complexity_selects_full_then_low_rank():
     assert elasticity.active_plan.depth == 1
 
 
-@pytest.mark.parametrize("scope,batch", [("dense", None), ("global", torch.tensor([0, 0, 1]))])
+@pytest.mark.parametrize(
+    "scope,batch", [("dense", None), ("global", torch.tensor([0, 0, 1]))]
+)
 def test_compiled_head_supports_dense_and_global_output(scope, batch):
     output_scope = "node" if scope == "dense" else "global"
     compilation = _compile("0e + 2e", output_scope=output_scope)
@@ -175,7 +180,9 @@ def test_compiled_rank4_low_rank_scale_is_equivariant():
     transformed_scale = spd_map(transformed_parameters)
     rho = compilation.output_spec.representation_matrix(rotation)
     expected = rho @ scale @ rho.T
-    relative_error = (transformed_scale - expected).norm() / scale.norm().clamp_min(1e-12)
+    relative_error = (transformed_scale - expected).norm() / scale.norm().clamp_min(
+        1e-12
+    )
     assert relative_error.item() < 2e-4
 
 

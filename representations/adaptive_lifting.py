@@ -235,9 +235,8 @@ def plan_lifting_graph(
         seed_parities = {irrep.p for irrep in seed_counts}
         missing_parities = {irrep.p for irrep in unreachable}
         parity_obstruction = seed_parities == {1} and -1 in missing_parities
-        angular_obstruction = (
-            max(irrep.l for irrep in seed_counts) == 0
-            and any(irrep.l > 0 for irrep in unreachable)
+        angular_obstruction = max(irrep.l for irrep in seed_counts) == 0 and any(
+            irrep.l > 0 for irrep in unreachable
         )
         if parity_obstruction:
             code = "parity_unreachable"

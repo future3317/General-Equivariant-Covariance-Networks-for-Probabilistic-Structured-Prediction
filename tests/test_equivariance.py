@@ -22,11 +22,13 @@ def _random_rotation():
     q = torch.randn(4)
     q = q / q.norm()
     w, x, y, z = q.unbind()
-    R = torch.tensor([
-        [1 - 2 * (y ** 2 + z ** 2), 2 * (x * y - w * z), 2 * (x * z + w * y)],
-        [2 * (x * y + w * z), 1 - 2 * (x ** 2 + z ** 2), 2 * (y * z - w * x)],
-        [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x ** 2 + y ** 2)],
-    ])
+    R = torch.tensor(
+        [
+            [1 - 2 * (y**2 + z**2), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+            [2 * (x * y + w * z), 1 - 2 * (x**2 + z**2), 2 * (y * z - w * x)],
+            [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x**2 + y**2)],
+        ]
+    )
     return R
 
 
@@ -102,7 +104,11 @@ def test_predictor_equivariance(output_irreps):
     output_spec = O3IrrepsSpec(output_irreps)
 
     backbone = EquivariantBackbone(
-        hidden_dim=16, lmax=2, num_layers=1, atom_feature_dim=49, num_basis=8,
+        hidden_dim=16,
+        lmax=2,
+        num_layers=1,
+        atom_feature_dim=49,
+        num_basis=8,
     )
     mean_head = EquivariantMeanHead(backbone.irreps_out, output_spec.irreps, pool=True)
     cov_head = O3EquivariantSymmetricOperatorHead(

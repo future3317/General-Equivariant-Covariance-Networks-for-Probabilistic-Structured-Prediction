@@ -35,7 +35,9 @@ def device_fingerprint(device: torch.device | str) -> str:
     resolved = torch.device(device)
     if resolved.type != "cuda":
         return _hash({"type": resolved.type})
-    index = resolved.index if resolved.index is not None else torch.cuda.current_device()
+    index = (
+        resolved.index if resolved.index is not None else torch.cuda.current_device()
+    )
     properties = torch.cuda.get_device_properties(index)
     record = {
         "name": properties.name,

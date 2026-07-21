@@ -19,10 +19,16 @@ def test_count_tp_instructions_runs():
 
     output_spec = O3IrrepsSpec("0e + 2e")
     backbone = EquivariantBackbone(
-        hidden_dim=8, lmax=1, num_layers=1, atom_feature_dim=49, num_basis=4,
+        hidden_dim=8,
+        lmax=1,
+        num_layers=1,
+        atom_feature_dim=49,
+        num_basis=4,
     )
     mean_head = EquivariantMeanHead(backbone.irreps_out, output_spec.irreps, pool=True)
-    cov_head = O3QuadraticSymmetricOperatorHead(backbone.irreps_out, output_spec, pool=True)
+    cov_head = O3QuadraticSymmetricOperatorHead(
+        backbone.irreps_out, output_spec, pool=True
+    )
     model = StructuredProbabilisticPredictor(
         backbone=backbone,
         output_spec=output_spec,
@@ -40,4 +46,5 @@ def test_count_tp_instructions_runs():
 def test_profiler_script_imports():
     """Profiler script should import without errors."""
     import scripts.profile_dielectric as profile_mod
+
     assert Path(profile_mod.__file__).name == "profile_dielectric.py"

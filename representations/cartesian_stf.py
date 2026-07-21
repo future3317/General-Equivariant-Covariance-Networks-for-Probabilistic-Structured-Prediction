@@ -185,9 +185,7 @@ class Rank2CartesianSTFOperatorBasis(torch.nn.Module):
                 f"expected {self._operator_dim} operator coefficients, "
                 f"got {coefficients.shape[-1]}"
             )
-        return torch.einsum(
-            "...q,cq->...c", coefficients, self._irreps_to_components
-        )
+        return torch.einsum("...q,cq->...c", coefficients, self._irreps_to_components)
 
     def irreps_from_components(self, components: torch.Tensor) -> torch.Tensor:
         if components.shape[-1] != self._operator_dim:
@@ -195,9 +193,7 @@ class Rank2CartesianSTFOperatorBasis(torch.nn.Module):
                 f"expected {self._operator_dim} Cartesian components, "
                 f"got {components.shape[-1]}"
             )
-        return torch.einsum(
-            "...c,qc->...q", components, self._components_to_irreps
-        )
+        return torch.einsum("...c,qc->...q", components, self._components_to_irreps)
 
     def assemble_components(self, components: torch.Tensor) -> torch.Tensor:
         """Assemble the explicit ``(a,b,P,Q,H)`` operator."""
@@ -206,9 +202,7 @@ class Rank2CartesianSTFOperatorBasis(torch.nn.Module):
                 f"expected {self._operator_dim} Cartesian components, "
                 f"got {components.shape[-1]}"
             )
-        operator = torch.einsum(
-            "...c,cij->...ij", components, self._canonical_basis
-        )
+        operator = torch.einsum("...c,cij->...ij", components, self._canonical_basis)
         return 0.5 * (operator + operator.transpose(-1, -2))
 
     def assemble(self, coefficients: torch.Tensor) -> torch.Tensor:
@@ -260,13 +254,13 @@ class MultiplicityFirstCartesianTensorSquare(torch.nn.Module):
             irrep not in {o3.Irrep("0e"), o3.Irrep("2e"), o3.Irrep("4e")}
             for _, irrep in self.irreps_out
         ):
-            raise ValueError(
-                "Cartesian-STF tensor square outputs must be 0e, 2e or 4e"
-            )
+            raise ValueError("Cartesian-STF tensor square outputs must be 0e, 2e or 4e")
 
         reference = o3.TensorSquare(self.irreps_in, irreps_out=self.irreps_out)
         self._instruction_paths = self._collect_paths(reference.instructions)
-        self.max_exact_rank = max(path["exact_rank"] for path in self._instruction_paths)
+        self.max_exact_rank = max(
+            path["exact_rank"] for path in self._instruction_paths
+        )
         if contraction_rank is not None and contraction_rank < 1:
             raise ValueError("contraction_rank must be positive")
         if contraction_rank is not None and contraction_rank >= self.max_exact_rank:
@@ -347,9 +341,7 @@ class MultiplicityFirstCartesianTensorSquare(torch.nn.Module):
             left_mul = self.irreps_in[path["i_in1"]].mul
             right_mul = self.irreps_in[path["i_in2"]].mul
             path["exact_rank"] = (
-                left_mul
-                if path["i_in1"] == path["i_in2"]
-                else min(left_mul, right_mul)
+                left_mul if path["i_in1"] == path["i_in2"] else min(left_mul, right_mul)
             )
             collected.append(path)
         return collected
@@ -477,13 +469,13 @@ class MultiplicityFirstCartesianTensorSquare(torch.nn.Module):
         if left_l == 0:
             # The only supported cross path is 0 x 2 -> 2.  e3nn's component
             # normalization contributes 1/sqrt(2l+1).
-            return (
-                left[..., :, 0].unsqueeze(-2).unsqueeze(-1) * mixed
-            ).sum(dim=-2) / math.sqrt(2 * output_l + 1)
+            return (left[..., :, 0].unsqueeze(-2).unsqueeze(-1) * mixed).sum(
+                dim=-2
+            ) / math.sqrt(2 * output_l + 1)
         if output_l == 0 and left_l == right_l:
-            return (left.unsqueeze(-3) * mixed).sum(dim=(-2, -1)).unsqueeze(-1) / math.sqrt(
-                2 * left_l + 1
-            )
+            return (left.unsqueeze(-3) * mixed).sum(dim=(-2, -1)).unsqueeze(
+                -1
+            ) / math.sqrt(2 * left_l + 1)
         pair = (left.unsqueeze(-3).unsqueeze(-1) * mixed.unsqueeze(-2)).flatten(-2)
         return torch.matmul(pair, coupling.flatten(1).T).sum(dim=-2)
 

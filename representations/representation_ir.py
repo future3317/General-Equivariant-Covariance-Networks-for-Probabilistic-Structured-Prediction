@@ -77,9 +77,7 @@ class DirectSumExpr(RepExpr):
             raise ValueError("a direct sum must contain at least one term")
 
     def decompose_o3(self) -> DecomposedRep:
-        irreps = direct_sum_irreps(
-            *(term.decompose_o3().irreps for term in self.terms)
-        )
+        irreps = direct_sum_irreps(*(term.decompose_o3().irreps for term in self.terms))
         return DecomposedRep("O3", irreps)
 
     def as_dict(self) -> dict[str, Any]:
@@ -113,7 +111,9 @@ class RepeatedExpr(RepExpr):
 
     def decompose_o3(self) -> DecomposedRep:
         base = self.operand.decompose_o3().irreps
-        return DecomposedRep("O3", RepeatedIrrepLayout(base, self.copies).expanded_irreps)
+        return DecomposedRep(
+            "O3", RepeatedIrrepLayout(base, self.copies).expanded_irreps
+        )
 
     def as_dict(self) -> dict[str, Any]:
         return {

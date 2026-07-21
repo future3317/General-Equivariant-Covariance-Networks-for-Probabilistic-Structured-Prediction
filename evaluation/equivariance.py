@@ -6,7 +6,13 @@ import torch
 from compatibility.torch_geometric import Data
 
 
-def _rotate_data(data: Data, R: torch.Tensor, max_radius: float = 3.0, num_basis: int = 8, lmax: int = 2):
+def _rotate_data(
+    data: Data,
+    R: torch.Tensor,
+    max_radius: float = 3.0,
+    num_basis: int = 8,
+    lmax: int = 2,
+):
     """Rotate a PyG Data object and recompute edge features.
 
     This is a minimal helper. For full validation it should match the
@@ -39,7 +45,12 @@ def _rotate_data(data: Data, R: torch.Tensor, max_radius: float = 3.0, num_basis
         irreps_sh, edge_vec, normalize=True, normalization="component"
     )
     edge_rbf = soft_one_hot_linspace(
-        edge_length, start=0.0, end=max_radius, number=num_basis, basis="gaussian", cutoff=False
+        edge_length,
+        start=0.0,
+        end=max_radius,
+        number=num_basis,
+        basis="gaussian",
+        cutoff=False,
     )
     edge_weights = 0.5 * (torch.cos(torch.pi * edge_length / max_radius) + 1.0)
     edge_weights[edge_length > max_radius] = 0.0

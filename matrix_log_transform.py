@@ -4,6 +4,7 @@ matrix_log_transform.py
 Matrix logarithm and exponential transformations for dielectric tensors.
 These transformations preserve E(3) equivariance while improving training stability.
 """
+
 import torch
 from voigt_utils import voigt_to_tensor
 
@@ -19,7 +20,9 @@ def voigt_to_matrix_batch(voigt_vectors):
         Tensor of shape [batch_size, 3, 3] representing symmetric 3x3 matrices
     """
     batch_size = voigt_vectors.shape[0]
-    matrices = torch.zeros(batch_size, 3, 3, device=voigt_vectors.device, dtype=voigt_vectors.dtype)
+    matrices = torch.zeros(
+        batch_size, 3, 3, device=voigt_vectors.device, dtype=voigt_vectors.dtype
+    )
 
     # Fill diagonal components
     matrices[:, 0, 0] = voigt_vectors[:, 0]  # c11
@@ -63,7 +66,9 @@ def matrix_to_voigt_batch(matrices):
     return voigt
 
 
-def matrix_logarithm_transform(targets_voigt, epsilon=1e-4): # [修改1] 默认 epsilon 增大到 1e-4
+def matrix_logarithm_transform(
+    targets_voigt, epsilon=1e-4
+):  # [修改1] 默认 epsilon 增大到 1e-4
     """
     Transform physical dielectric tensors to matrix logarithm space.
     This preserves E(3) equivariance and improves training stability.
@@ -103,7 +108,7 @@ def matrix_logarithm_transform(targets_voigt, epsilon=1e-4): # [修改1] 默认 
     # 6. Reconstruct log matrix: V @ diag(log(eigenvalues)) @ V^T
     matrices_log = torch.bmm(
         torch.bmm(eigenvectors, torch.diag_embed(eigenvalues_log)),
-        eigenvectors.transpose(-2, -1)
+        eigenvectors.transpose(-2, -1),
     )
 
     # 7. Convert back to Voigt notation
@@ -144,7 +149,7 @@ def matrix_exponential_transform(predictions_log_voigt):
     # 5. Reconstruct matrix: V @ diag(exp(eigenvalues)) @ V^T
     matrices = torch.bmm(
         torch.bmm(eigenvectors, torch.diag_embed(eigenvalues_exp)),
-        eigenvectors.transpose(-2, -1)
+        eigenvectors.transpose(-2, -1),
     )
 
     # 6. Convert back to Voigt notation
@@ -169,19 +174,20 @@ def analyze_log_transform_statistics(dataloader):
     all_log = []
 
     print("\nAnalyzing dielectric tensor statistics...")
-    print("="*60)
+    print("=" * 60)
 
     for i, batch in enumerate(dataloader):
         if i >= 20:  # Sample first 20 batches for efficiency
             break
 
-        targets_norm = batch['target']  # Normalized values
+        targets_norm = batch["target"]  # Normalized values
 
         # Denormalize to get physical values
         from isotropic_utils import denormalize_isotropic
-        targets_phys = denormalize_isotropic(targets_norm,
-                                            dataloader.dataset.global_mean,
-                                            dataloader.dataset.global_std)
+
+        targets_phys = denormalize_isotropic(
+            targets_norm, dataloader.dataset.global_mean, dataloader.dataset.global_std
+        )
         all_original.append(targets_phys)
 
         # Apply log transform
@@ -194,63 +200,79 @@ def analyze_log_transform_statistics(dataloader):
 
     # Calculate statistics
     stats = {
-        'original': {
-            'mean': all_original.mean(dim=0),
-            'std': all_original.std(dim=0),
-            'min': all_original.min(dim=0)[0],
-            'max': all_original.max(dim=0)[0],
-            'range': all_original.max(dim=0)[0] - all_original.min(dim=0)[0]
+        "original": {
+            "mean": all_original.mean(dim=0),
+            "std": all_original.std(dim=0),
+            "min": all_original.min(dim=0)[0],
+            "max": all_original.max(dim=0)[0],
+            "range": all_original.max(dim=0)[0] - all_original.min(dim=0)[0],
         },
-        'log': {
-            'mean': all_log.mean(dim=0),
-            'std': all_log.std(dim=0),
-            'min': all_log.min(dim=0)[0],
-            'max': all_log.max(dim=0)[0],
-            'range': all_log.max(dim=0)[0] - all_log.min(dim=0)[0]
-        }
+        "log": {
+            "mean": all_log.mean(dim=0),
+            "std": all_log.std(dim=0),
+            "min": all_log.min(dim=0)[0],
+            "max": all_log.max(dim=0)[0],
+            "range": all_log.max(dim=0)[0] - all_log.min(dim=0)[0],
+        },
     }
 
     # Print statistics
     print("\n[Original Physical Values]")
     print("  Diagonal (εxx, εyy, εzz):")
-    diag_mean = stats['original']['mean'][:3].numpy()
-    diag_std = stats['original']['std'][:3].numpy()
-    diag_min = stats['original']['min'][:3].numpy()
-    diag_max = stats['original']['max'][:3].numpy()
+    diag_mean = stats["original"]["mean"][:3].numpy()
+    diag_std = stats["original"]["std"][:3].numpy()
+    diag_min = stats["original"]["min"][:3].numpy()
+    diag_max = stats["original"]["max"][:3].numpy()
     print(f"    Mean: [{diag_mean[0]:.3f}, {diag_mean[1]:.3f}, {diag_mean[2]:.3f}]")
     print(f"    Std:  [{diag_std[0]:.3f}, {diag_std[1]:.3f}, {diag_std[2]:.3f}]")
-    print(f"    Range: [{diag_min[0]:.1f}, {diag_min[1]:.1f}, {diag_min[2]:.1f}] to [{diag_max[0]:.1f}, {diag_max[1]:.1f}, {diag_max[2]:.1f}]")
+    print(
+        f"    Range: [{diag_min[0]:.1f}, {diag_min[1]:.1f}, {diag_min[2]:.1f}] to [{diag_max[0]:.1f}, {diag_max[1]:.1f}, {diag_max[2]:.1f}]"
+    )
     print("  Off-diagonal (εyz, εxz, εxy):")
-    off_mean = stats['original']['mean'][3:].numpy()
-    off_std = stats['original']['std'][3:].numpy()
-    off_min = stats['original']['min'][3:].numpy()
-    off_max = stats['original']['max'][3:].numpy()
+    off_mean = stats["original"]["mean"][3:].numpy()
+    off_std = stats["original"]["std"][3:].numpy()
+    off_min = stats["original"]["min"][3:].numpy()
+    off_max = stats["original"]["max"][3:].numpy()
     print(f"    Mean: [{off_mean[0]:.3f}, {off_mean[1]:.3f}, {off_mean[2]:.3f}]")
     print(f"    Std:  [{off_std[0]:.3f}, {off_std[1]:.3f}, {off_std[2]:.3f}]")
-    print(f"    Range: [{off_min[0]:.1f}, {off_min[1]:.1f}, {off_min[2]:.1f}] to [{off_max[0]:.1f}, {off_max[1]:.1f}, {off_max[2]:.1f}]")
+    print(
+        f"    Range: [{off_min[0]:.1f}, {off_min[1]:.1f}, {off_min[2]:.1f}] to [{off_max[0]:.1f}, {off_max[1]:.1f}, {off_max[2]:.1f}]"
+    )
 
     print("\n[After Matrix Log Transform]")
     print("  Diagonal (log εxx, log εyy, log εzz):")
-    log_diag_mean = stats['log']['mean'][:3].numpy()
-    log_diag_std = stats['log']['std'][:3].numpy()
-    log_diag_min = stats['log']['min'][:3].numpy()
-    log_diag_max = stats['log']['max'][:3].numpy()
-    print(f"    Mean: [{log_diag_mean[0]:.3f}, {log_diag_mean[1]:.3f}, {log_diag_mean[2]:.3f}]")
-    print(f"    Std:  [{log_diag_std[0]:.3f}, {log_diag_std[1]:.3f}, {log_diag_std[2]:.3f}]")
-    print(f"    Range: [{log_diag_min[0]:.1f}, {log_diag_min[1]:.1f}, {log_diag_min[2]:.1f}] to [{log_diag_max[0]:.1f}, {log_diag_max[1]:.1f}, {log_diag_max[2]:.1f}]")
+    log_diag_mean = stats["log"]["mean"][:3].numpy()
+    log_diag_std = stats["log"]["std"][:3].numpy()
+    log_diag_min = stats["log"]["min"][:3].numpy()
+    log_diag_max = stats["log"]["max"][:3].numpy()
+    print(
+        f"    Mean: [{log_diag_mean[0]:.3f}, {log_diag_mean[1]:.3f}, {log_diag_mean[2]:.3f}]"
+    )
+    print(
+        f"    Std:  [{log_diag_std[0]:.3f}, {log_diag_std[1]:.3f}, {log_diag_std[2]:.3f}]"
+    )
+    print(
+        f"    Range: [{log_diag_min[0]:.1f}, {log_diag_min[1]:.1f}, {log_diag_min[2]:.1f}] to [{log_diag_max[0]:.1f}, {log_diag_max[1]:.1f}, {log_diag_max[2]:.1f}]"
+    )
     print("  Off-diagonal (log εyz, log εxz, log εxy):")
-    log_off_mean = stats['log']['mean'][3:].numpy()
-    log_off_std = stats['log']['std'][3:].numpy()
-    log_off_min = stats['log']['min'][3:].numpy()
-    log_off_max = stats['log']['max'][3:].numpy()
-    print(f"    Mean: [{log_off_mean[0]:.3f}, {log_off_mean[1]:.3f}, {log_off_mean[2]:.3f}]")
-    print(f"    Std:  [{log_off_std[0]:.3f}, {log_off_std[1]:.3f}, {log_off_std[2]:.3f}]")
-    print(f"    Range: [{log_off_min[0]:.1f}, {log_off_min[1]:.1f}, {log_off_min[2]:.1f}] to [{log_off_max[0]:.1f}, {log_off_max[1]:.1f}, {log_off_max[2]:.1f}]")
+    log_off_mean = stats["log"]["mean"][3:].numpy()
+    log_off_std = stats["log"]["std"][3:].numpy()
+    log_off_min = stats["log"]["min"][3:].numpy()
+    log_off_max = stats["log"]["max"][3:].numpy()
+    print(
+        f"    Mean: [{log_off_mean[0]:.3f}, {log_off_mean[1]:.3f}, {log_off_mean[2]:.3f}]"
+    )
+    print(
+        f"    Std:  [{log_off_std[0]:.3f}, {log_off_std[1]:.3f}, {log_off_std[2]:.3f}]"
+    )
+    print(
+        f"    Range: [{log_off_min[0]:.1f}, {log_off_min[1]:.1f}, {log_off_min[2]:.1f}] to [{log_off_max[0]:.1f}, {log_off_max[1]:.1f}, {log_off_max[2]:.1f}]"
+    )
 
     # Calculate compression ratio
-    original_range = stats['original']['range'].mean().item()
-    log_range = stats['log']['range'].mean().item()
-    compression = original_range / log_range if log_range > 0 else float('inf')
+    original_range = stats["original"]["range"].mean().item()
+    log_range = stats["log"]["range"].mean().item()
+    compression = original_range / log_range if log_range > 0 else float("inf")
 
     print("\n[Compression Ratio]")
     print(f"  Average range compression: {compression:.2f}x")
@@ -263,7 +285,7 @@ def analyze_log_transform_statistics(dataloader):
 def test_matrix_log_transform():
     """Test the matrix logarithm transform for correctness and equivariance."""
     print("\nTesting matrix logarithm transform...")
-    print("="*60)
+    print("=" * 60)
 
     # Test 1: Basic round-trip test
     print("\n[Test 1] Round-trip test (log -> exp)")
@@ -271,9 +293,7 @@ def test_matrix_log_transform():
 
     # Create a positive definite tensor (typical dielectric values)
     # Dielectric constants are usually > 1
-    base_values = torch.tensor([[4.0, 0.1, 0.2],
-                               [0.1, 5.0, 0.1],
-                               [0.2, 0.1, 6.0]])
+    base_values = torch.tensor([[4.0, 0.1, 0.2], [0.1, 5.0, 0.1], [0.2, 0.1, 6.0]])
 
     # Add some random variation
     batch = []
@@ -312,9 +332,9 @@ def test_matrix_log_transform():
     print("\n[Test 2] E(3) Equivariance test")
 
     # Create a test tensor
-    test_matrix = torch.tensor([[3.0, 0.5, 0.2],
-                                [0.5, 4.0, 0.1],
-                                [0.2, 0.1, 5.0]], dtype=torch.float32)
+    test_matrix = torch.tensor(
+        [[3.0, 0.5, 0.2], [0.5, 4.0, 0.1], [0.2, 0.1, 5.0]], dtype=torch.float32
+    )
     test_voigt = matrix_to_voigt_batch(test_matrix.unsqueeze(0))
 
     # Apply log transform
@@ -322,6 +342,7 @@ def test_matrix_log_transform():
 
     # Generate a random rotation
     from voigt_utils import random_rotation_matrix
+
     R = random_rotation_matrix()
 
     # Method 1: Rotate original tensor, then apply log
@@ -331,11 +352,14 @@ def test_matrix_log_transform():
 
     # Method 2: Apply log first, then rotate using Voigt rotation
     from voigt_utils import get_voigt_rotation_matrix
+
     rho = get_voigt_rotation_matrix(R)
     log_rotated_voigt = rho @ test_log_voigt.T
 
     # Compare the two methods (need to transpose to match shapes)
-    equivariance_error = torch.max(torch.abs(rotated_log_voigt - log_rotated_voigt.T)).item()
+    equivariance_error = torch.max(
+        torch.abs(rotated_log_voigt - log_rotated_voigt.T)
+    ).item()
 
     print(f"  Equivariance error: {equivariance_error:.2e}")
 

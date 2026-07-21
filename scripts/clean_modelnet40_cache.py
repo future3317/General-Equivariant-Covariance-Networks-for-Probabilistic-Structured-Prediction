@@ -162,9 +162,7 @@ def write_clean_cache(
     if source == destination:
         raise ValueError("source and destination must differ")
     if destination.exists() or audit_path.exists():
-        raise FileExistsError(
-            f"refusing to overwrite {destination} or {audit_path}"
-        )
+        raise FileExistsError(f"refusing to overwrite {destination} or {audit_path}")
     destination.parent.mkdir(parents=True, exist_ok=True)
 
     payload = joblib.load(source)
@@ -186,8 +184,7 @@ def write_clean_cache(
     audit["destination"] = str(destination)
     audit["destination_sha256"] = sha256(destination)
     audit["cleaned_training_statistics"] = {
-        name: np.asarray(value).tolist()
-        for name, value in cleaned["stats"].items()
+        name: np.asarray(value).tolist() for name, value in cleaned["stats"].items()
     }
     with audit_path.open("x", encoding="utf-8") as target:
         json.dump(audit, target, indent=2)
@@ -206,9 +203,7 @@ def main() -> None:
     destination = (
         Path(args.output_path) if args.output_path else cache_dir / CLEAN_CACHE_NAME
     )
-    output, audit = write_clean_cache(
-        source, destination, robust_z=args.robust_z
-    )
+    output, audit = write_clean_cache(source, destination, robust_z=args.robust_z)
     print(output)
     print(audit)
 

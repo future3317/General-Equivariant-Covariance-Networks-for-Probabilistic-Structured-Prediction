@@ -267,9 +267,7 @@ def _gradient_discrepancy(spherical, lowered, batch) -> dict:
     for name, model in (("spherical_cg", spherical), ("dense_projector", lowered)):
         model.zero_grad(set_to_none=True)
         features = shared_features.detach().clone().requires_grad_()
-        result = _from_shared_features(
-            model, features, batch_index, batch.y_irreps
-        )
+        result = _from_shared_features(model, features, batch_index, batch.y_irreps)
         result["loss"].backward()
         input_gradients[name] = features.grad.detach().clone()
         gradients[name] = {
@@ -387,9 +385,7 @@ def _time_model(model, batch, args, device: torch.device) -> dict:
         covariance_latest = None
         coefficients = head.covariance_projection(compiled)
         params = head.operator_basis.assemble(coefficients)
-        loss, _ = model.distribution(
-            cached_mean, params, batch.y_irreps, model.spd_map
-        )
+        loss, _ = model.distribution(cached_mean, params, batch.y_irreps, model.spd_map)
         scale = model.spd_map(params)
         covariance_latest = (loss, scale)
 
@@ -494,7 +490,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--cache-path", type=Path)
     parser.add_argument("--graph-cache-path", type=Path)
-    parser.add_argument("--target-type", choices=("inertia", "shape_covariance"), default="inertia")
+    parser.add_argument(
+        "--target-type", choices=("inertia", "shape_covariance"), default="inertia"
+    )
     parser.add_argument("--hidden-dim", type=int, default=32)
     parser.add_argument("--lmax", type=int, default=2)
     parser.add_argument("--num-layers", type=int, default=2)
@@ -506,16 +504,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--val-frac", type=float, default=0.1)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--tp-backend", choices=("e3nn", "cueq"), default="cueq")
-    parser.add_argument("--cueq-method", choices=("naive", "fused_tp"), default="fused_tp")
+    parser.add_argument(
+        "--cueq-method", choices=("naive", "fused_tp"), default="fused_tp"
+    )
     parser.add_argument("--num-workers", type=int, default=0)
-    parser.add_argument("--pin-memory", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--pin-memory", action=argparse.BooleanOptionalAction, default=True
+    )
     parser.add_argument("--prefetch-factor", type=int, default=2)
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--repeats", type=int, default=40)
     parser.add_argument("--max-test-batches", type=int)
     parser.add_argument("--tf32", action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument("--cudnn-benchmark", action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument(
+        "--cudnn-benchmark", action=argparse.BooleanOptionalAction, default=False
+    )
+    parser.add_argument(
+        "--device", default="cuda" if torch.cuda.is_available() else "cpu"
+    )
     parser.add_argument("--output", type=Path, required=True)
     return parser.parse_args()
 

@@ -6,6 +6,7 @@ Utility functions for creating rich atom-level features.
 This module provides functions to create atom features based on Magpie descriptor set,
 using sklearn's OneHotEncoder for categorical encoding.
 """
+
 import torch
 import numpy as np
 
@@ -43,14 +44,18 @@ def initialize_features():
         group = (Z % 18) + 1 if Z % 18 != 0 else 18  # Cyclic group pattern
 
         # Electronegativity follows periodic trends
-        electronegativity = 2.5 + np.sin(Z * np.pi / 8) - 0.5 * np.exp(-((Z - 20) / 30) ** 2)
+        electronegativity = (
+            2.5 + np.sin(Z * np.pi / 8) - 0.5 * np.exp(-(((Z - 20) / 30) ** 2))
+        )
         if Z == 1:
             electronegativity = 2.20
         elif Z == 2:
             electronegativity = 0.00
 
         # Atomic radius follows periodic trends
-        radius = 1.5 + 0.5 * np.sin(Z * np.pi / 10) - 0.2 * np.exp(-((Z - 30) / 20) ** 2)
+        radius = (
+            1.5 + 0.5 * np.sin(Z * np.pi / 10) - 0.2 * np.exp(-(((Z - 30) / 20) ** 2))
+        )
 
         # Valence electrons follow periodic pattern
         valence = (Z % 8) + 1
@@ -69,15 +74,17 @@ def initialize_features():
         ]
 
         # 2. Derived features (7 dimensions)
-        desc.extend([
-            np.log(atomic_mass + 1.0) / 5.0,  # Log mass
-            np.sqrt(atomic_mass) / 10.0,  # sqrt mass
-            (atomic_mass ** (1/3)) / 5.0,  # cube root mass
-            (electronegativity ** 2) / 10.0,  # Square electronegativity
-            (radius ** 2) / 4.0,  # Square radius
-            Z % 2,  # Atomic number parity
-            int(period) % 2,  # Period parity
-        ])
+        desc.extend(
+            [
+                np.log(atomic_mass + 1.0) / 5.0,  # Log mass
+                np.sqrt(atomic_mass) / 10.0,  # sqrt mass
+                (atomic_mass ** (1 / 3)) / 5.0,  # cube root mass
+                (electronegativity**2) / 10.0,  # Square electronegativity
+                (radius**2) / 4.0,  # Square radius
+                Z % 2,  # Atomic number parity
+                int(period) % 2,  # Period parity
+            ]
+        )
 
         # 3. Period indicators (7 dimensions)
         for p in range(1, 8):
@@ -106,13 +113,17 @@ def initialize_features():
         desc.append(1.0 if electronegativity < 1.5 else 0.0)
 
         # 7. Additional periodic properties (5 dimensions)
-        desc.extend([
-            np.sin(Z * np.pi / 7),  # Sinusoidal encoding for periodicity
-            np.cos(Z * np.pi / 7),  # Cosine encoding for periodicity
-            np.sin(Z * np.pi / 18),  # Sinusoidal encoding for groups
-            np.cos(Z * np.pi / 18),  # Cosine encoding for groups
-            np.exp(-((Z - 50) / 50) ** 2),  # Gaussian centered at middle of periodic table
-        ])
+        desc.extend(
+            [
+                np.sin(Z * np.pi / 7),  # Sinusoidal encoding for periodicity
+                np.cos(Z * np.pi / 7),  # Cosine encoding for periodicity
+                np.sin(Z * np.pi / 18),  # Sinusoidal encoding for groups
+                np.cos(Z * np.pi / 18),  # Cosine encoding for groups
+                np.exp(
+                    -(((Z - 50) / 50) ** 2)
+                ),  # Gaussian centered at middle of periodic table
+            ]
+        )
 
         # Verify we have exactly 49 dimensions
         assert len(desc) == 49, f"Expected 49 dimensions, got {len(desc)}"
@@ -124,7 +135,9 @@ def initialize_features():
     FEATURE_DIM = 49
 
     print(f"Initialized {len(element_descriptors)} element descriptors")
-    print(f"Final feature dimension: {FEATURE_DIM} (physically meaningful only, no padding)")
+    print(
+        f"Final feature dimension: {FEATURE_DIM} (physically meaningful only, no padding)"
+    )
 
 
 # Initialize features on module import
@@ -164,7 +177,9 @@ def get_magpie_features(atomic_numbers: torch.Tensor) -> torch.Tensor:
     return torch.stack(features).to(atomic_numbers.device)
 
 
-def create_composite_atom_features(atomic_numbers: torch.Tensor, use_onehot: bool = True) -> torch.Tensor:
+def create_composite_atom_features(
+    atomic_numbers: torch.Tensor, use_onehot: bool = True
+) -> torch.Tensor:
     """
     Create atom features using Magpie-style encoding.
 
@@ -194,7 +209,9 @@ def create_basic_atom_features(atomic_numbers: torch.Tensor) -> torch.Tensor:
     return get_magpie_features(atomic_numbers)
 
 
-def create_onehot_atom_features(atomic_numbers: torch.Tensor, max_atomic_number: int = 103) -> torch.Tensor:
+def create_onehot_atom_features(
+    atomic_numbers: torch.Tensor, max_atomic_number: int = 103
+) -> torch.Tensor:
     """
     Create simple one-hot encoding of atomic numbers.
 
@@ -205,7 +222,9 @@ def create_onehot_atom_features(atomic_numbers: torch.Tensor, max_atomic_number:
     Returns:
         [N, max_atomic_number] tensor of one-hot encoded features
     """
-    one_hot = torch.zeros(len(atomic_numbers), max_atomic_number, device=atomic_numbers.device)
+    one_hot = torch.zeros(
+        len(atomic_numbers), max_atomic_number, device=atomic_numbers.device
+    )
     Z_clamped = torch.clamp(atomic_numbers, 1, max_atomic_number)
     one_hot[torch.arange(len(atomic_numbers)), Z_clamped - 1] = 1.0
     return one_hot
@@ -247,8 +266,8 @@ def create_encoded_atom_features(atomic_numbers: torch.Tensor) -> torch.Tensor:
 
                 # Power transformations for first few features
                 if j < 5 and len(expanded_feat) < 119:
-                    expanded_feat.append((val ** 2))
-                    expanded_feat.append((val ** 0.5))
+                    expanded_feat.append((val**2))
+                    expanded_feat.append((val**0.5))
                     expanded_feat.append(np.log(val + 1.0))
 
         # Ensure exactly 119 dimensions

@@ -10,7 +10,12 @@ import torch
 
 from representations import O3IrrepsSpec
 from representations.operator_ir import OperatorFamilyPlan
-from representations.representation_ir import DirectSumExpr, IrrepsExpr, RepExpr, SymmetricSquareExpr
+from representations.representation_ir import (
+    DirectSumExpr,
+    IrrepsExpr,
+    RepExpr,
+    SymmetricSquareExpr,
+)
 
 
 class RadialLaw(ABC):
@@ -142,7 +147,9 @@ class EllipticalDistribution(DistributionSpec):
         elif isinstance(radial, RadialLaw):
             law = radial
         else:
-            raise TypeError("radial must be a RadialLaw or a supported compatibility name")
+            raise TypeError(
+                "radial must be a RadialLaw or a supported compatibility name"
+            )
         object.__setattr__(self, "radial", law)
 
     @property

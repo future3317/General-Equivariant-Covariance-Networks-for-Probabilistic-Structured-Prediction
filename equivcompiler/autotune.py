@@ -57,9 +57,7 @@ class DeviceAutotuner:
             _synchronize(signature.device)
             samples.append((time.perf_counter() - start) * 1_000.0)
         values = torch.tensor(samples, dtype=torch.float64)
-        q1, median, q3 = torch.quantile(
-            values, values.new_tensor([0.25, 0.5, 0.75])
-        )
+        q1, median, q3 = torch.quantile(values, values.new_tensor([0.25, 0.5, 0.75]))
         return ExecutorMeasurement(
             executor=executor,  # type: ignore[arg-type]
             signature=signature,

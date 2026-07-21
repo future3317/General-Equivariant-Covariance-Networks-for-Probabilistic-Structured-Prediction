@@ -118,12 +118,16 @@ class MultiplicityFirstDenseTensorProduct(torch.nn.Module):
             for path in self._paths
         }
         for left_l, right_l, output_l in keys:
-            coupling = o3.wigner_3j(
-                left_l,
-                right_l,
-                output_l,
-                dtype=torch.float64,
-            ).permute(2, 0, 1).contiguous()
+            coupling = (
+                o3.wigner_3j(
+                    left_l,
+                    right_l,
+                    output_l,
+                    dtype=torch.float64,
+                )
+                .permute(2, 0, 1)
+                .contiguous()
+            )
             self.register_buffer(
                 f"_coupling_{left_l}_{right_l}_{output_l}_float64",
                 coupling,
@@ -140,9 +144,7 @@ class MultiplicityFirstDenseTensorProduct(torch.nn.Module):
         right_l = self.irreps_in2[path["i_in2"]].ir.l
         output_l = self.irreps_out[path["i_out"]].ir.l
         suffix = "float64" if dtype == torch.float64 else "float32"
-        coupling = getattr(
-            self, f"_coupling_{left_l}_{right_l}_{output_l}_{suffix}"
-        )
+        coupling = getattr(self, f"_coupling_{left_l}_{right_l}_{output_l}_{suffix}")
         return coupling if coupling.dtype == dtype else coupling.to(dtype=dtype)
 
     @staticmethod
@@ -161,9 +163,7 @@ class MultiplicityFirstDenseTensorProduct(torch.nn.Module):
         right: torch.Tensor,
     ) -> torch.Tensor:
         weight = self.weight[path["start"] : path["stop"]].reshape(path["shape"])
-        mixed = torch.einsum(
-            "uvw,...vj->...wuj", weight * path["path_weight"], right
-        )
+        mixed = torch.einsum("uvw,...vj->...wuj", weight * path["path_weight"], right)
         return self._project(left, mixed, self._coupling(path, left.dtype))
 
     def _factorized_path(
@@ -180,9 +180,7 @@ class MultiplicityFirstDenseTensorProduct(torch.nn.Module):
             "wrv,...vj->...wrj", self.right_factors[path_index], right
         )
         pair = (left_mixed.unsqueeze(-1) * right_mixed.unsqueeze(-2)).flatten(-2)
-        projected = torch.matmul(
-            pair, self._coupling(path, left.dtype).flatten(1).T
-        )
+        projected = torch.matmul(pair, self._coupling(path, left.dtype).flatten(1).T)
         return projected.sum(dim=-2) * path["path_weight"]
 
     def load_e3nn_weights(self, tensor_product: torch.nn.Module) -> None:

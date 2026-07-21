@@ -89,7 +89,9 @@ def empirical_coverage(
     result = {}
     for level in levels:
         threshold = chi2.ppf(level, df=float(d))
-        result[f"coverage_{int(level * 100):02d}"] = (maha2 < threshold).float().mean().item()
+        result[f"coverage_{int(level * 100):02d}"] = (
+            (maha2 < threshold).float().mean().item()
+        )
     return result
 
 
@@ -113,6 +115,7 @@ def negative_log_likelihood_gaussian(
     maha2 = mahalanobis_distance_squared(residual, scale)
     logdet = torch.logdet(scale)
     import math
+
     nll = 0.5 * d * math.log(2.0 * math.pi) + 0.5 * logdet + 0.5 * maha2
     return nll.mean()
 
@@ -148,14 +151,18 @@ def energy_score(
 
     # S = L L^T
     L = torch.linalg.cholesky(scale_flat)
-    eps = torch.randn(pred_flat.shape[0], num_samples, d, device=pred.device, dtype=pred.dtype)
+    eps = torch.randn(
+        pred_flat.shape[0], num_samples, d, device=pred.device, dtype=pred.dtype
+    )
     samples = pred_flat.unsqueeze(1) + torch.einsum("bij,bnj->bni", L, eps)
 
     # E ||Y - y_true||
     term1 = torch.norm(samples - target_flat.unsqueeze(1), dim=-1).mean(dim=1)
 
     # E ||Y - Y'||
-    term2 = torch.norm(samples.unsqueeze(2) - samples.unsqueeze(1), dim=-1).mean(dim=(1, 2))
+    term2 = torch.norm(samples.unsqueeze(2) - samples.unsqueeze(1), dim=-1).mean(
+        dim=(1, 2)
+    )
 
     score = term1 - 0.5 * term2
     return score.mean()
@@ -193,6 +200,8 @@ def whitened_residual_covariance(
     """
     residual = target - pred
     L = torch.linalg.cholesky(scale)
-    z = torch.linalg.solve_triangular(L, residual.unsqueeze(-1), upper=False).squeeze(-1)
+    z = torch.linalg.solve_triangular(L, residual.unsqueeze(-1), upper=False).squeeze(
+        -1
+    )
     whitened = torch.matmul(z.unsqueeze(-1), z.unsqueeze(-2))
     return torch.trace(whitened.mean(dim=0))

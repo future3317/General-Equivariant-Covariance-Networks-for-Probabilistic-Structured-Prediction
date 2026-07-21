@@ -71,7 +71,9 @@ def test_checkpoint_conversion_handles_full_model_prefix(tmp_path):
     source_head = _head("spherical_cg")
     source = tmp_path / "source.pt"
     destination = tmp_path / "lowered.pt"
-    state = {f"joint_head.{key}": value for key, value in source_head.state_dict().items()}
+    state = {
+        f"joint_head.{key}": value for key, value in source_head.state_dict().items()
+    }
     state["backbone.placeholder"] = torch.ones(1)
     torch.save(state, source)
 

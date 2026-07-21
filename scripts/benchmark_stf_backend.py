@@ -86,13 +86,13 @@ def _benchmark_one(
     repeats: int,
 ) -> dict:
     dtype = {"float32": torch.float32, "bfloat16": torch.bfloat16}[dtype_name]
-    seed = o3.Irreps(
-        f"{2 * multiplicity}x0e + {multiplicity}x1o + {multiplicity}x2e"
-    )
+    seed = o3.Irreps(f"{2 * multiplicity}x0e + {multiplicity}x1o + {multiplicity}x2e")
     spherical, lowered = _build_pair(seed, device=device, dtype=dtype)
     spherical = _compile(spherical, execution)
     lowered = _compile(lowered, execution)
-    features = (0.1 * seed.randn(batch_size, -1, device=device, dtype=dtype)).requires_grad_()
+    features = (
+        0.1 * seed.randn(batch_size, -1, device=device, dtype=dtype)
+    ).requires_grad_()
 
     with torch.no_grad():
         spherical_mean, spherical_operator = spherical(features)
@@ -213,9 +213,15 @@ def benchmark(args: argparse.Namespace) -> dict:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--batch-sizes", type=_csv_ints, default=_csv_ints("32,128,256"))
-    parser.add_argument("--multiplicities", type=_csv_ints, default=_csv_ints("8,16,32,64"))
+    parser.add_argument(
+        "--device", default="cuda" if torch.cuda.is_available() else "cpu"
+    )
+    parser.add_argument(
+        "--batch-sizes", type=_csv_ints, default=_csv_ints("32,128,256")
+    )
+    parser.add_argument(
+        "--multiplicities", type=_csv_ints, default=_csv_ints("8,16,32,64")
+    )
     parser.add_argument(
         "--dtypes",
         type=lambda value: _csv_choices(value, {"float32", "bfloat16"}),

@@ -97,7 +97,9 @@ class O3QuadraticSymmetricOperatorHead(GraphOutputHead):
         """Whether the selected execution backend preserves the full CG map."""
         return self.backend == "spherical_cg" or bool(self.square.is_exact)
 
-    def load_spherical_head(self, spherical_head: "O3QuadraticSymmetricOperatorHead") -> None:
+    def load_spherical_head(
+        self, spherical_head: "O3QuadraticSymmetricOperatorHead"
+    ) -> None:
         """Map a spherical-CG head to the exact dense-projector backend."""
         if self.backend != "cartesian_stf" or not self.square.is_exact:
             raise RuntimeError("weight mapping requires an exact cartesian_stf head")

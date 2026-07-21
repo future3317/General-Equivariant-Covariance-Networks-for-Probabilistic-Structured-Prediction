@@ -33,9 +33,7 @@ class CompiledProbabilisticReadout(torch.nn.Module):
         mean, parameters = self.head(seed_features, batch)
         result: dict[str, Any] = {"mu": mean, "params": parameters}
         if target is not None:
-            loss, components = self.distribution(
-                mean, parameters, target, self.spd_map
-            )
+            loss, components = self.distribution(mean, parameters, target, self.spd_map)
             result["loss"] = loss
             result["components"] = components
         if return_scale:

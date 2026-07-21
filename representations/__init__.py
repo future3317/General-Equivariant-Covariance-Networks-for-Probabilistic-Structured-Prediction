@@ -1,7 +1,10 @@
 """Representation layer: orthogonal representations and symmetric squares."""
 
 from representations.base import OrthogonalRepresentationSpec, SymmetricSquareSpec
-from representations.symmetric_square import O3SymmetricOperatorBasis, symmetric_square_irreps
+from representations.symmetric_square import (
+    O3SymmetricOperatorBasis,
+    symmetric_square_irreps,
+)
 from representations.o3_irreps import O3IrrepsSpec
 from representations.cartesian_outputs import (
     rank2_symmetric_irreps,
