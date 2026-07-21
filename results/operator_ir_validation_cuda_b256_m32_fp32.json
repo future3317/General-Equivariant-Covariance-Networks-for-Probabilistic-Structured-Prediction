@@ -30,6 +30,7 @@
     {
       "name": "full",
       "kind": "full",
+      "output_irreps": "1x0e+1x2e",
       "parameter_bindings": [
         {
           "name": "operator",
@@ -106,7 +107,10 @@
           ],
           "unknown_instructions": [],
           "errors": [],
-          "derivation": "closed_primitive_rule_set"
+          "result_dimension": 6,
+          "result_irreps": "1x0e+1x2e",
+          "environment_typed": true,
+          "derivation": "closed_typed_primitive_rule_set"
         }
       },
       "operator_program_hash": "b989d0c3c5b3f22ea4d2f5c42ada2127a7891e7a01693db85a1dd3339f1159c8",
@@ -130,12 +134,16 @@
         ],
         "unknown_instructions": [],
         "errors": [],
-        "derivation": "closed_primitive_rule_set"
+        "result_dimension": 6,
+        "result_irreps": "1x0e+1x2e",
+        "environment_typed": true,
+        "derivation": "closed_typed_primitive_rule_set"
       }
     },
     {
       "name": "low_rank",
       "kind": "low_rank",
+      "output_irreps": "1x0e+1x2e",
       "parameter_bindings": [
         {
           "name": "factor",
@@ -214,7 +222,7 @@
             ],
             "attributes": {
               "dimension": 6,
-              "minimum": 0.0001
+              "minimum": 0.0
             }
           },
           {
@@ -256,10 +264,13 @@
           ],
           "unknown_instructions": [],
           "errors": [],
-          "derivation": "closed_primitive_rule_set"
+          "result_dimension": 6,
+          "result_irreps": "1x0e+1x2e",
+          "environment_typed": true,
+          "derivation": "closed_typed_primitive_rule_set"
         }
       },
-      "operator_program_hash": "67c8986393a7b2598ce88822dcef2175b9f8b5c97fada826175931f27e0df9db",
+      "operator_program_hash": "83e9defc62db39032ab756d14e37a57790d1d3745e4da75045c7f849c1759ac9",
       "relation_to_full": "strict_subset",
       "rank": 2,
       "graph": null,
@@ -283,12 +294,16 @@
         ],
         "unknown_instructions": [],
         "errors": [],
-        "derivation": "closed_primitive_rule_set"
+        "result_dimension": 6,
+        "result_irreps": "1x0e+1x2e",
+        "environment_typed": true,
+        "derivation": "closed_typed_primitive_rule_set"
       }
     },
     {
       "name": "isotypic_block",
       "kind": "block",
+      "output_irreps": "1x0e+1x2e",
       "parameter_bindings": [
         {
           "name": "blocks",
@@ -398,7 +413,10 @@
           ],
           "unknown_instructions": [],
           "errors": [],
-          "derivation": "closed_primitive_rule_set"
+          "result_dimension": 6,
+          "result_irreps": "1x0e+1x2e",
+          "environment_typed": true,
+          "derivation": "closed_typed_primitive_rule_set"
         }
       },
       "operator_program_hash": "c78f11bc6c3a88928d8425ac7f20cdc2e66da26ca9f0962f5c75b59ee538b7f0",
@@ -426,12 +444,16 @@
         ],
         "unknown_instructions": [],
         "errors": [],
-        "derivation": "closed_primitive_rule_set"
+        "result_dimension": 6,
+        "result_irreps": "1x0e+1x2e",
+        "environment_typed": true,
+        "derivation": "closed_typed_primitive_rule_set"
       }
     },
     {
       "name": "graph_precision",
       "kind": "graph",
+      "output_irreps": "4x1o",
       "parameter_bindings": [
         {
           "name": "potentials",
@@ -590,7 +612,10 @@
           ],
           "unknown_instructions": [],
           "errors": [],
-          "derivation": "closed_primitive_rule_set"
+          "result_dimension": 12,
+          "result_irreps": "4x1o",
+          "environment_typed": true,
+          "derivation": "closed_typed_primitive_rule_set"
         }
       },
       "operator_program_hash": "28e5ddd1da7d1aaf631dee2f4ab0d79ebe3c735b9dd0ff2a5f70b84f94dc6652",
@@ -643,7 +668,10 @@
         ],
         "unknown_instructions": [],
         "errors": [],
-        "derivation": "closed_primitive_rule_set"
+        "result_dimension": 12,
+        "result_irreps": "4x1o",
+        "environment_typed": true,
+        "derivation": "closed_typed_primitive_rule_set"
       }
     }
   ],
@@ -711,7 +739,8 @@
         ],
         "kind": "direct_sum",
         "verification": {
-          "derivation": "closed_primitive_rule_set",
+          "derivation": "closed_typed_primitive_rule_set",
+          "environment_typed": true,
           "equivariance": "verified",
           "errors": [],
           "instructions": [
@@ -724,12 +753,15 @@
             "direct_sum"
           ],
           "positivity": "spd",
+          "result_dimension": 6,
+          "result_irreps": "1x0e+1x2e",
           "unknown_instructions": [],
           "valid": true
         }
       },
       "certificates": {
-        "derivation": "closed_primitive_rule_set",
+        "derivation": "closed_typed_primitive_rule_set",
+        "environment_typed": true,
         "equivariance": "verified",
         "errors": [],
         "instructions": [
@@ -742,6 +774,8 @@
           "direct_sum"
         ],
         "positivity": "spd",
+        "result_dimension": 6,
+        "result_irreps": "1x0e+1x2e",
         "unknown_instructions": [],
         "valid": true
       },
@@ -754,6 +788,33 @@
       "graph": null,
       "kind": "isotypic_block_covariance",
       "operator_program_hash": "c78f11bc6c3a88928d8425ac7f20cdc2e66da26ca9f0962f5c75b59ee538b7f0",
+      "optimization": {
+        "binding_correspondence": [
+          {
+            "program": "blocks",
+            "template": "blocks"
+          }
+        ],
+        "graph_identity": null,
+        "match_evidence": [
+          "complete_operator_tree_identity",
+          "typed_binding_expression_identity",
+          "parameter_slice_and_layout_identity",
+          "operator_domain_and_output_identity",
+          "graph_and_rank_metadata_identity"
+        ],
+        "operator_domain": "scatter",
+        "operator_program_hash": "c78f11bc6c3a88928d8425ac7f20cdc2e66da26ca9f0962f5c75b59ee538b7f0",
+        "optimization_name": "multiplicity_block_oracle",
+        "output_dimension": 6,
+        "parameter_layout_transform": [
+          "blocks: identity ordering over registered multiplicity blocks"
+        ],
+        "proof_scope": "exact_registered_template_identity",
+        "rank": null,
+        "semantic_template_hash": "fabe257ac5b7b8868d8ad515c56c00f622b66a0b6e8b45428ac686c6c6d4fc6b"
+      },
+      "output_irreps": "1x0e+1x2e",
       "parameter_bindings": [
         {
           "expression": {
@@ -888,7 +949,8 @@
         ],
         "kind": "spectral_positive",
         "verification": {
-          "derivation": "closed_primitive_rule_set",
+          "derivation": "closed_typed_primitive_rule_set",
+          "environment_typed": true,
           "equivariance": "verified",
           "errors": [],
           "instructions": [
@@ -897,12 +959,15 @@
             "spectral_positive"
           ],
           "positivity": "spd",
+          "result_dimension": 6,
+          "result_irreps": "1x0e+1x2e",
           "unknown_instructions": [],
           "valid": true
         }
       },
       "certificates": {
-        "derivation": "closed_primitive_rule_set",
+        "derivation": "closed_typed_primitive_rule_set",
+        "environment_typed": true,
         "equivariance": "verified",
         "errors": [],
         "instructions": [
@@ -911,6 +976,8 @@
           "spectral_positive"
         ],
         "positivity": "spd",
+        "result_dimension": 6,
+        "result_irreps": "1x0e+1x2e",
         "unknown_instructions": [],
         "valid": true
       },
@@ -923,6 +990,33 @@
       "graph": null,
       "kind": "full_covariance",
       "operator_program_hash": "b989d0c3c5b3f22ea4d2f5c42ada2127a7891e7a01693db85a1dd3339f1159c8",
+      "optimization": {
+        "binding_correspondence": [
+          {
+            "program": "operator",
+            "template": "operator"
+          }
+        ],
+        "graph_identity": null,
+        "match_evidence": [
+          "complete_operator_tree_identity",
+          "typed_binding_expression_identity",
+          "parameter_slice_and_layout_identity",
+          "operator_domain_and_output_identity",
+          "graph_and_rank_metadata_identity"
+        ],
+        "operator_domain": "scatter",
+        "operator_program_hash": "b989d0c3c5b3f22ea4d2f5c42ada2127a7891e7a01693db85a1dd3339f1159c8",
+        "optimization_name": "spectral_trace_and_exponential_oracle",
+        "output_dimension": 6,
+        "parameter_layout_transform": [
+          "operator: Sym^2(V) coefficients -> dense symmetric generator"
+        ],
+        "proof_scope": "exact_registered_template_identity",
+        "rank": null,
+        "semantic_template_hash": "cc5c1f45b60a5d584c2437d0dfb95823ab141b9f9efec3cf9e774f9d122ec054"
+      },
+      "output_irreps": "1x0e+1x2e",
       "parameter_bindings": [
         {
           "expression": {
@@ -1104,33 +1198,143 @@
     {
       "family": "full",
       "optimization": "spectral_trace_and_exponential_oracle",
-      "covariance_max_abs": 1.4901161193847656e-08,
-      "logdet_max_abs": 2.1606683731079102e-07,
-      "quadratic_max_abs": 9.5367431640625e-07,
-      "parameter_gradient_max_abs": 5.066394805908203e-07
+      "optimization_certificate": {
+        "optimization_name": "spectral_trace_and_exponential_oracle",
+        "semantic_template_hash": "cc5c1f45b60a5d584c2437d0dfb95823ab141b9f9efec3cf9e774f9d122ec054",
+        "operator_program_hash": "b989d0c3c5b3f22ea4d2f5c42ada2127a7891e7a01693db85a1dd3339f1159c8",
+        "binding_correspondence": [
+          {
+            "template": "operator",
+            "program": "operator"
+          }
+        ],
+        "parameter_layout_transform": [
+          "operator: Sym^2(V) coefficients -> dense symmetric generator"
+        ],
+        "operator_domain": "scatter",
+        "output_dimension": 6,
+        "graph_identity": null,
+        "rank": null,
+        "match_evidence": [
+          "complete_operator_tree_identity",
+          "typed_binding_expression_identity",
+          "parameter_slice_and_layout_identity",
+          "operator_domain_and_output_identity",
+          "graph_and_rank_metadata_identity"
+        ],
+        "proof_scope": "exact_registered_template_identity"
+      },
+      "covariance_max_abs": 7.450580596923828e-09,
+      "logdet_max_abs": 6.109476089477539e-07,
+      "quadratic_max_abs": 1.9073486328125e-06,
+      "parameter_gradient_max_abs": 9.5367431640625e-07
     },
     {
       "family": "low_rank",
       "optimization": "woodbury_and_determinant_lemma_oracle",
+      "optimization_certificate": {
+        "optimization_name": "woodbury_and_determinant_lemma_oracle",
+        "semantic_template_hash": "b92b158c5c302dc90ac3efa3c4e21ed410aa29ff5f4b7760a1f1d2e0b73906f8",
+        "operator_program_hash": "83e9defc62db39032ab756d14e37a57790d1d3745e4da75045c7f849c1759ac9",
+        "binding_correspondence": [
+          {
+            "template": "factor",
+            "program": "factor"
+          },
+          {
+            "template": "scale",
+            "program": "scale"
+          }
+        ],
+        "parameter_layout_transform": [
+          "factor: irrep-major rV -> copy-major (d,r) matrix",
+          "scale: append the exact scalar primitive parameter"
+        ],
+        "operator_domain": "scatter",
+        "output_dimension": 6,
+        "graph_identity": null,
+        "rank": 2,
+        "match_evidence": [
+          "complete_operator_tree_identity",
+          "typed_binding_expression_identity",
+          "parameter_slice_and_layout_identity",
+          "operator_domain_and_output_identity",
+          "graph_and_rank_metadata_identity"
+        ],
+        "proof_scope": "exact_registered_template_identity"
+      },
       "covariance_max_abs": 1.862645149230957e-09,
-      "logdet_max_abs": 4.76837158203125e-07,
-      "quadratic_max_abs": 0.0,
-      "parameter_gradient_max_abs": 4.76837158203125e-07
+      "logdet_max_abs": 2.384185791015625e-07,
+      "quadratic_max_abs": 9.5367431640625e-07,
+      "parameter_gradient_max_abs": 1.1920928955078125e-07
     },
     {
       "family": "isotypic_block",
       "optimization": "multiplicity_block_oracle",
+      "optimization_certificate": {
+        "optimization_name": "multiplicity_block_oracle",
+        "semantic_template_hash": "fabe257ac5b7b8868d8ad515c56c00f622b66a0b6e8b45428ac686c6c6d4fc6b",
+        "operator_program_hash": "c78f11bc6c3a88928d8425ac7f20cdc2e66da26ca9f0962f5c75b59ee538b7f0",
+        "binding_correspondence": [
+          {
+            "template": "blocks",
+            "program": "blocks"
+          }
+        ],
+        "parameter_layout_transform": [
+          "blocks: identity ordering over registered multiplicity blocks"
+        ],
+        "operator_domain": "scatter",
+        "output_dimension": 6,
+        "graph_identity": null,
+        "rank": null,
+        "match_evidence": [
+          "complete_operator_tree_identity",
+          "typed_binding_expression_identity",
+          "parameter_slice_and_layout_identity",
+          "operator_domain_and_output_identity",
+          "graph_and_rank_metadata_identity"
+        ],
+        "proof_scope": "exact_registered_template_identity"
+      },
       "covariance_max_abs": 0.0,
-      "logdet_max_abs": 9.5367431640625e-07,
+      "logdet_max_abs": 0.0,
       "quadratic_max_abs": 1.9073486328125e-06,
-      "parameter_gradient_max_abs": 1.430511474609375e-06
+      "parameter_gradient_max_abs": 9.5367431640625e-07
     },
     {
       "family": "graph_precision",
       "optimization": "graph_elimination_or_dense_precision_oracle",
-      "covariance_max_abs": 1.1920928955078125e-07,
-      "logdet_max_abs": 9.5367431640625e-07,
-      "quadratic_max_abs": 7.62939453125e-06,
+      "optimization_certificate": {
+        "optimization_name": "graph_elimination_or_dense_precision_oracle",
+        "semantic_template_hash": "04f0062a3d8e6eb6a9eb7b8211b430aa5f48c2d4a5f06f2a9346448e13da2dd9",
+        "operator_program_hash": "28e5ddd1da7d1aaf631dee2f4ab0d79ebe3c735b9dd0ff2a5f70b84f94dc6652",
+        "binding_correspondence": [
+          {
+            "template": "potentials",
+            "program": "potentials"
+          }
+        ],
+        "parameter_layout_transform": [
+          "potentials: irrep-major copies -> potential-major coefficients",
+          "potentials: expand each local Sym^2(V0) coefficient in its basis"
+        ],
+        "operator_domain": "precision",
+        "output_dimension": 12,
+        "graph_identity": "139940880f855cabc685b9d06b7b7cd6cda95e6a32c61e6f5ae9cc5e71974578",
+        "rank": null,
+        "match_evidence": [
+          "complete_operator_tree_identity",
+          "typed_binding_expression_identity",
+          "parameter_slice_and_layout_identity",
+          "operator_domain_and_output_identity",
+          "graph_and_rank_metadata_identity"
+        ],
+        "proof_scope": "exact_registered_template_identity"
+      },
+      "covariance_max_abs": 1.7881393432617188e-07,
+      "logdet_max_abs": 0.0,
+      "quadratic_max_abs": 3.814697265625e-06,
       "parameter_gradient_max_abs": 4.76837158203125e-07
     }
   ],
@@ -1146,7 +1350,7 @@
       ],
       "dtype": "float32",
       "device": "cuda",
-      "device_uuid": "25ca0b59526a9112eefaef9137150930f72cb0584e45359b1e39e8c5dcbb887f",
+      "device_uuid": "d2545ef5c4debfce43de05a27b8f4f3943e7f9ea1accff59508786bce7dcead3",
       "phase": "forward_backward",
       "compilation_mode": "eager",
       "software_fingerprint": "bffe137979e3d40e7c26d495191ba0573cfb4a954a40b8f11db8fcaa976d0f82",
@@ -1155,25 +1359,25 @@
       "requires_parameter_grad": true
     },
     "maximum_absolute_error": {
-      "mu": 5.960464477539063e-08,
-      "params": 2.9802322387695312e-08,
+      "mu": 2.9802322387695312e-08,
+      "params": 5.960464477539063e-08,
       "scale": 1.1920928955078125e-07
     },
     "maximum_relative_error": {
-      "mu": 1.090733334763172e-07,
-      "params": 9.989730642701034e-08,
-      "scale": 9.576586279536059e-08
+      "mu": 9.367020226136447e-08,
+      "params": 1.4120303148956737e-07,
+      "scale": 9.419786550779463e-08
     },
     "measurements": [
       {
         "executor": "spherical_cg",
-        "median_ms": 21.24935749452561,
-        "iqr_ms": 2.917734265793115
+        "median_ms": 13.497337989974767,
+        "iqr_ms": 4.59834819776006
       },
       {
         "executor": "cartesian_stf",
-        "median_ms": 25.783249468076974,
-        "iqr_ms": 2.4064107274170965
+        "median_ms": 14.146392000839114,
+        "iqr_ms": 4.523478535702452
       }
     ],
     "selected_executor": "spherical_cg",
@@ -1218,13 +1422,13 @@
         "measurements": [
           {
             "executor": "spherical_cg",
-            "iqr_ms": 2.917734265793115,
-            "median_ms": 21.24935749452561
+            "iqr_ms": 4.59834819776006,
+            "median_ms": 13.497337989974767
           },
           {
             "executor": "cartesian_stf",
-            "iqr_ms": 2.4064107274170965,
-            "median_ms": 25.783249468076974
+            "iqr_ms": 4.523478535702452,
+            "median_ms": 14.146392000839114
           }
         ],
         "signature": {
@@ -1235,7 +1439,7 @@
           ],
           "compilation_mode": "eager",
           "device": "cuda",
-          "device_uuid": "25ca0b59526a9112eefaef9137150930f72cb0584e45359b1e39e8c5dcbb887f",
+          "device_uuid": "d2545ef5c4debfce43de05a27b8f4f3943e7f9ea1accff59508786bce7dcead3",
           "dtype": "float32",
           "feature_fingerprint": "3cfeec99775721abc5847a3831b53d582da030aade57d307a93b4ccdb463eb26",
           "operator_program_hash": "b989d0c3c5b3f22ea4d2f5c42ada2127a7891e7a01693db85a1dd3339f1159c8",
@@ -1257,19 +1461,19 @@
       "measurements": [
         {
           "executor": "spherical_cg",
-          "iqr_ms": 2.917734265793115,
-          "median_ms": 21.24935749452561
+          "iqr_ms": 4.59834819776006,
+          "median_ms": 13.497337989974767
         },
         {
           "executor": "cartesian_stf",
-          "iqr_ms": 2.4064107274170965,
-          "median_ms": 25.783249468076974
+          "iqr_ms": 4.523478535702452,
+          "median_ms": 14.146392000839114
         }
       ],
       "method": "measured_autotune",
       "performance_claim": "measured_for_exact_shape_signature",
       "selected_executor": "spherical_cg",
-      "selected_median_ms": 21.24935749452561,
+      "selected_median_ms": 13.497337989974767,
       "signature": {
         "active_plan_hash": "bcc7d3b0cf561a40ffe6ffe378a36974f3a0df22018a57cc45bf83bb981687a1",
         "batch_shape": [
@@ -1278,7 +1482,7 @@
         ],
         "compilation_mode": "eager",
         "device": "cuda",
-        "device_uuid": "25ca0b59526a9112eefaef9137150930f72cb0584e45359b1e39e8c5dcbb887f",
+        "device_uuid": "d2545ef5c4debfce43de05a27b8f4f3943e7f9ea1accff59508786bce7dcead3",
         "dtype": "float32",
         "feature_fingerprint": "3cfeec99775721abc5847a3831b53d582da030aade57d307a93b4ccdb463eb26",
         "operator_program_hash": "b989d0c3c5b3f22ea4d2f5c42ada2127a7891e7a01693db85a1dd3339f1159c8",
