@@ -339,7 +339,8 @@ def build_compilation_report(
                 status="diagnostic",
                 message=(
                     "The unrestricted full-family reference is unreachable, but it is "
-                    "diagnostic because the selected restricted family is reachable."
+                    "diagnostic because the selected active parameter representation "
+                    "is reachable."
                 ),
                 details={"underlying_failure": failure.as_dict()},
             ).as_dict()
@@ -428,6 +429,9 @@ def build_compilation_report(
     canonical_reachability = compilation.canonical_reachability.as_dict()
     active_reachability = compilation.active_reachability.as_dict()
     relation = compilation.operator_family.relation_to_full.value
+    canonical_is_active = (
+        compilation.canonical_target_irreps == compilation.active_target_irreps
+    )
     family_record = {
         **compilation.operator_family.as_dict(),
         "kind": family_kind,
@@ -468,6 +472,8 @@ def build_compilation_report(
             "canonical": canonical_reachability,
             "active": active_reachability,
             "active_is_compilation_gate": True,
+            "canonical_is_compilation_gate": canonical_is_active,
+            "canonical_is_diagnostic": not canonical_is_active,
             "canonical_is_diagnostic_for_restricted_families": not covariance_is_full,
         },
         "execution_fidelity": fidelity_record,

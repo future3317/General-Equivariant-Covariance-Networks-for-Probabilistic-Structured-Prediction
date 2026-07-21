@@ -81,8 +81,12 @@ backbone. Both call the same pure `plan_readout()` internally:
 ```python
 from equivcompiler import (
     AutoBudget,
+    ExactExecutorCandidates,
     ExactOnly,
     FeatureSpec,
+    FullCovariance,
+    LowRankCovariance,
+    PreferExecutor,
     compile_readout,
 )
 
@@ -96,8 +100,13 @@ seed = FeatureSpec.from_irreps(
 readout, report = compile_readout(
     seed,
     output="ijkl=jikl=ijlk=klij",
-    covariance=AutoBudget(budget=192, low_rank=8),
-    lowering=ExactOnly(),
+    covariance=AutoBudget(
+        max_parameters=192,
+        candidates=(FullCovariance(), LowRankCovariance(8)),
+    ),
+    fidelity=ExactOnly(),
+    executor=ExactExecutorCandidates(),
+    cost=PreferExecutor(("spherical_cg", "cartesian_stf")),
     distribution="student_t",
 )
 ```
@@ -116,7 +125,7 @@ plan = plan_readout(
     seed,
     output="ij=ji",
     covariance=FullCovariance(),
-    lowering=ExactOnly(),
+    fidelity=ExactOnly(),
 )
 plan.report.save("compilation.json")
 readout = plan.build_readout(device="cuda")
@@ -136,16 +145,21 @@ The report includes:
 - exact covariance/scatter/precision semantics and the selected proper
   likelihood.
 
-Family and lowering policies are typed objects. `FullCovariance()`,
-`LowRankCovariance(rank)`, `GraphPrecision(graph)`, and
-`AutoBudget(allowed_families=...)` select a statistical family;
-`ExactOnly()` and `TruncatedMultiplicityRank(rank)` independently select
-execution fidelity. Low-rank and graph models report `strict_subfamily` plus
-`exact_for_active_family`; only explicit contraction truncation reports
+The public policies are deliberately orthogonal. `FullCovariance()`,
+`LowRankCovariance(rank)`, `IsotypicBlockCovariance()`, and
+`GraphPrecision(graph)` define operator families. `AutoBudget(max_parameters,
+candidates)` minimizes emitted parameter count among feasible candidates, while
+`FirstFeasible(max_parameters, priority)` follows an explicit user order.
+`ExactOnly()` and `TruncatedMultiplicityRank(rank)` control fidelity;
+`ExactExecutorCandidates()` or `SpecificExecutor(name)` control executor
+eligibility; and `PreferExecutor(priority)` or `MinimizeLatency(...)` controls
+cost selection. Low-rank and graph models normally report `strict_subfamily`
+plus `exact_for_active_family`; only explicit contraction truncation reports
 `approximate_for_active_family`. `ExactOnly()` never selects truncation.
-Canonical full-target reachability is checked before any authorized budget
-selection. An unreachable canonical target therefore fails with a structured
-certificate instead of silently changing the statistical family.
+The selected active representation is the compilation gate. The unrestricted
+full-family target remains a diagnostic reference when a different structured
+parameterization is selected, so an unreachable canonical reference cannot
+silently change the requested statistical family.
 
 This separation is also a safeguard. Coordinate-wise Cholesky is not exposed
 because it is not conjugation equivariant; a Gaunt-only shortcut is not
@@ -258,16 +272,17 @@ model, report = compile_predictor(
     backbone,
     output="ij=ji",
     covariance=FullCovariance(),
-    lowering=ExactOnly(),
+    fidelity=ExactOnly(),
     distribution="gaussian",
 )
 ```
 
 For the 21-dimensional elasticity representation, the same API discovers a
 canonical full-covariance target up to `8e`. With an `lmax=2` seed this requires
-three CG edges. With an explicit `AutoBudget(budget=192, low_rank=8)` policy,
-the compiler selects the rank-8 low-rank subfamily instead of materializing all
-231 symmetric-operator parameters and records that restriction in the report.
+three CG edges. With an explicit `AutoBudget(max_parameters=192,
+candidates=(FullCovariance(), LowRankCovariance(8)))` policy, the compiler
+selects the 169-parameter rank-8 subfamily instead of materializing all 231
+symmetric-operator parameters and records that restriction in the report.
 
 ## Training
 

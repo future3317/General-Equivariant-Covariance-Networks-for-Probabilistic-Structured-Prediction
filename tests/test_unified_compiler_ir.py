@@ -30,6 +30,7 @@ from representations import (
     UnreachableActiveTargetError,
     analyze_lifting_graph,
 )
+from representations.operator_ir import FamilyRelation
 
 
 SEED = FeatureSpec.from_irreps("4x0e + 2x1o + 2x2e", scope="global")
@@ -57,6 +58,21 @@ def test_all_operator_families_share_one_typed_ir():
     assert graph_plan.assembly.kind == "add"
     assert graph_plan.assembly.inputs[1].kind == "pullback"
     assert all(plan.compile(output).parameter_expression.as_dict() for plan in families)
+
+
+def test_degenerate_structured_families_report_exact_full_coverage():
+    scalar_output = O3IrrepsSpec("3x0e")
+    assert (
+        IsotypicBlockCovariance().compile(scalar_output).relation_to_full
+        == FamilyRelation.EQUAL_TO_FULL
+    )
+    singleton_graph = EquivariantOutputGraph(num_nodes=1, edges=(), node_irrep="1o")
+    assert (
+        GraphPrecision(singleton_graph)
+        .compile(O3IrrepsSpec(singleton_graph.output_irreps))
+        .relation_to_full
+        == FamilyRelation.EQUAL_TO_FULL
+    )
 
 
 def test_auto_budget_cost_objective_differs_from_user_priority():
@@ -121,6 +137,36 @@ def test_restricted_family_treats_canonical_failure_as_diagnostic():
     assert not report["representation_reachability"]["canonical"]["reachable"]
     assert report["representation_reachability"]["active"]["reachable"]
     assert report["complexity"]["canonical_lifting_edges"] is None
+
+
+def test_alternative_full_family_parameterization_keeps_canonical_diagnostic():
+    output = O3IrrepsSpec.from_cartesian("ij=ji")
+    family = LowRankCovariance(output.dim).compile(output)
+    assert family.relation_to_full == FamilyRelation.EQUAL_TO_FULL
+    compiler = O3RepresentationCompiler(output)
+    canonical = EllipticalDistribution().canonical_reference(output).decompose_o3().irreps
+    active = family.active_expression(compiler._output_expression()).decompose_o3().irreps
+    seed = output.irreps
+    synthetic_failure = O3ReachabilityAnalysis(
+        seed,
+        canonical,
+        None,
+        CompilationCertificate(
+            code="synthetic_canonical_unreachable",
+            status="failure",
+            message="test-only canonical diagnostic",
+            details={"missing_irreps": ["4e"]},
+        ),
+    )
+    compilation = compiler.compile(
+        seed,
+        operator_family=family,
+        canonical_reachability=synthetic_failure,
+        active_reachability=analyze_lifting_graph(seed, active),
+    )
+    reachability = compilation.report().as_dict()["representation_reachability"]
+    assert reachability["canonical_is_diagnostic"]
+    assert not reachability["canonical_is_compilation_gate"]
 
 
 def test_full_family_still_rejects_the_same_active_failure():

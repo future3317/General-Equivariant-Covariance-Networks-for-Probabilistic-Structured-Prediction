@@ -105,6 +105,10 @@ class IsotypicBlockCovariance(OperatorFamilySpec):
     def compile(self, output: O3IrrepsSpec) -> OperatorFamilyPlan:
         multiplicities = irrep_multiplicities(output.irreps)
         count = sum(value * (value + 1) // 2 for value in multiplicities.values())
+        equals_full = (
+            len(multiplicities) == 1
+            and next(iter(multiplicities)).dim == 1
+        )
         blocks = tuple(
             OperatorIR.node(
                 "kronecker_identity",
@@ -126,8 +130,12 @@ class IsotypicBlockCovariance(OperatorFamilySpec):
             parameter_count=count,
             domain="scatter",
             assembly=OperatorIR.node("direct_sum", *blocks, positivity="spd"),
-            relation_to_full=FamilyRelation.STRICT_SUBSET,
-            restriction="isotypic_multiplicity_blocks",
+            relation_to_full=(
+                FamilyRelation.EQUAL_TO_FULL
+                if equals_full
+                else FamilyRelation.STRICT_SUBSET
+            ),
+            restriction=None if equals_full else "isotypic_multiplicity_blocks",
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -174,9 +182,17 @@ class GraphPrecision(OperatorFamilySpec):
             parameter_count=local_count * self.graph.num_potentials,
             domain="precision",
             assembly=OperatorIR.node("add", unary, pullback, positivity="spd"),
-            relation_to_full=FamilyRelation.STRICT_SUBSET,
+            relation_to_full=(
+                FamilyRelation.EQUAL_TO_FULL
+                if self.graph.num_nodes == 1
+                else FamilyRelation.STRICT_SUBSET
+            ),
             graph=self.graph,
-            restriction="fixed_skeleton_precision_cone",
+            restriction=(
+                None
+                if self.graph.num_nodes == 1
+                else "fixed_skeleton_precision_cone"
+            ),
         )
 
     def as_dict(self) -> dict[str, Any]:
