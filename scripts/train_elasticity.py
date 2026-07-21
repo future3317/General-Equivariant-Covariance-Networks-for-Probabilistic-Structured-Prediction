@@ -12,16 +12,17 @@ import torch
 import torch.optim as optim
 from tqdm import tqdm
 
-from representations import (
-    CompilerConfig,
-    O3RepresentationCompiler,
-    rank4_elasticity_irreps,
-)
+from equivcompiler import FeatureSpec, plan_readout
+from representations import rank4_elasticity_irreps
 from models import EquivariantBackbone
 from data.elasticity_dataset import get_elasticity_irreps_loaders
 from data.paths import dataset_dir
 from data.tensor_conversions import irreps_to_elasticity_21d
-from scripts._common import add_tensor_product_arguments, tensor_product_kwargs
+from scripts._common import (
+    add_tensor_product_arguments,
+    covariance_policy_from_cli,
+    tensor_product_kwargs,
+)
 
 
 def setup_logger(save_dir: str, experiment_name: str | None = None):
@@ -194,19 +195,20 @@ def main():
         atom_features=args.atom_features,
         **tensor_product_kwargs(args),
     )
-    compiler = O3RepresentationCompiler(
-        rank4_elasticity_irreps(),
-        CompilerConfig(
-            covariance=args.covariance,
-            output_scope="global",
-            objective=args.objective,
+    plan = plan_readout(
+        FeatureSpec.from_backbone(backbone),
+        output=rank4_elasticity_irreps(),
+        covariance=covariance_policy_from_cli(
+            args.covariance,
+            rank=args.rank,
             parameter_budget=args.parameter_budget,
-            low_rank=args.rank,
-            student_t_dof=args.student_t_dof,
         ),
+        distribution=args.objective,
+        student_t_dof=args.student_t_dof,
+        output_scope="global",
     )
-    compilation = compiler.compile(backbone.irreps_out)
-    model = compilation.build_model(backbone).to(args.device)
+    compilation = plan.compilation
+    model = plan.bind(backbone).to(args.device)
     if args.compile_tp:
         model.backbone.compile_tensor_products(dynamic=True)
 

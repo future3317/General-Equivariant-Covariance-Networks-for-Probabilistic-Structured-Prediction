@@ -22,17 +22,18 @@ from equivcompiler import (
     LowRankCovariance,
     MinimizeLatency,
     PreferExecutor,
-    ShapeSignature,
     SpecificExecutor,
     FeatureSpec,
+    execution_signature_for_plan,
     plan_readout,
 )
 from representations import (
     EquivariantOutputGraph,
     O3IrrepsSpec,
-    O3RepresentationCompiler,
+    O3ProgramCompiler,
     analyze_lifting_graph,
 )
+from representations.operator_lowering import RecursiveOperatorMap
 from scripts.benchmarking import environment_record
 
 
@@ -58,16 +59,24 @@ def _family_records() -> list[dict]:
 def _reachability_diagnostic() -> dict:
     output = O3IrrepsSpec.from_cartesian("ij=ji")
     family = IsotypicBlockCovariance().compile(output)
-    compiler = O3RepresentationCompiler(output)
+    compiler = O3ProgramCompiler(output)
     distribution = EllipticalDistribution()
     canonical = distribution.canonical_reference(output).decompose_o3().irreps
     active = distribution.active_parameter_rep(output, family).decompose_o3().irreps
-    seed = output.irreps
-    canonical_analysis = analyze_lifting_graph(seed, canonical, max_depth=0)
-    active_analysis = analyze_lifting_graph(seed, active, max_depth=0)
+    feature = FeatureSpec.from_irreps(output.irreps, scope="global")
+    canonical_analysis = analyze_lifting_graph(feature.irreps, canonical, max_depth=0)
+    active_analysis = analyze_lifting_graph(feature.irreps, active, max_depth=0)
+    planned = plan_readout(
+        feature,
+        output=output,
+        covariance=IsotypicBlockCovariance(),
+        distribution=distribution,
+    )
     compilation = compiler.compile(
-        seed,
+        feature,
         operator_family=family,
+        executor_decision=planned.compilation.executor_decision,
+        distribution_spec=distribution,
         canonical_reachability=canonical_analysis,
         active_reachability=active_analysis,
     )
@@ -102,6 +111,79 @@ def _selection_records(seed: FeatureSpec) -> dict:
     }
 
 
+def _recursive_oracle_validation(
+    seed: FeatureSpec,
+    *,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> list[dict]:
+    graph = EquivariantOutputGraph(
+        num_nodes=4,
+        edges=((0, 1), (1, 2), (2, 3)),
+        node_irrep="1o",
+    )
+    cases = (
+        ("full", "ij=ji", FullCovariance()),
+        ("low_rank", "ij=ji", LowRankCovariance(2)),
+        ("isotypic_block", "ij=ji", IsotypicBlockCovariance()),
+        ("graph_precision", graph.output_irreps, GraphPrecision(graph)),
+    )
+    records = []
+    for name, output, family in cases:
+        plan = plan_readout(seed, output=output, covariance=family)
+        optimized = plan.compilation.build_spd_map().to(device=device, dtype=dtype)
+        recursive = RecursiveOperatorMap(plan.compilation).to(
+            device=device, dtype=dtype
+        )
+        left = (
+            0.1
+            * torch.randn(
+                3,
+                plan.compilation.covariance_parameter_count,
+                device=device,
+                dtype=dtype,
+            )
+        ).requires_grad_()
+        right = left.detach().clone().requires_grad_()
+        residual = torch.randn(
+            3,
+            plan.compilation.output_spec.dim,
+            device=device,
+            dtype=dtype,
+        )
+        optimized_covariance = optimized(left)
+        recursive_covariance = recursive(right)
+        optimized_stats = optimized.statistics(left, residual)
+        recursive_stats = recursive.statistics(right, residual)
+        optimized_loss = optimized_covariance.square().mean() + sum(
+            value.mean() for value in optimized_stats
+        )
+        recursive_loss = recursive_covariance.square().mean() + sum(
+            value.mean() for value in recursive_stats
+        )
+        optimized_gradient = torch.autograd.grad(optimized_loss, left)[0]
+        recursive_gradient = torch.autograd.grad(recursive_loss, right)[0]
+        records.append(
+            {
+                "family": name,
+                "optimization": optimized.optimization_name,
+                "covariance_max_abs": float(
+                    (optimized_covariance - recursive_covariance).abs().max().detach()
+                ),
+                "logdet_max_abs": float(
+                    (optimized_stats[0] - recursive_stats[0]).abs().max().detach()
+                ),
+                "quadratic_max_abs": float(
+                    (optimized_stats[1] - recursive_stats[1]).abs().max().detach()
+                ),
+                "parameter_gradient_max_abs": float(
+                    (optimized_gradient - recursive_gradient).abs().max().detach()
+                ),
+            }
+        )
+    return records
+
+
 def _build_exact_pair(seed: FeatureSpec, device: torch.device, dtype: torch.dtype):
     common = dict(
         output="ij=ji",
@@ -124,7 +206,7 @@ def _build_exact_pair(seed: FeatureSpec, device: torch.device, dtype: torch.dtyp
     spherical = spherical_plan.build_readout(device=device, dtype=dtype)
     cartesian = cartesian_plan.build_readout(device=device, dtype=dtype)
     cartesian.load_state_dict(spherical.state_dict(), strict=True)
-    return spherical, cartesian
+    return spherical_plan, spherical, cartesian
 
 
 def _executor_validation(
@@ -136,7 +218,7 @@ def _executor_validation(
     warmup: int,
     repeats: int,
 ) -> dict:
-    spherical, cartesian = _build_exact_pair(seed, device, dtype)
+    spherical_plan, spherical, cartesian = _build_exact_pair(seed, device, dtype)
     features = (0.1 * seed.irreps.randn(batch_size, -1, device=device, dtype=dtype)).requires_grad_()
     with torch.no_grad():
         spherical_output = spherical(features, return_scale=True)
@@ -156,12 +238,12 @@ def _executor_validation(
     }
 
     phase = "forward_backward"
-    signature = ShapeSignature(
-        batch_size,
-        seed.irreps.dim,
-        str(dtype).removeprefix("torch."),
-        str(device),
-        phase,
+    signature = execution_signature_for_plan(
+        spherical_plan,
+        batch_shape=(batch_size, seed.irreps.dim),
+        dtype=str(dtype).removeprefix("torch."),
+        device=device,
+        phase=phase,
     )
     latest = None
 
@@ -217,7 +299,11 @@ def _executor_validation(
 
 def validate(args: argparse.Namespace) -> dict:
     device = torch.device(args.device)
-    dtype = {"float32": torch.float32, "bfloat16": torch.bfloat16}[args.dtype]
+    dtype = {
+        "float64": torch.float64,
+        "float32": torch.float32,
+        "bfloat16": torch.bfloat16,
+    }[args.dtype]
     seed = FeatureSpec.from_irreps(
         f"{2 * args.multiplicity}x0e + {args.multiplicity}x1o + {args.multiplicity}x2e",
         scope="global",
@@ -230,6 +316,11 @@ def validate(args: argparse.Namespace) -> dict:
         "operator_families": _family_records(),
         "family_selection": _selection_records(seed),
         "reachability_gate": _reachability_diagnostic(),
+        "recursive_oracle_equivalence": _recursive_oracle_validation(
+            seed,
+            device=device,
+            dtype=dtype,
+        ),
         "executor_autotune": _executor_validation(
             seed,
             device=device,
@@ -244,7 +335,9 @@ def validate(args: argparse.Namespace) -> dict:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--dtype", choices=("float32", "bfloat16"), default="float32")
+    parser.add_argument(
+        "--dtype", choices=("float64", "float32", "bfloat16"), default="float32"
+    )
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--multiplicity", type=int, default=16)
     parser.add_argument("--warmup", type=int, default=10)

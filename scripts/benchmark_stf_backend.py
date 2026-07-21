@@ -14,7 +14,13 @@ from pathlib import Path
 import torch
 from compatibility.e3nn import o3
 
-from representations import CompilerConfig, O3RepresentationCompiler
+from equivcompiler import (
+    FeatureSpec,
+    FullCovariance,
+    PreferExecutor,
+    SpecificExecutor,
+    plan_readout,
+)
 from scripts.benchmarking import environment_record, measure
 
 
@@ -41,13 +47,21 @@ def _build_pair(
     device: torch.device,
     dtype: torch.dtype,
 ) -> tuple[torch.nn.Module, torch.nn.Module]:
-    common = {"covariance": "full", "output_scope": "dense", "objective": "gaussian"}
-    spherical = O3RepresentationCompiler(
-        "0e + 2e", CompilerConfig(**common, backend="spherical_cg")
-    ).compile(seed).build_head()
-    lowered = O3RepresentationCompiler(
-        "0e + 2e", CompilerConfig(**common, backend="cartesian_stf")
-    ).compile(seed).build_head()
+    feature = FeatureSpec.from_irreps(seed, scope="node")
+
+    def build(executor: str):
+        plan = plan_readout(
+            feature,
+            output="0e + 2e",
+            covariance=FullCovariance(),
+            executor=SpecificExecutor(executor),
+            cost=PreferExecutor((executor,)),
+            output_scope="node",
+        )
+        return plan.compilation.build_head()
+
+    spherical = build("spherical_cg")
+    lowered = build("cartesian_stf")
     lowered.load_state_dict(spherical.state_dict(), strict=True)
     return (
         spherical.to(device=device, dtype=dtype),

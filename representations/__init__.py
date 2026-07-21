@@ -20,10 +20,10 @@ from representations.adaptive_lifting import (
     required_lifting_depth,
 )
 from representations.compiler import (
-    CompilerConfig,
+    LoweringConfig,
     O3Compilation,
     O3CompiledOutputHead,
-    O3RepresentationCompiler,
+    O3ProgramCompiler,
 )
 from representations.graph_structure import EquivariantOutputGraph
 from representations.cartesian_stf import (
@@ -55,6 +55,9 @@ from representations.operator_ir import (
     FamilyRelation,
     OperatorFamilyPlan,
     OperatorIR,
+    ParameterBinding,
+    Positivity,
+    Equivariance,
 )
 from representations.report import CompilationReport, build_compilation_report
 
@@ -76,10 +79,10 @@ __all__ = [
     "irrep_multiplicities",
     "plan_lifting_graph",
     "required_lifting_depth",
-    "CompilerConfig",
+    "LoweringConfig",
     "O3Compilation",
     "O3CompiledOutputHead",
-    "O3RepresentationCompiler",
+    "O3ProgramCompiler",
     "EquivariantOutputGraph",
     "MultiplicityFirstCartesianTensorSquare",
     "MultiplicityFirstDenseTensorProduct",
@@ -102,6 +105,9 @@ __all__ = [
     "InnerProductRep",
     "FamilyRelation",
     "OperatorIR",
+    "ParameterBinding",
+    "Positivity",
+    "Equivariance",
     "OperatorFamilyPlan",
     "CompilationReport",
     "build_compilation_report",

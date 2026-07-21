@@ -16,6 +16,7 @@ from equivcompiler.distributions import (
 from equivcompiler.executors import (
     CandidateEnumerator,
     DEFAULT_EXACT_LOWERINGS,
+    ExecutorDecision,
     ExecutionContext,
 )
 from equivcompiler.modules import CompiledProbabilisticReadout
@@ -35,13 +36,14 @@ from equivcompiler.policies import (
     TruncatedMultiplicityRank,
 )
 from equivcompiler.specs import FeatureSpec, OutputSemantics, describe_output
+from equivcompiler.signatures import plan_fingerprints
 from representations import (
     CompilationCertificate,
     CompilationError,
     CompilationReport,
-    CompilerConfig,
+    LoweringConfig,
     O3Compilation,
-    O3RepresentationCompiler,
+    O3ProgramCompiler,
     analyze_lifting_graph,
 )
 from representations.operator_ir import OperatorFamilyPlan
@@ -106,16 +108,13 @@ def _select_family(
     pairwise_relations = []
     for left_index, left in enumerate(compiled):
         for right in compiled[left_index + 1 :]:
-            if left.kind == right.kind:
-                relation = "same_family_kind"
-            elif left.kind == "full":
-                relation = "right_is_subset_or_equal_to_left"
-            elif right.kind == "full":
-                relation = "left_is_subset_or_equal_to_right"
-            else:
-                relation = "incomparable_or_unknown"
+            certificate = left.relation_to(right)
             pairwise_relations.append(
-                {"left": left.kind, "right": right.kind, "relation": relation}
+                {
+                    "left": left.kind,
+                    "right": right.kind,
+                    **certificate.as_dict(),
+                }
             )
     feasible = [
         (index, item)
@@ -137,9 +136,9 @@ def _select_family(
 
     if isinstance(policy, AutoBudget):
         selected_index, selected = min(
-            feasible, key=lambda pair: (pair[1].parameter_count, pair[0])
+            feasible, key=lambda pair: (*policy.objective.score(pair[1]), pair[0])
         )
-        rule = "min_parameter_count_under_budget"
+        rule = "family_cost_model_under_budget"
         selection_semantics = "cost_objective_with_declaration_order_tie_break"
     elif isinstance(policy, FirstFeasible):
         selected_index, selected = feasible[0]
@@ -155,6 +154,9 @@ def _select_family(
         "selected_family": selected.kind,
         "selected_candidate_index": selected_index,
         "selected_parameters": selected.parameter_count,
+        "cost_objective": (
+            policy.objective.as_dict() if isinstance(policy, AutoBudget) else None
+        ),
         "considered": considered,
         "pairwise_family_relations": pairwise_relations,
         "candidate_family_order_is_not_a_mathematical_inclusion_order": True,
@@ -218,26 +220,34 @@ def _validate_contract(seed: FeatureSpec, output_scope: OutputScope) -> bool:
 
 
 def _select_executor(
+    seed: FeatureSpec,
     semantics: OutputSemantics,
     family: OperatorFamilyPlan,
-    active_depth: int,
+    active_plan,
+    distribution: DistributionSpec,
     fidelity: FidelityPolicy,
     executor: ExecutorPolicy,
     cost: CostPolicy,
-) -> tuple[str, int | None, dict[str, Any]]:
-    context = ExecutionContext(semantics.output_spec, family.kind, active_depth)
+) -> ExecutorDecision:
+    context = ExecutionContext(
+        feature=seed,
+        output=semantics.output_spec,
+        active_plan=active_plan,
+        operator_program=family.assembly,
+        operator_domain=family.domain,
+        fidelity=fidelity,
+    )
     support = DEFAULT_EXACT_LOWERINGS.as_dict(context)
     requested = (
         executor.candidates
         if isinstance(executor, ExactExecutorCandidates)
         else (executor.name,)
     )
-    available = CandidateEnumerator(DEFAULT_EXACT_LOWERINGS).enumerate(
+    certificates = CandidateEnumerator(DEFAULT_EXACT_LOWERINGS).enumerate(
         requested, context
     )
-    if isinstance(fidelity, TruncatedMultiplicityRank):
-        available = tuple(name for name in available if name == "cartesian_stf")
-    if not available:
+    available = tuple(item.executor for item in certificates)
+    if not certificates:
         raise CompilationError(
             CompilationCertificate(
                 code="backend_incompatible",
@@ -247,8 +257,8 @@ def _select_executor(
                     "requested": list(requested),
                     "support": support,
                     "fidelity": _policy_record(fidelity),
-                    "family": family.kind,
-                    "active_depth": active_depth,
+                    "operator_program_hash": family.assembly.fingerprint,
+                    "active_plan": active_plan.as_dict(),
                 },
             )
         )
@@ -271,6 +281,42 @@ def _select_executor(
             "priority": list(cost.priority),
         }
     elif isinstance(cost, MinimizeLatency):
+        expected = plan_fingerprints(
+            feature_record=seed.as_dict(),
+            output_record=semantics.as_dict(),
+            active_plan_record=active_plan.as_dict(),
+            operator_record=family.assembly.semantic_dict(),
+            distribution_record=distribution.as_dict(),
+        )
+        mismatches = {
+            "feature_fingerprint": (cost.signature.feature_fingerprint, seed.fingerprint),
+            "active_plan_hash": (
+                cost.signature.active_plan_hash,
+                expected["active_plan_hash"],
+            ),
+            "operator_program_hash": (
+                cost.signature.operator_program_hash,
+                expected["operator_program_hash"],
+            ),
+            "semantic_plan_hash": (
+                cost.signature.semantic_plan_hash,
+                expected["semantic_plan_hash"],
+            ),
+        }
+        mismatches = {
+            key: {"measured": pair[0], "planned": pair[1]}
+            for key, pair in mismatches.items()
+            if pair[0] != pair[1]
+        }
+        if mismatches:
+            raise CompilationError(
+                CompilationCertificate(
+                    code="executor_measurement_signature_mismatch",
+                    status="failure",
+                    message="latency evidence does not describe the active semantic plan",
+                    details={"mismatches": mismatches},
+                )
+            )
         measured = [item for item in cost.measurements if item.executor in available]
         if not measured:
             raise CompilationError(
@@ -300,10 +346,9 @@ def _select_executor(
     else:  # pragma: no cover
         raise TypeError(f"unsupported cost policy: {type(cost).__name__}")
 
-    contraction_rank = (
-        fidelity.rank if isinstance(fidelity, TruncatedMultiplicityRank) else None
-    )
-    return selected, contraction_rank, basis
+    capability = next(item for item in certificates if item.executor == selected)
+    basis["capability_certificate"] = capability.as_dict()
+    return ExecutorDecision(selected, capability, basis)
 
 
 def _compatibility_hash(
@@ -370,7 +415,6 @@ def _decorate_report(
             "output": semantics.as_dict(),
             "distribution_ir": distribution.as_dict(),
             "family": family,
-            "semantic_family_coverage": family,
             "execution_fidelity": execution_fidelity,
             "backend_selection_basis": backend_selection,
             "output_scope": output_scope,
@@ -380,12 +424,6 @@ def _decorate_report(
             "certificates": certificates,
         }
     )
-    # Compatibility aliases contain the same data, not a second source of truth.
-    record["lowering"] = execution_fidelity
-    record["execution"] = {
-        **record.get("execution", {}),
-        "selection_basis": backend_selection,
-    }
     return CompilationReport.from_dict(record)
 
 
@@ -406,11 +444,6 @@ class CompilationPlan:
     backend_selection_basis: dict[str, Any]
     compatibility_hash: str
     report: CompilationReport
-
-    @property
-    def lowering_policy(self) -> FidelityPolicy:
-        """Compatibility alias for pre-0.3 clients."""
-        return self.fidelity_policy
 
     def build_readout(
         self,
@@ -467,14 +500,11 @@ def plan_readout(
     fidelity: FidelityPolicy | None = None,
     executor: ExecutorPolicy = ExactExecutorCandidates(),
     cost: CostPolicy = PreferExecutor(),
-    lowering: FidelityPolicy | None = None,
     student_t_dof: float = 5.0,
     output_scope: OutputScope = "global",
 ) -> CompilationPlan:
     """Analyze semantics/reachability and select an independently costed lowering."""
-    if fidelity is not None and lowering is not None:
-        raise ValueError("pass fidelity or the legacy lowering alias, not both")
-    fidelity_policy = fidelity or lowering or ExactOnly()
+    fidelity_policy = fidelity or ExactOnly()
     distribution_spec = normalize_distribution(
         distribution, student_t_dof=student_t_dof
     )
@@ -496,39 +526,35 @@ def plan_readout(
     )
     if not active_reachability.reachable:
         # The core compiler converts this diagnostic into the public active-target error.
-        active_depth = 0
-        backend = "spherical_cg"
-        contraction_rank = None
         backend_selection_basis = {"method": "not_selected_active_unreachable"}
     else:
-        active_depth = active_reachability.plan.depth  # type: ignore[union-attr]
-        backend, contraction_rank, backend_selection_basis = _select_executor(
+        active_plan = active_reachability.plan
+        assert active_plan is not None
+        executor_decision = _select_executor(
+            seed,
             semantics,
             family,
-            active_depth,
+            active_plan,
+            distribution_spec,
             fidelity_policy,
             executor,
             cost,
         )
+        backend_selection_basis = executor_decision.selection_basis
 
-    config = CompilerConfig(
-        covariance=family.kind,
+    config = LoweringConfig(
         output_scope="global" if pool_input else "dense",
-        objective=distribution_spec.objective_name(),
         parameter_budget=getattr(covariance, "max_parameters", family.parameter_count),
-        low_rank=family.rank or 1,
-        student_t_dof=getattr(distribution_spec, "student_t_dof", student_t_dof),
-        backend=backend,
-        stf_contraction_rank=contraction_rank,
     )
-    compiler = O3RepresentationCompiler(
+    compiler = O3ProgramCompiler(
         semantics.output_spec,
         config,
-        graph_structure=family.graph,
     )
     compilation = compiler.compile(
-        seed.irreps,
+        seed,
         operator_family=family,
+        executor_decision=executor_decision if active_reachability.reachable else None,
+        distribution_spec=distribution_spec,
         canonical_reachability=canonical_reachability,
         active_reachability=active_reachability,
     )

@@ -6,10 +6,17 @@ import torch
 from e3nn import o3
 
 from distributions import GaussianNLL, StudentTNLL
+from equivcompiler import (
+    FeatureSpec,
+    FirstFeasible,
+    FullCovariance,
+    GraphPrecision,
+    IsotypicBlockCovariance,
+    LowRankCovariance,
+    plan_readout,
+)
 from representations import (
-    CompilerConfig,
     EquivariantOutputGraph,
-    O3RepresentationCompiler,
 )
 from spd_maps import GraphStructuredPrecisionMap
 
@@ -204,10 +211,20 @@ def test_compiler_selects_graph_precision_for_itop_budget():
         node_irrep="1o",
     )
     seed = o3.Irreps("8x0e + 4x1o + 4x2e")
-    compilation = O3RepresentationCompiler.for_graph(
-        graph,
-        CompilerConfig(covariance="auto", parameter_budget=192),
-    ).compile(seed)
+    feature = FeatureSpec.from_irreps(seed, scope="node")
+    compilation = plan_readout(
+        feature,
+        output=graph.output_irreps,
+        covariance=FirstFeasible(
+            192,
+            (
+                FullCovariance(),
+                GraphPrecision(graph),
+                LowRankCovariance(8),
+                IsotypicBlockCovariance(),
+            ),
+        ),
+    ).compilation
     assert compilation.covariance_mode == "graph"
     assert compilation.output_spec.dim == 45
     assert compilation.output_spec.symmetric_square().operator_dim == 1035
@@ -220,7 +237,11 @@ def test_compiled_graph_head_and_precision_are_equivariant():
     torch.manual_seed(5)
     graph = _graph()
     seed = o3.Irreps("8x0e + 4x1o + 4x2e")
-    compilation = O3RepresentationCompiler.for_graph(graph).compile(seed)
+    compilation = plan_readout(
+        FeatureSpec.from_irreps(seed, scope="node"),
+        output=graph.output_irreps,
+        covariance=GraphPrecision(graph),
+    ).compilation
     head = compilation.build_head()
     spd_map = compilation.build_spd_map()
     features = seed.randn(5, -1)
@@ -234,7 +255,8 @@ def test_compiled_graph_head_and_precision_are_equivariant():
     expected_mean = mean @ output_representation.T
     assert torch.allclose(transformed_mean, expected_mean, atol=2e-4, rtol=2e-4)
 
-    expected_params = rotation @ params @ rotation.T
+    parameter_representation = compilation.operator_family.parameter_irreps
+    expected_params = params @ parameter_representation.D_from_matrix(rotation).T
     assert torch.allclose(transformed_params, expected_params, atol=2e-4, rtol=2e-4)
     precision = spd_map.precision(params)
     transformed_precision = spd_map.precision(transformed_params)

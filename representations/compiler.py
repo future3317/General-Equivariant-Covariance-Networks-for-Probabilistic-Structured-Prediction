@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+import hashlib
+import json
+from typing import TYPE_CHECKING, Any, Literal
 
 import torch
 from compatibility.e3nn import o3
@@ -18,74 +20,38 @@ from representations.adaptive_lifting import (
 )
 from representations.o3_irreps import O3IrrepsSpec
 from representations.graph_structure import EquivariantOutputGraph
-from representations.cartesian_stf import is_rank2_stf_output
 from representations.diagnostics import (
     CompilationCertificate,
     CompilationError,
     UnreachableActiveTargetError,
 )
 from representations.operator_ir import OperatorFamilyPlan
-from representations.operator_runtime import operator_runtime
+from representations.operator_lowering import (
+    install_parameter_projections,
+    lower_operator_program,
+    project_parameter_bindings,
+)
+
+if TYPE_CHECKING:
+    from equivcompiler.executors import ExecutorDecision
 
 
-CovarianceMode = Literal["auto", "full", "block", "low_rank", "graph"]
+CovarianceMode = Literal["full", "block", "low_rank", "graph"]
 OutputScope = Literal["global", "dense"]
-ObjectiveName = Literal["gaussian", "student_t"]
-ExecutionBackend = Literal["auto", "spherical_cg", "cartesian_stf"]
 
 
 @dataclass(frozen=True)
-class CompilerConfig:
-    """Architecture and probabilistic choices made by the compiler."""
+class LoweringConfig:
+    """Execution-neutral settings remaining after semantic planning."""
 
-    covariance: CovarianceMode = "auto"
     output_scope: OutputScope = "global"
-    objective: ObjectiveName = "gaussian"
-    parameter_budget: int = 192
-    low_rank: int = 8
-    student_t_dof: float = 5.0
-    backend: ExecutionBackend = "auto"
-    stf_contraction_rank: int | None = None
+    parameter_budget: int | None = None
 
     def __post_init__(self):
-        if self.covariance not in {"auto", "full", "block", "low_rank", "graph"}:
-            raise CompilationError(
-                CompilationCertificate(
-                    code="unsupported_covariance_parameterization",
-                    status="failure",
-                    message=f"unknown covariance mode: {self.covariance}",
-                    details={
-                        "requested": self.covariance,
-                        "supported": ["auto", "full", "block", "low_rank", "graph"],
-                        "safeguard": "coordinate-wise Cholesky is intentionally unavailable because it is not conjugation equivariant",
-                    },
-                )
-            )
         if self.output_scope not in {"global", "dense"}:
             raise ValueError(f"unknown output scope: {self.output_scope}")
-        if self.objective not in {"gaussian", "student_t"}:
-            raise ValueError(f"unknown proper objective: {self.objective}")
-        if self.parameter_budget < 1:
+        if self.parameter_budget is not None and self.parameter_budget < 1:
             raise ValueError("parameter_budget must be positive")
-        if self.low_rank < 1:
-            raise ValueError("low_rank must be positive")
-        if self.student_t_dof <= 0:
-            raise ValueError("student_t_dof must be positive")
-        if self.backend not in {"auto", "spherical_cg", "cartesian_stf"}:
-            raise CompilationError(
-                CompilationCertificate(
-                    code="unsupported_execution_backend",
-                    status="failure",
-                    message=f"unknown execution backend: {self.backend}",
-                    details={
-                        "requested": self.backend,
-                        "supported": ["auto", "spherical_cg", "cartesian_stf"],
-                        "safeguard": "scalar Gaunt shortcuts are not accepted as a complete CG executor",
-                    },
-                )
-            )
-        if self.stf_contraction_rank is not None and self.stf_contraction_rank < 1:
-            raise ValueError("stf_contraction_rank must be positive")
 
 
 def _isotypic_parameter_count(output_irreps: o3.Irreps) -> int:
@@ -100,19 +66,22 @@ class O3Compilation:
     """Immutable result of compiling an output representation."""
 
     output_spec: O3IrrepsSpec
+    feature_contract: Any
     seed_irreps: o3.Irreps
     operator_family: OperatorFamilyPlan
     canonical_target_irreps: o3.Irreps
     active_target_irreps: o3.Irreps
     canonical_reachability: O3ReachabilityAnalysis
     active_reachability: O3ReachabilityAnalysis
+    executor_decision: "ExecutorDecision"
+    distribution_spec: Any
     backend: Literal["spherical_cg", "cartesian_stf"]
     backend_exact: bool
     stf_contraction_rank: int | None
-    config: CompilerConfig
+    config: LoweringConfig
 
     @property
-    def covariance_mode(self) -> Literal["full", "block", "low_rank", "graph"]:
+    def covariance_mode(self) -> str:
         return self.operator_family.kind
 
     @property
@@ -159,16 +128,10 @@ class O3Compilation:
         return O3CompiledOutputHead(self)
 
     def build_spd_map(self):
-        return operator_runtime(self.operator_family.kind).build_spd_map(self)
+        return lower_operator_program(self)
 
     def build_distribution(self):
-        if self.config.objective == "gaussian":
-            from distributions import GaussianNLL
-
-            return GaussianNLL()
-        from distributions import StudentTNLL
-
-        return StudentTNLL(nu=self.config.student_t_dof)
+        return self.distribution_spec.materialize_log_prob()
 
     def build_model(self, backbone: torch.nn.Module):
         """Build a predictor driven entirely by this compilation result."""
@@ -189,7 +152,7 @@ class O3Compilation:
         )
 
 
-class O3RepresentationCompiler:
+class O3ProgramCompiler:
     r"""Lower typed distribution/operator plans to an executable O(3) model.
 
     ``V + Sym^2(V)`` is retained as the unrestricted diagnostic reference.
@@ -200,10 +163,9 @@ class O3RepresentationCompiler:
     def __init__(
         self,
         output: O3IrrepsSpec | o3.Irreps | str,
-        config: CompilerConfig | None = None,
+        config: LoweringConfig | None = None,
         *,
         cartesian_formula: str | None = None,
-        graph_structure: EquivariantOutputGraph | None = None,
     ):
         if cartesian_formula is not None:
             if isinstance(output, O3IrrepsSpec):
@@ -213,77 +175,18 @@ class O3RepresentationCompiler:
             self.output_spec = output
         else:
             self.output_spec = O3IrrepsSpec(o3.Irreps(output))
-        self.config = config or CompilerConfig()
-        self.graph_structure = graph_structure
-        if (
-            graph_structure is not None
-            and graph_structure.output_irreps != self.output_spec.irreps
-        ):
-            raise ValueError(
-                f"graph output {graph_structure.output_irreps} does not match "
-                f"compiled output {self.output_spec.irreps}"
-            )
+        self.config = config or LoweringConfig()
 
     @classmethod
     def from_cartesian(
-        cls, formula: str, config: CompilerConfig | None = None
-    ) -> "O3RepresentationCompiler":
+        cls, formula: str, config: LoweringConfig | None = None
+    ) -> "O3ProgramCompiler":
         return cls(o3.Irreps("0e"), config, cartesian_formula=formula)
-
-    @classmethod
-    def for_graph(
-        cls,
-        graph_structure: EquivariantOutputGraph,
-        config: CompilerConfig | None = None,
-    ) -> "O3RepresentationCompiler":
-        """Compile repeated node variables with graph-structured precision."""
-        return cls(
-            graph_structure.output_irreps,
-            config or CompilerConfig(covariance="graph"),
-            graph_structure=graph_structure,
-        )
 
     def _output_expression(self):
         from representations.representation_ir import IrrepsExpr
 
         return IrrepsExpr(self.output_spec.irreps, "location")
-
-    def _legacy_operator_family(self) -> OperatorFamilyPlan:
-        """Adapt the pre-IR low-level config to an operator-family plugin."""
-        from equivcompiler.policies import (
-            FullCovariance,
-            GraphPrecision,
-            IsotypicBlockCovariance,
-            LowRankCovariance,
-        )
-
-        mode = self.config.covariance
-        if mode == "auto":
-            full = FullCovariance().compile(self.output_spec)
-            graph = (
-                GraphPrecision(self.graph_structure).compile(self.output_spec)
-                if self.graph_structure is not None
-                else None
-            )
-            low_rank = LowRankCovariance(self.config.low_rank).compile(self.output_spec)
-            if full.parameter_count <= self.config.parameter_budget:
-                return full
-            if graph is not None and graph.parameter_count <= self.config.parameter_budget:
-                return graph
-            if low_rank.parameter_count <= self.config.parameter_budget:
-                return low_rank
-            return IsotypicBlockCovariance().compile(self.output_spec)
-        if mode == "full":
-            return FullCovariance().compile(self.output_spec)
-        if mode == "low_rank":
-            return LowRankCovariance(self.config.low_rank).compile(self.output_spec)
-        if mode == "block":
-            return IsotypicBlockCovariance().compile(self.output_spec)
-        if mode == "graph":
-            if self.graph_structure is None:
-                raise ValueError("graph covariance requires graph_structure")
-            return GraphPrecision(self.graph_structure).compile(self.output_spec)
-        raise AssertionError(f"unhandled covariance mode: {mode}")
 
     @staticmethod
     def _validate_reachability_contract(
@@ -310,18 +213,22 @@ class O3RepresentationCompiler:
 
     def compile(
         self,
-        seed_irreps: o3.Irreps,
+        feature_contract: Any,
         *,
-        operator_family: OperatorFamilyPlan | None = None,
+        operator_family: OperatorFamilyPlan,
+        executor_decision: "ExecutorDecision | None",
+        distribution_spec: Any,
         canonical_reachability: O3ReachabilityAnalysis | None = None,
         active_reachability: O3ReachabilityAnalysis | None = None,
     ) -> O3Compilation:
-        seed = o3.Irreps(seed_irreps)
+        if not hasattr(feature_contract, "irreps") or not hasattr(
+            feature_contract, "fingerprint"
+        ):
+            raise TypeError("core compiler requires a complete FeatureSpec contract")
+        seed = o3.Irreps(feature_contract.irreps)
         output_irreps = self.output_spec.irreps
         covariance_irreps = self.output_spec.symmetric_square_irreps
         canonical_target = direct_sum_irreps(output_irreps, covariance_irreps)
-        if operator_family is None:
-            operator_family = self._legacy_operator_family()
         active_target = operator_family.active_expression(
             self._output_expression()
         ).decompose_o3().irreps
@@ -358,58 +265,69 @@ class O3RepresentationCompiler:
 
         active_plan = active_reachability.plan
         assert active_plan is not None
-
-        stf_supported = (
-            operator_family.kind == "full"
-            and is_rank2_stf_output(output_irreps)
-            and active_plan.depth == 1
-        )
-        backend = self.config.backend
-        if backend == "auto":
-            backend = "cartesian_stf" if stf_supported else "spherical_cg"
-        elif backend == "cartesian_stf" and not stf_supported:
+        if executor_decision is None:
             raise CompilationError(
                 CompilationCertificate(
-                    code="backend_incompatible",
+                    code="missing_executor_decision",
                     status="failure",
-                    message=(
-                        "cartesian_stf requires full covariance, V=0e+2e, and a "
-                        "single direct lifting edge"
-                    ),
-                    details={
-                        "requested_backend": "cartesian_stf",
-                        "covariance_mode": operator_family.kind,
-                        "output_irreps": str(output_irreps),
-                        "active_depth": active_plan.depth,
-                    },
+                    message="core lowering requires a planning-time executor decision",
+                    details={"active_plan": active_plan.as_dict()},
                 )
             )
-        if self.config.stf_contraction_rank is not None and backend != "cartesian_stf":
+        capability = executor_decision.capability
+        if not capability.supported:
             raise CompilationError(
                 CompilationCertificate(
-                    code="contraction_rank_without_lowering",
+                    code="invalid_executor_decision",
                     status="failure",
-                    message="stf_contraction_rank is only valid when cartesian_stf is selected",
-                    details={
-                        "selected_backend": backend,
-                        "contraction_rank": self.config.stf_contraction_rank,
-                    },
+                    message="selected executor capability is not supported",
+                    details=capability.as_dict(),
                 )
             )
-        contraction_rank = self.config.stf_contraction_rank
-        if backend == "cartesian_stf" and contraction_rank is not None:
-            max_exact_rank = max(multiplicity for multiplicity, _ in seed)
-            if contraction_rank >= max_exact_rank:
-                contraction_rank = None
-        backend_exact = backend == "spherical_cg" or contraction_rank is None
+        backend = executor_decision.name
+        active_plan_hash = hashlib.sha256(
+            json.dumps(
+                active_plan.as_dict(), sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+        ).hexdigest()
+        decision_contract = {
+            "feature_fingerprint": (
+                capability.feature_fingerprint,
+                feature_contract.fingerprint,
+            ),
+            "active_plan_hash": (capability.active_plan_hash, active_plan_hash),
+            "operator_program_hash": (
+                capability.operator_program_hash,
+                operator_family.assembly.fingerprint,
+            ),
+        }
+        mismatches = {
+            key: {"decision": value[0], "compilation": value[1]}
+            for key, value in decision_contract.items()
+            if value[0] != value[1]
+        }
+        if mismatches:
+            raise CompilationError(
+                CompilationCertificate(
+                    code="executor_decision_contract_mismatch",
+                    status="failure",
+                    message="executor decision does not certify this active program",
+                    details={"mismatches": mismatches},
+                )
+            )
+        contraction_rank = capability.fidelity.effective_contraction_rank
+        backend_exact = capability.exact
         return O3Compilation(
             output_spec=self.output_spec,
+            feature_contract=feature_contract,
             seed_irreps=seed,
             operator_family=operator_family,
             canonical_target_irreps=canonical_target,
             active_target_irreps=active_target,
             canonical_reachability=canonical_reachability,
             active_reachability=active_reachability,
+            executor_decision=executor_decision,
+            distribution_spec=distribution_spec,
             backend=backend,
             backend_exact=backend_exact,
             stf_contraction_rank=contraction_rank,
@@ -438,8 +356,7 @@ class O3CompiledOutputHead(torch.nn.Module):
             contraction_rank=compilation.stf_contraction_rank,
         )
         self.mean_projection = o3.Linear(active_irreps, self.output_spec.irreps)
-        self.operator_runtime = operator_runtime(compilation.operator_family.kind)
-        self.operator_runtime.install(self)
+        install_parameter_projections(self)
 
     def forward(
         self, node_features: torch.Tensor, batch: torch.Tensor | None = None
@@ -453,5 +370,5 @@ class O3CompiledOutputHead(torch.nn.Module):
             hidden = mean_pool(hidden, batch)
         compiled = self.lifting(hidden)
         mean = self.mean_projection(compiled)
-        parameters = self.operator_runtime.project(self, compiled)
+        parameters = project_parameter_bindings(self, compiled)
         return mean, parameters

@@ -7,9 +7,13 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from representations import EquivariantOutputGraph, O3IrrepsSpec, irrep_multiplicities
-from representations.operator_ir import FamilyRelation, OperatorFamilyPlan, OperatorIR
+from representations.operator_ir import (
+    FamilyRelation,
+    OperatorFamilyPlan,
+    OperatorIR,
+    ParameterBinding,
+)
 from representations.representation_ir import (
-    DirectSumExpr,
     IrrepsExpr,
     RepeatedExpr,
     SymmetricSquareExpr,
@@ -39,16 +43,21 @@ class FullCovariance(OperatorFamilySpec):
     def compile(self, output: O3IrrepsSpec) -> OperatorFamilyPlan:
         base = IrrepsExpr(output.irreps, "output")
         parameter = SymmetricSquareExpr(base)
+        parameter_ref = OperatorIR.parameter("operator")
+        symmetric = OperatorIR.symmetric_operator(
+            parameter=parameter_ref,
+            coordinate_space="output_representation",
+            output_irreps=str(output.irreps),
+        )
         return OperatorFamilyPlan(
             kind="full",
-            parameter_expression=parameter,
+            parameter_bindings=(
+                ParameterBinding("operator", parameter, "covariance_projection"),
+            ),
             parameter_count=output.dim * (output.dim + 1) // 2,
             domain="scatter",
-            assembly=OperatorIR.node(
-                "spectral_positive",
-                OperatorIR.node("symmetric_operator", positivity="unspecified"),
-                map="matrix_exponential",
-                positivity="spd",
+            assembly=OperatorIR.spectral_positive(
+                symmetric, map="matrix_exponential"
             ),
             relation_to_full=FamilyRelation.EQUAL_TO_FULL,
         )
@@ -68,29 +77,39 @@ class LowRankCovariance(OperatorFamilySpec):
             raise ValueError("rank must be positive")
 
     def compile(self, output: O3IrrepsSpec) -> OperatorFamilyPlan:
-        rank = min(self.rank, output.dim)
+        rank = self.rank
         base = IrrepsExpr(output.irreps, "output")
-        parameter = DirectSumExpr((RepeatedExpr(base, rank), TrivialScalarsExpr(1)))
-        isotropic = OperatorIR.node("positive_scalar_identity", positivity="spd")
-        gram = OperatorIR.node(
-            "gram",
-            OperatorIR.node("equivariant_factor", rank=rank),
-            positivity="psd",
+        factor_expression = RepeatedExpr(base, rank)
+        scale_expression = TrivialScalarsExpr(1)
+        isotropic = OperatorIR.positive_scalar_identity(
+            OperatorIR.parameter("scale"), dimension=output.dim
+        )
+        gram = OperatorIR.gram(
+            OperatorIR.equivariant_factor(
+                OperatorIR.parameter("factor"),
+                rank=rank,
+                output_irreps=str(output.irreps),
+            )
         )
         return OperatorFamilyPlan(
             kind="low_rank",
-            parameter_expression=parameter,
+            parameter_bindings=(
+                ParameterBinding(
+                    "factor", factor_expression, "covariance_projection"
+                ),
+                ParameterBinding("scale", scale_expression, "scale_projection"),
+            ),
             parameter_count=output.dim * rank + 1,
             domain="scatter",
-            assembly=OperatorIR.node("add", isotropic, gram, positivity="spd"),
+            assembly=OperatorIR.add(isotropic, gram),
             relation_to_full=(
                 FamilyRelation.EQUAL_TO_FULL
-                if rank == output.dim
+                if rank >= output.dim
                 else FamilyRelation.STRICT_SUBSET
             ),
             rank=rank,
             restriction=(
-                None if rank == output.dim else "rank_r_plus_isotropic_scatter"
+                None if rank >= output.dim else "rank_r_plus_isotropic_scatter"
             ),
         )
 
@@ -109,27 +128,34 @@ class IsotypicBlockCovariance(OperatorFamilySpec):
             len(multiplicities) == 1
             and next(iter(multiplicities)).dim == 1
         )
-        blocks = tuple(
-            OperatorIR.node(
-                "kronecker_identity",
-                OperatorIR.node(
-                    "spectral_positive",
-                    map="multiplicity_cholesky",
-                    positivity="spd",
-                ),
-                irrep=str(irrep),
-                irrep_dimension=irrep.dim,
-                multiplicity=multiplicity,
-                positivity="spd",
+        blocks = []
+        cursor = 0
+        for irrep, multiplicity in multiplicities.items():
+            block_count = multiplicity * (multiplicity + 1) // 2
+            blocks.append(
+                OperatorIR.kronecker_identity(
+                    OperatorIR.cholesky_positive(
+                        OperatorIR.parameter(
+                            "blocks", start=cursor, stop=cursor + block_count
+                        ),
+                        dimension=multiplicity,
+                    ),
+                    irrep=str(irrep),
+                    irrep_dimension=irrep.dim,
+                    multiplicity=multiplicity,
+                )
             )
-            for irrep, multiplicity in multiplicities.items()
-        )
+            cursor += block_count
         return OperatorFamilyPlan(
             kind="block",
-            parameter_expression=TrivialScalarsExpr(count),
+            parameter_bindings=(
+                ParameterBinding(
+                    "blocks", TrivialScalarsExpr(count), "covariance_projection"
+                ),
+            ),
             parameter_count=count,
             domain="scatter",
-            assembly=OperatorIR.node("direct_sum", *blocks, positivity="spd"),
+            assembly=OperatorIR.direct_sum(*blocks),
             relation_to_full=(
                 FamilyRelation.EQUAL_TO_FULL
                 if equals_full
@@ -154,34 +180,66 @@ class GraphPrecision(OperatorFamilySpec):
                 f"graph output {self.graph.output_irreps} does not match {output.irreps}"
             )
         local = IrrepsExpr(f"1x{self.graph.node_irrep}", "graph_residual")
-        parameter = RepeatedExpr(
-            SymmetricSquareExpr(local), self.graph.num_potentials
-        )
+        local_operator = SymmetricSquareExpr(local)
+        local_operator_irreps = str(local_operator.decompose_o3().irreps)
+        parameter = RepeatedExpr(local_operator, self.graph.num_potentials)
         local_count = self.graph.block_dim * (self.graph.block_dim + 1) // 2
-        unary = OperatorIR.node(
-            "direct_sum",
-            OperatorIR.node("local_spectral_positive", role="unary", positivity="spd"),
+        unary_stop = self.graph.num_nodes * local_count
+        local_unary = OperatorIR.spectral_positive(
+            OperatorIR.symmetric_operator(
+                parameter=OperatorIR.parameter(
+                    "potentials",
+                    start=0,
+                    stop=unary_stop,
+                    coordinate_layout="repeated_irrep",
+                    unit_irreps=local_operator_irreps,
+                    copies=self.graph.num_potentials,
+                ),
+                coordinate_space="graph_local",
+                role="unary",
+                irrep=str(self.graph.node_irrep),
+                copies=self.graph.num_nodes,
+            ),
+            map="matrix_exponential",
+        )
+        unary = OperatorIR.direct_sum(
+            local_unary,
             copies=self.graph.num_nodes,
-            positivity="spd",
         )
-        factor = OperatorIR.node(
-            "direct_sum",
-            OperatorIR.node("local_spectral_positive", role="factor", positivity="spd"),
+        local_factor = OperatorIR.spectral_positive(
+            OperatorIR.symmetric_operator(
+                parameter=OperatorIR.parameter(
+                        "potentials",
+                        start=unary_stop,
+                        stop=self.graph.num_potentials * local_count,
+                        coordinate_layout="repeated_irrep",
+                        unit_irreps=local_operator_irreps,
+                        copies=self.graph.num_potentials,
+                    ),
+                coordinate_space="graph_local",
+                role="factor",
+                irrep=str(self.graph.node_irrep),
+                copies=self.graph.num_edges,
+            ),
+            map="matrix_exponential",
+        )
+        factor = OperatorIR.direct_sum(
+            local_factor,
             copies=self.graph.num_edges,
-            positivity="spd",
         )
-        pullback = OperatorIR.node(
-            "pullback",
-            factor,
-            map="homogeneous_graph_coboundary",
-            positivity="psd",
+        pullback = OperatorIR.pullback(
+            factor, intertwiner="homogeneous_graph_coboundary"
         )
         return OperatorFamilyPlan(
             kind="graph",
-            parameter_expression=parameter,
+            parameter_bindings=(
+                ParameterBinding(
+                    "potentials", parameter, "covariance_projection"
+                ),
+            ),
             parameter_count=local_count * self.graph.num_potentials,
             domain="precision",
-            assembly=OperatorIR.node("add", unary, pullback, positivity="spd"),
+            assembly=OperatorIR.add(unary, pullback),
             relation_to_full=(
                 FamilyRelation.EQUAL_TO_FULL
                 if self.graph.num_nodes == 1
@@ -199,9 +257,27 @@ class GraphPrecision(OperatorFamilySpec):
         return {"kind": "graph_precision", "graph": self.graph.as_dict()}
 
 
+class FamilyCostModel(ABC):
+    """Explicit cost objective used to compare feasible family plans."""
+
+    @abstractmethod
+    def score(self, family: OperatorFamilyPlan) -> tuple[float, ...]:
+        """Return a lexicographically minimized score."""
+
+    @abstractmethod
+    def as_dict(self) -> dict[str, Any]:
+        """Return stable cost-model semantics."""
+
+
 @dataclass(frozen=True)
-class MinParameterCount:
+class MinParameterCount(FamilyCostModel):
     """Choose the feasible candidate with the fewest emitted coordinates."""
+
+    def score(self, family: OperatorFamilyPlan) -> tuple[float, ...]:
+        return (float(family.parameter_count),)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"kind": "min_parameter_count"}
 
 
 @dataclass(frozen=True)
@@ -210,7 +286,7 @@ class AutoBudget:
 
     max_parameters: int
     candidates: tuple[OperatorFamilySpec, ...]
-    objective: MinParameterCount = MinParameterCount()
+    objective: FamilyCostModel = MinParameterCount()
 
     def __post_init__(self) -> None:
         if self.max_parameters < 1:
@@ -226,7 +302,7 @@ class AutoBudget:
         return {
             "kind": "auto_budget",
             "max_parameters": self.max_parameters,
-            "objective": "min_parameter_count",
+            "objective": self.objective.as_dict(),
             "candidates": [candidate.as_dict() for candidate in self.candidates],
         }
 
@@ -310,26 +386,58 @@ ExecutorPolicy = ExactExecutorCandidates | SpecificExecutor
 
 
 @dataclass(frozen=True)
-class ShapeSignature:
-    """Performance signature for measured executor selection."""
+class ExecutionSignature:
+    """Exact semantic, software, device, and tensor contract for autotuning."""
 
-    batch_size: int
-    feature_dimension: int
+    semantic_plan_hash: str
+    feature_fingerprint: str
+    active_plan_hash: str
+    operator_program_hash: str
+    batch_shape: tuple[int, ...]
     dtype: str
     device: str
-    phase: Literal["forward", "forward_backward"] = "forward_backward"
+    device_uuid: str
+    phase: Literal["forward", "forward_backward"]
+    compilation_mode: Literal["eager", "torch_compile"]
+    software_fingerprint: str
+    tensor_layout: str = "contiguous"
+    requires_input_grad: bool = True
+    requires_parameter_grad: bool = True
 
     def __post_init__(self) -> None:
-        if self.batch_size < 1 or self.feature_dimension < 1:
-            raise ValueError("shape dimensions must be positive")
+        hashes = (
+            self.semantic_plan_hash,
+            self.feature_fingerprint,
+            self.active_plan_hash,
+            self.operator_program_hash,
+            self.device_uuid,
+            self.software_fingerprint,
+        )
+        if any(not item for item in hashes):
+            raise ValueError("execution signature fingerprints must not be empty")
+        if not self.batch_shape or any(size < 1 for size in self.batch_shape):
+            raise ValueError("batch_shape must contain positive dimensions")
+
+    @property
+    def batch_size(self) -> int:
+        return self.batch_shape[0]
 
     def as_dict(self) -> dict[str, Any]:
         return {
-            "batch_size": self.batch_size,
-            "feature_dimension": self.feature_dimension,
+            "semantic_plan_hash": self.semantic_plan_hash,
+            "feature_fingerprint": self.feature_fingerprint,
+            "active_plan_hash": self.active_plan_hash,
+            "operator_program_hash": self.operator_program_hash,
+            "batch_shape": list(self.batch_shape),
             "dtype": self.dtype,
             "device": self.device,
+            "device_uuid": self.device_uuid,
             "phase": self.phase,
+            "compilation_mode": self.compilation_mode,
+            "software_fingerprint": self.software_fingerprint,
+            "tensor_layout": self.tensor_layout,
+            "requires_input_grad": self.requires_input_grad,
+            "requires_parameter_grad": self.requires_parameter_grad,
         }
 
 
@@ -338,7 +446,7 @@ class ExecutorMeasurement:
     """One measured latency used by a cost policy."""
 
     executor: ExecutorName
-    signature: ShapeSignature
+    signature: ExecutionSignature
     median_ms: float
     iqr_ms: float | None = None
 
@@ -365,7 +473,7 @@ class PreferExecutor:
 class MinimizeLatency:
     """Choose the lowest measured latency for one exact shape signature."""
 
-    signature: ShapeSignature
+    signature: ExecutionSignature
     measurements: tuple[ExecutorMeasurement, ...]
 
     def __post_init__(self) -> None:
@@ -376,7 +484,3 @@ class MinimizeLatency:
 
 
 CostPolicy = PreferExecutor | MinimizeLatency
-
-
-# Compatibility name retained for callers that used the old combined policy.
-LoweringPolicy = FidelityPolicy

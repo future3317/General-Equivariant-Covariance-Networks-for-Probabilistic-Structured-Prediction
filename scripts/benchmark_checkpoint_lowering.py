@@ -21,9 +21,15 @@ from data.modelnet40_inertia_dataset import (
     get_modelnet40_inertia_loaders,
 )
 from data.tensor_conversions import irreps_to_voigt
+from equivcompiler import (
+    FeatureSpec,
+    FullCovariance,
+    PreferExecutor,
+    SpecificExecutor,
+    plan_readout,
+)
 from models import EquivariantBackbone
 from models.pooling import mean_pool
-from representations import CompilerConfig, O3RepresentationCompiler
 from scripts.benchmarking import environment_record, measure
 
 
@@ -38,16 +44,16 @@ def _build_model(args: argparse.Namespace, backend: str, device: torch.device):
         tp_backend=args.tp_backend,
         cueq_method=(args.cueq_method if args.tp_backend == "cueq" else "naive"),
     )
-    compilation = O3RepresentationCompiler(
-        "0e + 2e",
-        CompilerConfig(
-            covariance="full",
-            output_scope="global",
-            objective="gaussian",
-            backend=backend,
-        ),
-    ).compile(backbone.irreps_out)
-    return compilation.build_model(backbone).to(device), compilation
+    plan = plan_readout(
+        FeatureSpec.from_backbone(backbone),
+        output="0e + 2e",
+        covariance=FullCovariance(),
+        distribution="gaussian",
+        executor=SpecificExecutor(backend),
+        cost=PreferExecutor((backend,)),
+        output_scope="global",
+    )
+    return plan.bind(backbone).to(device), plan.compilation
 
 
 def _load_models(args: argparse.Namespace, device: torch.device):

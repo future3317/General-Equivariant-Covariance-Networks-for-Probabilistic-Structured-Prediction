@@ -5,21 +5,30 @@ import json
 import pytest
 import torch
 
-from equivcompiler import convert_checkpoint
-from representations import CompilationError, CompilerConfig, O3RepresentationCompiler
+from equivcompiler import (
+    FeatureSpec,
+    FullCovariance,
+    PreferExecutor,
+    SpecificExecutor,
+    convert_checkpoint,
+    plan_readout,
+)
+from representations import CompilationError
 
 
 SEED = "4x0e + 2x1o + 2x2e"
 
 
 def _head(backend):
-    compilation = O3RepresentationCompiler(
-        "0e + 2e",
-        CompilerConfig(
-            covariance="full", output_scope="dense", backend=backend
-        ),
-    ).compile(SEED)
-    return compilation.build_head()
+    plan = plan_readout(
+        FeatureSpec.from_irreps(SEED, scope="node"),
+        output="0e + 2e",
+        covariance=FullCovariance(),
+        executor=SpecificExecutor(backend),
+        cost=PreferExecutor((backend,)),
+        output_scope="node",
+    )
+    return plan.compilation.build_head()
 
 
 def test_exact_checkpoint_conversion_preserves_raw_state_layout(tmp_path):
@@ -44,8 +53,14 @@ def test_exact_checkpoint_conversion_preserves_raw_state_layout(tmp_path):
     assert not audit["learned_coordinates_changed"]
     assert audit["numerical_equivalence"]["mean_max_abs"] < 2e-5
     assert audit["numerical_equivalence"]["distribution_parameter_max_abs"] < 2e-5
-    assert audit["source_compilation"]["backend"] == "spherical_cg"
-    assert audit["target_compilation"]["backend"] == "cartesian_stf"
+    assert (
+        audit["source_compilation"]["backend_selection_basis"]["selected_executor"]
+        == "spherical_cg"
+    )
+    assert (
+        audit["target_compilation"]["backend_selection_basis"]["selected_executor"]
+        == "cartesian_stf"
+    )
     stored_audit = json.loads(
         destination.with_suffix(".pt.conversion.json").read_text(encoding="utf-8")
     )

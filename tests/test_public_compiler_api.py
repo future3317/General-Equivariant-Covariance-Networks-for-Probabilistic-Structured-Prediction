@@ -42,20 +42,20 @@ def test_declarative_readout_api_builds_executable_and_full_report():
         seed,
         output="ij=ji",
         covariance=FullCovariance(),
-        lowering=ExactOnly(),
+        fidelity=ExactOnly(),
         distribution="student_t",
     )
     record = report.as_dict()
     assert record["output"]["output_representation"] == "1x0e+1x2e"
-    assert record["symmetric_square_representation"]["irreps"] == "2x0e+2x2e+1x4e"
-    assert record["reachability"]["canonical"]["reachable"]
-    assert record["reachability"]["active"]["reachable"]
-    assert record["reachability"]["multiplicity_coverage"] == {
+    assert record["covariance_representation"]["irreps"] == "2x0e+2x2e+1x4e"
+    assert record["representation_reachability"]["canonical"]["reachable"]
+    assert record["representation_reachability"]["active"]["reachable"]
+    assert record["representation_reachability"]["multiplicity_coverage"] == {
         "canonical_deficit": {},
         "active_deficit": {},
     }
     assert record["family"]["relation_to_canonical"] == "canonical_full"
-    assert record["lowering"]["exactness"] == "exact_for_active_family"
+    assert record["execution_fidelity"]["exactness"] == "exact_for_active_family"
     assert record["probability"]["scale_semantics"] == "scatter"
     assert record["objective"]["proper"]
     assert record["complexity"]["parameter_counts"]["readout_trainable"] == sum(
@@ -77,7 +77,7 @@ def test_planning_is_separate_from_materialization():
         seed,
         output="ij=ji",
         covariance=FullCovariance(),
-        lowering=ExactOnly(),
+        fidelity=ExactOnly(),
     )
     assert not isinstance(plan, torch.nn.Module)
     assert plan.report.compatibility_hash == plan.compatibility_hash
@@ -98,16 +98,16 @@ def test_budget_subfamily_is_not_reported_as_lowering_approximation():
     )
     assert report.family["kind"] == "low_rank_plus_isotropic"
     assert report.family["relation_to_canonical"] == "strict_subfamily"
-    assert report.lowering["exactness"] == "exact_for_active_family"
-    assert report.lowering["approximation"] is None
-    assert report.family["selection_reason"]["rule"] == "min_parameter_count_under_budget"
+    assert report.execution_fidelity["exactness"] == "exact_for_active_family"
+    assert report.execution_fidelity["approximation"] is None
+    assert report.family["selection_reason"]["rule"] == "family_cost_model_under_budget"
     assert "structured_covariance_restriction" in _certificate_codes(report)
     restriction = next(
         certificate
         for certificate in report["certificates"]
         if certificate["code"] == "structured_covariance_restriction"
     )
-    assert restriction["details"]["selected_by"] == "min_parameter_count_under_budget"
+    assert restriction["details"]["selected_by"] == "family_cost_model_under_budget"
     counts = report.complexity["parameter_counts"]
     assert counts["canonical_covariance_coordinates"] == 231
     assert counts["active_covariance_coordinates"] == 169
@@ -160,12 +160,12 @@ def test_truncated_execution_has_separate_approximation_certificate():
         seed,
         output="ij=ji",
         covariance=FullCovariance(),
-        lowering=TruncatedMultiplicityRank(rank=1),
+        fidelity=TruncatedMultiplicityRank(rank=1),
     )
     assert report.family["relation_to_canonical"] == "canonical_full"
-    assert report.lowering["exactness"] == "approximate_for_active_family"
-    assert report.lowering["checkpoint_mapping"] == "not_available"
-    assert report.lowering["approximation"]["kind"] == "truncated_multiplicity_rank"
+    assert report.execution_fidelity["exactness"] == "approximate_for_active_family"
+    assert report.execution_fidelity["checkpoint_mapping"] == "not_available"
+    assert report.execution_fidelity["approximation"]["kind"] == "truncated_multiplicity_rank"
     assert "truncated_contraction" in _certificate_codes(report)
 
 
@@ -194,8 +194,8 @@ def test_graph_precision_is_restricted_family_with_exact_lowering():
     )
     assert plan.report.family["kind"] == "graph_precision"
     assert plan.report.family["relation_to_canonical"] == "strict_subfamily"
-    assert plan.report.lowering["exactness"] == "exact_for_active_family"
-    assert plan.report.lowering["approximation"] is None
+    assert plan.report.execution_fidelity["exactness"] == "exact_for_active_family"
+    assert plan.report.execution_fidelity["approximation"] is None
     assert plan.report["pooling_required"]
 
 

@@ -12,7 +12,7 @@ import torch
 import torch.optim as optim
 from tqdm import tqdm
 
-from representations import CompilerConfig, O3RepresentationCompiler
+from equivcompiler import FeatureSpec, FullCovariance, plan_readout
 from models import EquivariantBackbone
 from data.dielectric_dataset import get_dielectric_irreps_loaders
 from data.paths import dataset_dir
@@ -187,11 +187,15 @@ def main():
         atom_features=args.atom_features,
         **tensor_product_kwargs(args),
     )
-    compilation = O3RepresentationCompiler(
-        "0e + 2e",
-        CompilerConfig(covariance="full", output_scope="global", objective="gaussian"),
-    ).compile(backbone.irreps_out)
-    model = compilation.build_model(backbone).to(args.device)
+    plan = plan_readout(
+        FeatureSpec.from_backbone(backbone),
+        output="0e + 2e",
+        covariance=FullCovariance(),
+        distribution="gaussian",
+        output_scope="global",
+    )
+    compilation = plan.compilation
+    model = plan.bind(backbone).to(args.device)
     if args.compile_tp:
         model.backbone.compile_tensor_products(dynamic=True)
 

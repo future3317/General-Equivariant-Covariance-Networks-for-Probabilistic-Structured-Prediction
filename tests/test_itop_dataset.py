@@ -10,8 +10,8 @@ from data.itop_dataset import (
     compact_itop_labels,
     depth_to_point_cloud,
 )
+from equivcompiler import FeatureSpec, GraphPrecision, plan_readout
 from models import EquivariantBackbone
-from representations import CompilerConfig, O3RepresentationCompiler
 
 
 def _write_fixture(tmp_path):
@@ -106,13 +106,15 @@ def test_itop_sample_runs_through_compiled_graph_precision_model(tmp_path):
         atom_feature_dim=4,
         atom_features="learnable",
     )
-    compilation = O3RepresentationCompiler.for_graph(
-        ITOP_OUTPUT_GRAPH,
-        CompilerConfig(covariance="graph", output_scope="global"),
-    ).compile(backbone.irreps_out)
-    model = compilation.build_model(backbone)
+    plan = plan_readout(
+        FeatureSpec.from_backbone(backbone),
+        output=ITOP_OUTPUT_GRAPH.output_irreps,
+        covariance=GraphPrecision(ITOP_OUTPUT_GRAPH),
+        output_scope="global",
+    )
+    model = plan.bind(backbone)
     result = model(sample, target=sample.y_pose, return_precision=True)
     assert result["mu"].shape == (1, 45)
-    assert result["params"].shape == (1, 29, 3, 3)
+    assert result["params"].shape == (1, 174)
     assert result["precision"].shape == (1, 45, 45)
     assert torch.isfinite(result["loss"])

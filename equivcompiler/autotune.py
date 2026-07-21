@@ -8,7 +8,7 @@ from typing import Callable, Mapping
 
 import torch
 
-from equivcompiler.policies import ExecutorMeasurement, ShapeSignature
+from equivcompiler.policies import ExecutionSignature, ExecutorMeasurement
 
 
 def _synchronize(device: str) -> None:
@@ -38,7 +38,7 @@ class DeviceAutotuner:
     def measure(
         self,
         executor: str,
-        signature: ShapeSignature,
+        signature: ExecutionSignature,
         run_once: Callable[[], object],
         prepare: Callable[[], None] | None = None,
     ) -> ExecutorMeasurement:
@@ -69,7 +69,7 @@ class DeviceAutotuner:
 
     def benchmark(
         self,
-        signature: ShapeSignature,
+        signature: ExecutionSignature,
         runners: Mapping[str, Callable[[], object] | BenchmarkTask],
     ) -> tuple[ExecutorMeasurement, ...]:
         return tuple(

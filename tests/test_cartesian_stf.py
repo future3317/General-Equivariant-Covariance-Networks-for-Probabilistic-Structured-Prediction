@@ -6,13 +6,20 @@ import pytest
 import torch
 from e3nn import o3
 
+from equivcompiler import (
+    ExactOnly,
+    FeatureSpec,
+    FullCovariance,
+    PreferExecutor,
+    SpecificExecutor,
+    TruncatedMultiplicityRank,
+    plan_readout,
+)
 from models import O3QuadraticSymmetricOperatorHead
 from representations import (
-    CompilerConfig,
     MultiplicityFirstCartesianTensorSquare,
     MultiplicityFirstDenseTensorProduct,
     O3IrrepsSpec,
-    O3RepresentationCompiler,
     O3SymmetricOperatorBasis,
     Rank2CartesianSTFOperatorBasis,
     rank4_elasticity_irreps,
@@ -24,6 +31,30 @@ MIXED_PARITY_SEED = o3.Irreps(
     "4x0e + 2x1e + 2x1o + 2x2e + 2x2o"
 )
 OPERATOR_IRREPS = o3.Irreps("2x0e + 2x2e + 1x4e")
+
+
+def _compile(
+    output,
+    *,
+    executor="auto",
+    fidelity=ExactOnly(),
+    output_scope="global",
+):
+    executor_policy = (
+        SpecificExecutor(executor)
+        if executor != "auto"
+        else SpecificExecutor("cartesian_stf")
+    )
+    priority = (executor_policy.name,)
+    return plan_readout(
+        FeatureSpec.from_irreps(SEED, scope="node"),
+        output=output,
+        covariance=FullCovariance(),
+        fidelity=fidelity,
+        executor=executor_policy,
+        cost=PreferExecutor(priority),
+        output_scope=output_scope,
+    ).compilation
 
 
 @contextmanager
@@ -200,25 +231,18 @@ def test_mapped_heads_match_per_sample_output_and_loss_gradients():
 
 
 def test_compiler_selects_exact_stf_and_labels_truncation_as_approximate():
-    exact = O3RepresentationCompiler(
-        "0e + 2e",
-        CompilerConfig(covariance="full", output_scope="dense"),
-    ).compile(SEED)
+    exact = _compile("0e + 2e", output_scope="node")
     assert exact.backend == "cartesian_stf"
     assert exact.backend_exact
     assert exact.stf_contraction_rank is None
     exact_head = exact.build_head()
     assert exact_head.lifting.stages[0].tensor_product.is_exact
 
-    truncated = O3RepresentationCompiler(
+    truncated = _compile(
         "0e + 2e",
-        CompilerConfig(
-            covariance="full",
-            output_scope="dense",
-            backend="cartesian_stf",
-            stf_contraction_rank=1,
-        ),
-    ).compile(SEED)
+        fidelity=TruncatedMultiplicityRank(1),
+        output_scope="node",
+    )
     assert truncated.backend == "cartesian_stf"
     assert not truncated.backend_exact
     assert truncated.stf_contraction_rank == 1
@@ -226,16 +250,23 @@ def test_compiler_selects_exact_stf_and_labels_truncation_as_approximate():
 
 
 def test_compiler_lowers_mixed_parity_stage_without_discarding_channels():
-    lowered_compilation = O3RepresentationCompiler(
-        "0e + 2e",
-        CompilerConfig(covariance="full", output_scope="dense"),
-    ).compile(MIXED_PARITY_SEED)
-    spherical_compilation = O3RepresentationCompiler(
-        "0e + 2e",
-        CompilerConfig(
-            covariance="full", output_scope="dense", backend="spherical_cg"
-        ),
-    ).compile(MIXED_PARITY_SEED)
+    mixed_seed = FeatureSpec.from_irreps(MIXED_PARITY_SEED, scope="node")
+    lowered_compilation = plan_readout(
+        mixed_seed,
+        output="0e + 2e",
+        covariance=FullCovariance(),
+        executor=SpecificExecutor("cartesian_stf"),
+        cost=PreferExecutor(("cartesian_stf",)),
+        output_scope="node",
+    ).compilation
+    spherical_compilation = plan_readout(
+        mixed_seed,
+        output="0e + 2e",
+        covariance=FullCovariance(),
+        executor=SpecificExecutor("spherical_cg"),
+        cost=PreferExecutor(("spherical_cg",)),
+        output_scope="node",
+    ).compilation
     assert lowered_compilation.backend == "cartesian_stf"
     lowered = lowered_compilation.build_head()
     spherical = spherical_compilation.build_head()
@@ -253,14 +284,12 @@ def test_compiler_lowers_mixed_parity_stage_without_discarding_channels():
 
 
 def test_high_order_compilation_uses_spherical_backend_and_rejects_fake_stf():
-    automatic = O3RepresentationCompiler(
-        rank4_elasticity_irreps(),
-        CompilerConfig(covariance="full", backend="auto"),
-    ).compile(SEED)
+    automatic = plan_readout(
+        FeatureSpec.from_irreps(SEED, scope="node"),
+        output=rank4_elasticity_irreps(),
+        covariance=FullCovariance(),
+    ).compilation
     assert automatic.backend == "spherical_cg"
     assert automatic.backend_exact
-    with pytest.raises(ValueError, match="cartesian_stf requires"):
-        O3RepresentationCompiler(
-            rank4_elasticity_irreps(),
-            CompilerConfig(covariance="full", backend="cartesian_stf"),
-        ).compile(SEED)
+    with pytest.raises(ValueError, match="no requested executor supports"):
+        _compile(rank4_elasticity_irreps(), executor="cartesian_stf")

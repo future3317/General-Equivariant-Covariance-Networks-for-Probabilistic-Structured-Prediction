@@ -4,11 +4,18 @@ import pytest
 import torch
 from e3nn import o3
 
+from equivcompiler import (
+    FeatureSpec,
+    FirstFeasible,
+    FullCovariance,
+    IsotypicBlockCovariance,
+    LowRankCovariance,
+    plan_readout,
+)
+
 from representations import (
-    CompilerConfig,
     O3AdaptiveLifting,
     O3IrrepsSpec,
-    O3RepresentationCompiler,
     coverage_deficit,
     direct_sum_irreps,
     plan_lifting_graph,
@@ -21,11 +28,19 @@ from spd_maps import IsotypicBlockMap
 SEED = o3.Irreps("4x0e + 2x1o + 2x2e")
 
 
+def _compile(output, covariance=FullCovariance(), *, output_scope="global"):
+    seed = FeatureSpec.from_irreps(SEED, scope="node")
+    return plan_readout(
+        seed,
+        output=output,
+        covariance=covariance,
+        output_scope=output_scope,
+    ).compilation
+
+
 def test_canonical_target_is_v_plus_symmetric_square():
     output = O3IrrepsSpec("0e + 2e")
-    compilation = O3RepresentationCompiler(
-        output, CompilerConfig(covariance="full", output_scope="dense")
-    ).compile(SEED)
+    compilation = _compile(output, output_scope="node")
     expected = direct_sum_irreps(
         output.irreps, output.symmetric_square().operator_irreps
     )
@@ -34,14 +49,12 @@ def test_canonical_target_is_v_plus_symmetric_square():
 
 
 def test_rank2_needs_one_quadratic_edge_not_two():
-    target = O3RepresentationCompiler("0e + 2e").compile(SEED).canonical_target_irreps
+    target = _compile("0e + 2e").canonical_target_irreps
     assert required_lifting_depth(SEED, target) == 1
 
 
 def test_rank4_full_covariance_needs_three_edges_from_lmax2():
-    compilation = O3RepresentationCompiler(
-        rank4_elasticity_irreps(), CompilerConfig(covariance="full")
-    ).compile(SEED)
+    compilation = _compile(rank4_elasticity_irreps())
     assert compilation.canonical_plan.depth == 3
     assert max(ir.l for _, ir in compilation.covariance_irreps) == 8
     assert coverage_deficit(
@@ -94,13 +107,18 @@ def test_cartesian_symmetry_is_compiled_and_round_trips():
 
 
 def test_auto_complexity_selects_full_then_low_rank():
-    rank2 = O3RepresentationCompiler(
-        "0e + 2e", CompilerConfig(covariance="auto", parameter_budget=192)
-    ).compile(SEED)
-    elasticity = O3RepresentationCompiler(
+    rank2_candidates = (
+        FullCovariance(),
+        LowRankCovariance(8),
+        IsotypicBlockCovariance(),
+    )
+    rank2 = _compile(
+        "0e + 2e", FirstFeasible(192, rank2_candidates)
+    )
+    elasticity = _compile(
         rank4_elasticity_irreps(),
-        CompilerConfig(covariance="auto", parameter_budget=192, low_rank=8),
-    ).compile(SEED)
+        FirstFeasible(192, rank2_candidates),
+    )
     assert rank2.covariance_mode == "full"
     assert rank2.covariance_parameter_count == 21
     assert elasticity.covariance_mode == "low_rank"
@@ -110,23 +128,25 @@ def test_auto_complexity_selects_full_then_low_rank():
 
 @pytest.mark.parametrize("scope,batch", [("dense", None), ("global", torch.tensor([0, 0, 1]))])
 def test_compiled_head_supports_dense_and_global_output(scope, batch):
-    config = CompilerConfig(covariance="full", output_scope=scope)
-    compilation = O3RepresentationCompiler("0e + 2e", config).compile(SEED)
+    output_scope = "node" if scope == "dense" else "global"
+    compilation = _compile("0e + 2e", output_scope=output_scope)
     head = compilation.build_head()
     count = 2 if scope == "dense" else 3
     mean, parameters = head(SEED.randn(count, -1), batch)
     expected_count = count if scope == "dense" else 2
     assert mean.shape == (expected_count, 6)
-    assert parameters.shape == (expected_count, 6, 6)
+    assert parameters.shape == (expected_count, 21)
 
 
 def test_block_mode_uses_full_multiplicity_spd_blocks():
-    compilation = O3RepresentationCompiler(
+    compilation = _compile(
         "2x0e + 2x2e + 4e",
-        CompilerConfig(covariance="block", output_scope="dense"),
-    ).compile(SEED)
+        IsotypicBlockCovariance(),
+        output_scope="node",
+    )
     spd_map = compilation.build_spd_map()
-    assert isinstance(spd_map, IsotypicBlockMap)
+    assert spd_map.optimization_name == "multiplicity_block_oracle"
+    assert isinstance(spd_map.delegate, IsotypicBlockMap)
     assert compilation.covariance_parameter_count == 7
     params = torch.randn(2, 7, requires_grad=True)
     covariance = spd_map(params)
@@ -138,10 +158,11 @@ def test_block_mode_uses_full_multiplicity_spd_blocks():
 
 def test_compiled_rank4_low_rank_scale_is_equivariant():
     torch.manual_seed(3)
-    compilation = O3RepresentationCompiler(
+    compilation = _compile(
         rank4_elasticity_irreps(),
-        CompilerConfig(covariance="low_rank", low_rank=4, output_scope="dense"),
-    ).compile(SEED)
+        LowRankCovariance(4),
+        output_scope="node",
+    )
     head = compilation.build_head()
     spd_map = compilation.build_spd_map()
     features = SEED.randn(1, -1)
@@ -159,9 +180,18 @@ def test_compiled_rank4_low_rank_scale_is_equivariant():
 
 
 def test_compiler_only_exposes_proper_objectives():
-    student = O3RepresentationCompiler(
-        "1o", CompilerConfig(objective="student_t", student_t_dof=7.0)
-    ).compile(SEED)
+    student = plan_readout(
+        FeatureSpec.from_irreps(SEED, scope="node"),
+        output="1o",
+        covariance=FullCovariance(),
+        distribution="student_t",
+        student_t_dof=7.0,
+    ).compilation
     assert student.build_distribution().nu == 7.0
-    with pytest.raises(ValueError, match="proper objective"):
-        CompilerConfig(objective="surrogate")
+    with pytest.raises(ValueError, match="unsupported elliptical radial law"):
+        plan_readout(
+            FeatureSpec.from_irreps(SEED, scope="node"),
+            output="1o",
+            covariance=FullCovariance(),
+            distribution="surrogate",
+        )

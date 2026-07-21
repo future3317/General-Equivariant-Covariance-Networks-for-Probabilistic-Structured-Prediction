@@ -30,13 +30,38 @@
     {
       "name": "full",
       "kind": "full",
-      "parameter_expression": {
-        "kind": "symmetric_square",
-        "operand": {
-          "kind": "atomic_representation",
-          "semantic_name": "output",
-          "declared_irreps": "1x0e+1x2e"
+      "parameter_bindings": [
+        {
+          "name": "operator",
+          "expression": {
+            "kind": "symmetric_square",
+            "operand": {
+              "kind": "atomic_representation",
+              "semantic_name": "output",
+              "declared_irreps": "1x0e+1x2e"
+            }
+          },
+          "representation": {
+            "group": "O3",
+            "irreps": "2x0e+2x2e+1x4e",
+            "dimension": 21,
+            "multiplicity_basis": "abstract_multiplicity_space"
+          },
+          "projection_name": "covariance_projection"
         }
+      ],
+      "parameter_expression": {
+        "kind": "direct_sum",
+        "terms": [
+          {
+            "kind": "symmetric_square",
+            "operand": {
+              "kind": "atomic_representation",
+              "semantic_name": "output",
+              "declared_irreps": "1x0e+1x2e"
+            }
+          }
+        ]
       },
       "parameter_representation": {
         "group": "O3",
@@ -51,18 +76,40 @@
         "inputs": [
           {
             "kind": "symmetric_operator",
-            "inputs": [],
-            "attributes": {},
-            "positivity": "unspecified",
-            "equivariance": "certified"
+            "inputs": [
+              {
+                "kind": "parameter",
+                "inputs": [],
+                "attributes": {
+                  "binding": "operator",
+                  "start": 0
+                }
+              }
+            ],
+            "attributes": {
+              "coordinate_space": "output_representation",
+              "output_irreps": "1x0e+1x2e"
+            }
           }
         ],
         "attributes": {
           "map": "matrix_exponential"
         },
-        "positivity": "spd",
-        "equivariance": "certified"
+        "verification": {
+          "valid": true,
+          "positivity": "spd",
+          "equivariance": "verified",
+          "instructions": [
+            "parameter",
+            "symmetric_operator",
+            "spectral_positive"
+          ],
+          "unknown_instructions": [],
+          "errors": [],
+          "derivation": "closed_primitive_rule_set"
+        }
       },
+      "operator_program_hash": "b989d0c3c5b3f22ea4d2f5c42ada2127a7891e7a01693db85a1dd3339f1159c8",
       "relation_to_full": "equal_to_full",
       "rank": null,
       "graph": null,
@@ -73,13 +120,57 @@
         "sampling"
       ],
       "certificates": {
-        "equivariance": "compositional",
-        "positivity": "spd"
+        "valid": true,
+        "positivity": "spd",
+        "equivariance": "verified",
+        "instructions": [
+          "parameter",
+          "symmetric_operator",
+          "spectral_positive"
+        ],
+        "unknown_instructions": [],
+        "errors": [],
+        "derivation": "closed_primitive_rule_set"
       }
     },
     {
       "name": "low_rank",
       "kind": "low_rank",
+      "parameter_bindings": [
+        {
+          "name": "factor",
+          "expression": {
+            "kind": "repeated_representation",
+            "copies": 2,
+            "operand": {
+              "kind": "atomic_representation",
+              "semantic_name": "output",
+              "declared_irreps": "1x0e+1x2e"
+            }
+          },
+          "representation": {
+            "group": "O3",
+            "irreps": "2x0e+2x2e",
+            "dimension": 12,
+            "multiplicity_basis": "abstract_multiplicity_space"
+          },
+          "projection_name": "covariance_projection"
+        },
+        {
+          "name": "scale",
+          "expression": {
+            "kind": "trivial_scalars",
+            "count": 1
+          },
+          "representation": {
+            "group": "O3",
+            "irreps": "1x0e",
+            "dimension": 1,
+            "multiplicity_basis": "abstract_multiplicity_space"
+          },
+          "projection_name": "scale_projection"
+        }
+      ],
       "parameter_expression": {
         "kind": "direct_sum",
         "terms": [
@@ -111,33 +202,64 @@
         "inputs": [
           {
             "kind": "positive_scalar_identity",
-            "inputs": [],
-            "attributes": {},
-            "positivity": "spd",
-            "equivariance": "certified"
+            "inputs": [
+              {
+                "kind": "parameter",
+                "inputs": [],
+                "attributes": {
+                  "binding": "scale",
+                  "start": 0
+                }
+              }
+            ],
+            "attributes": {
+              "dimension": 6,
+              "minimum": 0.0001
+            }
           },
           {
             "kind": "gram",
             "inputs": [
               {
                 "kind": "equivariant_factor",
-                "inputs": [],
+                "inputs": [
+                  {
+                    "kind": "parameter",
+                    "inputs": [],
+                    "attributes": {
+                      "binding": "factor",
+                      "start": 0
+                    }
+                  }
+                ],
                 "attributes": {
+                  "output_irreps": "1x0e+1x2e",
                   "rank": 2
-                },
-                "positivity": "unspecified",
-                "equivariance": "certified"
+                }
               }
             ],
-            "attributes": {},
-            "positivity": "psd",
-            "equivariance": "certified"
+            "attributes": {}
           }
         ],
         "attributes": {},
-        "positivity": "spd",
-        "equivariance": "certified"
+        "verification": {
+          "valid": true,
+          "positivity": "spd",
+          "equivariance": "verified",
+          "instructions": [
+            "parameter",
+            "positive_scalar_identity",
+            "parameter",
+            "equivariant_factor",
+            "gram",
+            "add"
+          ],
+          "unknown_instructions": [],
+          "errors": [],
+          "derivation": "closed_primitive_rule_set"
+        }
       },
+      "operator_program_hash": "67c8986393a7b2598ce88822dcef2175b9f8b5c97fada826175931f27e0df9db",
       "relation_to_full": "strict_subset",
       "rank": 2,
       "graph": null,
@@ -148,16 +270,49 @@
         "sampling"
       ],
       "certificates": {
-        "equivariance": "compositional",
-        "positivity": "spd"
+        "valid": true,
+        "positivity": "spd",
+        "equivariance": "verified",
+        "instructions": [
+          "parameter",
+          "positive_scalar_identity",
+          "parameter",
+          "equivariant_factor",
+          "gram",
+          "add"
+        ],
+        "unknown_instructions": [],
+        "errors": [],
+        "derivation": "closed_primitive_rule_set"
       }
     },
     {
       "name": "isotypic_block",
       "kind": "block",
+      "parameter_bindings": [
+        {
+          "name": "blocks",
+          "expression": {
+            "kind": "trivial_scalars",
+            "count": 2
+          },
+          "representation": {
+            "group": "O3",
+            "irreps": "2x0e",
+            "dimension": 2,
+            "multiplicity_basis": "abstract_multiplicity_space"
+          },
+          "projection_name": "covariance_projection"
+        }
+      ],
       "parameter_expression": {
-        "kind": "trivial_scalars",
-        "count": 2
+        "kind": "direct_sum",
+        "terms": [
+          {
+            "kind": "trivial_scalars",
+            "count": 2
+          }
+        ]
       },
       "parameter_representation": {
         "group": "O3",
@@ -174,49 +329,79 @@
             "kind": "kronecker_identity",
             "inputs": [
               {
-                "kind": "spectral_positive",
-                "inputs": [],
+                "kind": "cholesky_positive",
+                "inputs": [
+                  {
+                    "kind": "parameter",
+                    "inputs": [],
+                    "attributes": {
+                      "binding": "blocks",
+                      "start": 0,
+                      "stop": 1
+                    }
+                  }
+                ],
                 "attributes": {
-                  "map": "multiplicity_cholesky"
-                },
-                "positivity": "spd",
-                "equivariance": "certified"
+                  "dimension": 1,
+                  "minimum": 0.0001
+                }
               }
             ],
             "attributes": {
               "irrep": "0e",
               "irrep_dimension": 1,
               "multiplicity": 1
-            },
-            "positivity": "spd",
-            "equivariance": "certified"
+            }
           },
           {
             "kind": "kronecker_identity",
             "inputs": [
               {
-                "kind": "spectral_positive",
-                "inputs": [],
+                "kind": "cholesky_positive",
+                "inputs": [
+                  {
+                    "kind": "parameter",
+                    "inputs": [],
+                    "attributes": {
+                      "binding": "blocks",
+                      "start": 1,
+                      "stop": 2
+                    }
+                  }
+                ],
                 "attributes": {
-                  "map": "multiplicity_cholesky"
-                },
-                "positivity": "spd",
-                "equivariance": "certified"
+                  "dimension": 1,
+                  "minimum": 0.0001
+                }
               }
             ],
             "attributes": {
               "irrep": "2e",
               "irrep_dimension": 5,
               "multiplicity": 1
-            },
-            "positivity": "spd",
-            "equivariance": "certified"
+            }
           }
         ],
         "attributes": {},
-        "positivity": "spd",
-        "equivariance": "certified"
+        "verification": {
+          "valid": true,
+          "positivity": "spd",
+          "equivariance": "verified",
+          "instructions": [
+            "parameter",
+            "cholesky_positive",
+            "kronecker_identity",
+            "parameter",
+            "cholesky_positive",
+            "kronecker_identity",
+            "direct_sum"
+          ],
+          "unknown_instructions": [],
+          "errors": [],
+          "derivation": "closed_primitive_rule_set"
+        }
       },
+      "operator_program_hash": "c78f11bc6c3a88928d8425ac7f20cdc2e66da26ca9f0962f5c75b59ee538b7f0",
       "relation_to_full": "strict_subset",
       "rank": null,
       "graph": null,
@@ -227,24 +412,66 @@
         "sampling"
       ],
       "certificates": {
-        "equivariance": "compositional",
-        "positivity": "spd"
+        "valid": true,
+        "positivity": "spd",
+        "equivariance": "verified",
+        "instructions": [
+          "parameter",
+          "cholesky_positive",
+          "kronecker_identity",
+          "parameter",
+          "cholesky_positive",
+          "kronecker_identity",
+          "direct_sum"
+        ],
+        "unknown_instructions": [],
+        "errors": [],
+        "derivation": "closed_primitive_rule_set"
       }
     },
     {
       "name": "graph_precision",
       "kind": "graph",
-      "parameter_expression": {
-        "kind": "repeated_representation",
-        "copies": 7,
-        "operand": {
-          "kind": "symmetric_square",
-          "operand": {
-            "kind": "atomic_representation",
-            "semantic_name": "graph_residual",
-            "declared_irreps": "1x1o"
-          }
+      "parameter_bindings": [
+        {
+          "name": "potentials",
+          "expression": {
+            "kind": "repeated_representation",
+            "copies": 7,
+            "operand": {
+              "kind": "symmetric_square",
+              "operand": {
+                "kind": "atomic_representation",
+                "semantic_name": "graph_residual",
+                "declared_irreps": "1x1o"
+              }
+            }
+          },
+          "representation": {
+            "group": "O3",
+            "irreps": "7x0e+7x2e",
+            "dimension": 42,
+            "multiplicity_basis": "abstract_multiplicity_space"
+          },
+          "projection_name": "covariance_projection"
         }
+      ],
+      "parameter_expression": {
+        "kind": "direct_sum",
+        "terms": [
+          {
+            "kind": "repeated_representation",
+            "copies": 7,
+            "operand": {
+              "kind": "symmetric_square",
+              "operand": {
+                "kind": "atomic_representation",
+                "semantic_name": "graph_residual",
+                "declared_irreps": "1x1o"
+              }
+            }
+          }
+        ]
       },
       "parameter_representation": {
         "group": "O3",
@@ -261,20 +488,40 @@
             "kind": "direct_sum",
             "inputs": [
               {
-                "kind": "local_spectral_positive",
-                "inputs": [],
+                "kind": "spectral_positive",
+                "inputs": [
+                  {
+                    "kind": "symmetric_operator",
+                    "inputs": [
+                      {
+                        "kind": "parameter",
+                        "inputs": [],
+                        "attributes": {
+                          "binding": "potentials",
+                          "coordinate_layout": "repeated_irrep",
+                          "copies": 7,
+                          "start": 0,
+                          "stop": 24,
+                          "unit_irreps": "1x0e+1x2e"
+                        }
+                      }
+                    ],
+                    "attributes": {
+                      "coordinate_space": "graph_local",
+                      "copies": 4,
+                      "irrep": "1o",
+                      "role": "unary"
+                    }
+                  }
+                ],
                 "attributes": {
-                  "role": "unary"
-                },
-                "positivity": "spd",
-                "equivariance": "certified"
+                  "map": "matrix_exponential"
+                }
               }
             ],
             "attributes": {
               "copies": 4
-            },
-            "positivity": "spd",
-            "equivariance": "certified"
+            }
           },
           {
             "kind": "pullback",
@@ -283,33 +530,70 @@
                 "kind": "direct_sum",
                 "inputs": [
                   {
-                    "kind": "local_spectral_positive",
-                    "inputs": [],
+                    "kind": "spectral_positive",
+                    "inputs": [
+                      {
+                        "kind": "symmetric_operator",
+                        "inputs": [
+                          {
+                            "kind": "parameter",
+                            "inputs": [],
+                            "attributes": {
+                              "binding": "potentials",
+                              "coordinate_layout": "repeated_irrep",
+                              "copies": 7,
+                              "start": 24,
+                              "stop": 42,
+                              "unit_irreps": "1x0e+1x2e"
+                            }
+                          }
+                        ],
+                        "attributes": {
+                          "coordinate_space": "graph_local",
+                          "copies": 3,
+                          "irrep": "1o",
+                          "role": "factor"
+                        }
+                      }
+                    ],
                     "attributes": {
-                      "role": "factor"
-                    },
-                    "positivity": "spd",
-                    "equivariance": "certified"
+                      "map": "matrix_exponential"
+                    }
                   }
                 ],
                 "attributes": {
                   "copies": 3
-                },
-                "positivity": "spd",
-                "equivariance": "certified"
+                }
               }
             ],
             "attributes": {
-              "map": "homogeneous_graph_coboundary"
-            },
-            "positivity": "psd",
-            "equivariance": "certified"
+              "intertwiner": "homogeneous_graph_coboundary"
+            }
           }
         ],
         "attributes": {},
-        "positivity": "spd",
-        "equivariance": "certified"
+        "verification": {
+          "valid": true,
+          "positivity": "spd",
+          "equivariance": "verified",
+          "instructions": [
+            "parameter",
+            "symmetric_operator",
+            "spectral_positive",
+            "direct_sum",
+            "parameter",
+            "symmetric_operator",
+            "spectral_positive",
+            "direct_sum",
+            "pullback",
+            "add"
+          ],
+          "unknown_instructions": [],
+          "errors": [],
+          "derivation": "closed_primitive_rule_set"
+        }
       },
+      "operator_program_hash": "28e5ddd1da7d1aaf631dee2f4ab0d79ebe3c735b9dd0ff2a5f70b84f94dc6652",
       "relation_to_full": "strict_subset",
       "rank": null,
       "graph": {
@@ -342,8 +626,24 @@
         "sampling"
       ],
       "certificates": {
-        "equivariance": "compositional",
-        "positivity": "spd"
+        "valid": true,
+        "positivity": "spd",
+        "equivariance": "verified",
+        "instructions": [
+          "parameter",
+          "symmetric_operator",
+          "spectral_positive",
+          "direct_sum",
+          "parameter",
+          "symmetric_operator",
+          "spectral_positive",
+          "direct_sum",
+          "pullback",
+          "add"
+        ],
+        "unknown_instructions": [],
+        "errors": [],
+        "derivation": "closed_primitive_rule_set"
       }
     }
   ],
@@ -351,7 +651,6 @@
     "auto_budget": {
       "assembly_ir": {
         "attributes": {},
-        "equivariance": "certified",
         "inputs": [
           {
             "attributes": {
@@ -359,20 +658,27 @@
               "irrep_dimension": 1,
               "multiplicity": 1
             },
-            "equivariance": "certified",
             "inputs": [
               {
                 "attributes": {
-                  "map": "multiplicity_cholesky"
+                  "dimension": 1,
+                  "minimum": 0.0001
                 },
-                "equivariance": "certified",
-                "inputs": [],
-                "kind": "spectral_positive",
-                "positivity": "spd"
+                "inputs": [
+                  {
+                    "attributes": {
+                      "binding": "blocks",
+                      "start": 0,
+                      "stop": 1
+                    },
+                    "inputs": [],
+                    "kind": "parameter"
+                  }
+                ],
+                "kind": "cholesky_positive"
               }
             ],
-            "kind": "kronecker_identity",
-            "positivity": "spd"
+            "kind": "kronecker_identity"
           },
           {
             "attributes": {
@@ -380,28 +686,64 @@
               "irrep_dimension": 5,
               "multiplicity": 1
             },
-            "equivariance": "certified",
             "inputs": [
               {
                 "attributes": {
-                  "map": "multiplicity_cholesky"
+                  "dimension": 1,
+                  "minimum": 0.0001
                 },
-                "equivariance": "certified",
-                "inputs": [],
-                "kind": "spectral_positive",
-                "positivity": "spd"
+                "inputs": [
+                  {
+                    "attributes": {
+                      "binding": "blocks",
+                      "start": 1,
+                      "stop": 2
+                    },
+                    "inputs": [],
+                    "kind": "parameter"
+                  }
+                ],
+                "kind": "cholesky_positive"
               }
             ],
-            "kind": "kronecker_identity",
-            "positivity": "spd"
+            "kind": "kronecker_identity"
           }
         ],
         "kind": "direct_sum",
-        "positivity": "spd"
+        "verification": {
+          "derivation": "closed_primitive_rule_set",
+          "equivariance": "verified",
+          "errors": [],
+          "instructions": [
+            "parameter",
+            "cholesky_positive",
+            "kronecker_identity",
+            "parameter",
+            "cholesky_positive",
+            "kronecker_identity",
+            "direct_sum"
+          ],
+          "positivity": "spd",
+          "unknown_instructions": [],
+          "valid": true
+        }
       },
       "certificates": {
-        "equivariance": "compositional",
-        "positivity": "spd"
+        "derivation": "closed_primitive_rule_set",
+        "equivariance": "verified",
+        "errors": [],
+        "instructions": [
+          "parameter",
+          "cholesky_positive",
+          "kronecker_identity",
+          "parameter",
+          "cholesky_positive",
+          "kronecker_identity",
+          "direct_sum"
+        ],
+        "positivity": "spd",
+        "unknown_instructions": [],
+        "valid": true
       },
       "computational_oracles": [
         "logdet",
@@ -411,10 +753,32 @@
       "domain": "scatter",
       "graph": null,
       "kind": "isotypic_block_covariance",
+      "operator_program_hash": "c78f11bc6c3a88928d8425ac7f20cdc2e66da26ca9f0962f5c75b59ee538b7f0",
+      "parameter_bindings": [
+        {
+          "expression": {
+            "count": 2,
+            "kind": "trivial_scalars"
+          },
+          "name": "blocks",
+          "projection_name": "covariance_projection",
+          "representation": {
+            "dimension": 2,
+            "group": "O3",
+            "irreps": "2x0e",
+            "multiplicity_basis": "abstract_multiplicity_space"
+          }
+        }
+      ],
       "parameter_count": 2,
       "parameter_expression": {
-        "count": 2,
-        "kind": "trivial_scalars"
+        "kind": "direct_sum",
+        "terms": [
+          {
+            "count": 2,
+            "kind": "trivial_scalars"
+          }
+        ]
       },
       "parameter_representation": {
         "dimension": 2,
@@ -437,7 +801,9 @@
         ],
         "kind": "auto_budget",
         "max_parameters": 30,
-        "objective": "min_parameter_count"
+        "objective": {
+          "kind": "min_parameter_count"
+        }
       },
       "rank": null,
       "relation_to_canonical": "strict_subfamily",
@@ -466,24 +832,30 @@
             "within_budget": true
           }
         ],
+        "cost_objective": {
+          "kind": "min_parameter_count"
+        },
         "pairwise_family_relations": [
           {
+            "evidence": "full_family_reference",
             "left": "full",
-            "relation": "right_is_subset_or_equal_to_left",
+            "relation": "strict_superset",
             "right": "low_rank"
           },
           {
+            "evidence": "full_family_reference",
             "left": "full",
-            "relation": "right_is_subset_or_equal_to_left",
+            "relation": "strict_superset",
             "right": "block"
           },
           {
+            "evidence": "no_registered_family_relation_proof",
             "left": "low_rank",
-            "relation": "incomparable_or_unknown",
+            "relation": "unknown",
             "right": "block"
           }
         ],
-        "rule": "min_parameter_count_under_budget",
+        "rule": "family_cost_model_under_budget",
         "selected_candidate_index": 2,
         "selected_family": "block",
         "selected_parameters": 2,
@@ -495,22 +867,52 @@
         "attributes": {
           "map": "matrix_exponential"
         },
-        "equivariance": "certified",
         "inputs": [
           {
-            "attributes": {},
-            "equivariance": "certified",
-            "inputs": [],
-            "kind": "symmetric_operator",
-            "positivity": "unspecified"
+            "attributes": {
+              "coordinate_space": "output_representation",
+              "output_irreps": "1x0e+1x2e"
+            },
+            "inputs": [
+              {
+                "attributes": {
+                  "binding": "operator",
+                  "start": 0
+                },
+                "inputs": [],
+                "kind": "parameter"
+              }
+            ],
+            "kind": "symmetric_operator"
           }
         ],
         "kind": "spectral_positive",
-        "positivity": "spd"
+        "verification": {
+          "derivation": "closed_primitive_rule_set",
+          "equivariance": "verified",
+          "errors": [],
+          "instructions": [
+            "parameter",
+            "symmetric_operator",
+            "spectral_positive"
+          ],
+          "positivity": "spd",
+          "unknown_instructions": [],
+          "valid": true
+        }
       },
       "certificates": {
-        "equivariance": "compositional",
-        "positivity": "spd"
+        "derivation": "closed_primitive_rule_set",
+        "equivariance": "verified",
+        "errors": [],
+        "instructions": [
+          "parameter",
+          "symmetric_operator",
+          "spectral_positive"
+        ],
+        "positivity": "spd",
+        "unknown_instructions": [],
+        "valid": true
       },
       "computational_oracles": [
         "logdet",
@@ -520,14 +922,40 @@
       "domain": "scatter",
       "graph": null,
       "kind": "full_covariance",
+      "operator_program_hash": "b989d0c3c5b3f22ea4d2f5c42ada2127a7891e7a01693db85a1dd3339f1159c8",
+      "parameter_bindings": [
+        {
+          "expression": {
+            "kind": "symmetric_square",
+            "operand": {
+              "declared_irreps": "1x0e+1x2e",
+              "kind": "atomic_representation",
+              "semantic_name": "output"
+            }
+          },
+          "name": "operator",
+          "projection_name": "covariance_projection",
+          "representation": {
+            "dimension": 21,
+            "group": "O3",
+            "irreps": "2x0e+2x2e+1x4e",
+            "multiplicity_basis": "abstract_multiplicity_space"
+          }
+        }
+      ],
       "parameter_count": 21,
       "parameter_expression": {
-        "kind": "symmetric_square",
-        "operand": {
-          "declared_irreps": "1x0e+1x2e",
-          "kind": "atomic_representation",
-          "semantic_name": "output"
-        }
+        "kind": "direct_sum",
+        "terms": [
+          {
+            "kind": "symmetric_square",
+            "operand": {
+              "declared_irreps": "1x0e+1x2e",
+              "kind": "atomic_representation",
+              "semantic_name": "output"
+            }
+          }
+        ]
       },
       "parameter_representation": {
         "dimension": 21,
@@ -579,20 +1007,24 @@
             "within_budget": true
           }
         ],
+        "cost_objective": null,
         "pairwise_family_relations": [
           {
+            "evidence": "full_family_reference",
             "left": "full",
-            "relation": "right_is_subset_or_equal_to_left",
+            "relation": "strict_superset",
             "right": "low_rank"
           },
           {
+            "evidence": "full_family_reference",
             "left": "full",
-            "relation": "right_is_subset_or_equal_to_left",
+            "relation": "strict_superset",
             "right": "block"
           },
           {
+            "evidence": "no_registered_family_relation_proof",
             "left": "low_rank",
-            "relation": "incomparable_or_unknown",
+            "relation": "unknown",
             "right": "block"
           }
         ],
@@ -668,13 +1100,59 @@
     },
     "compilation_succeeded": true
   },
+  "recursive_oracle_equivalence": [
+    {
+      "family": "full",
+      "optimization": "spectral_trace_and_exponential_oracle",
+      "covariance_max_abs": 1.4901161193847656e-08,
+      "logdet_max_abs": 2.384185791015625e-07,
+      "quadratic_max_abs": 2.86102294921875e-06,
+      "parameter_gradient_max_abs": 7.152557373046875e-07
+    },
+    {
+      "family": "low_rank",
+      "optimization": "woodbury_and_determinant_lemma_oracle",
+      "covariance_max_abs": 3.725290298461914e-09,
+      "logdet_max_abs": 4.76837158203125e-07,
+      "quadratic_max_abs": 0.0,
+      "parameter_gradient_max_abs": 2.384185791015625e-07
+    },
+    {
+      "family": "isotypic_block",
+      "optimization": "multiplicity_block_oracle",
+      "covariance_max_abs": 0.0,
+      "logdet_max_abs": 0.0,
+      "quadratic_max_abs": 0.0,
+      "parameter_gradient_max_abs": 9.5367431640625e-07
+    },
+    {
+      "family": "graph_precision",
+      "optimization": "graph_elimination_or_dense_precision_oracle",
+      "covariance_max_abs": 1.1920928955078125e-07,
+      "logdet_max_abs": 0.0,
+      "quadratic_max_abs": 3.814697265625e-06,
+      "parameter_gradient_max_abs": 2.980232238769531e-07
+    }
+  ],
   "executor_autotune": {
     "signature": {
-      "batch_size": 16,
-      "feature_dimension": 160,
+      "semantic_plan_hash": "3bba3003cf1ea66c789caa36ad8dff4a8467c69a462128ed3a3de9914b5345c5",
+      "feature_fingerprint": "123ab15702d77b4f37e286a1062c01469fa673731b4441ba8e13f108bc392e1d",
+      "active_plan_hash": "ddf4a94bea4b2310ab0ef1b26bdbd59b0a892777de18fe61bbfa9a6b73f7da90",
+      "operator_program_hash": "b989d0c3c5b3f22ea4d2f5c42ada2127a7891e7a01693db85a1dd3339f1159c8",
+      "batch_shape": [
+        16,
+        160
+      ],
       "dtype": "float32",
       "device": "cuda",
-      "phase": "forward_backward"
+      "device_uuid": "25ca0b59526a9112eefaef9137150930f72cb0584e45359b1e39e8c5dcbb887f",
+      "phase": "forward_backward",
+      "compilation_mode": "eager",
+      "software_fingerprint": "bffe137979e3d40e7c26d495191ba0573cfb4a954a40b8f11db8fcaa976d0f82",
+      "tensor_layout": "contiguous",
+      "requires_input_grad": true,
+      "requires_parameter_grad": true
     },
     "maximum_absolute_error": {
       "mu": 1.4901161193847656e-08,
@@ -682,20 +1160,20 @@
       "scale": 5.960464477539063e-08
     },
     "maximum_relative_error": {
-      "mu": 6.352710357759861e-08,
-      "params": 8.638197357413446e-08,
-      "scale": 5.012822157368646e-08
+      "mu": 5.019103710424133e-08,
+      "params": 7.105730048806436e-08,
+      "scale": 4.8214868542117983e-08
     },
     "measurements": [
       {
         "executor": "spherical_cg",
-        "median_ms": 23.20226951269433,
-        "iqr_ms": 3.027527272934094
+        "median_ms": 22.90701004676521,
+        "iqr_ms": 3.1317119719460607
       },
       {
         "executor": "cartesian_stf",
-        "median_ms": 25.724339007865638,
-        "iqr_ms": 2.157612791052088
+        "median_ms": 25.356962985824794,
+        "iqr_ms": 1.3749766803812236
       }
     ],
     "selected_executor": "spherical_cg",
@@ -704,26 +1182,69 @@
         "spherical_cg",
         "cartesian_stf"
       ],
+      "capability_certificate": {
+        "active_plan_hash": "ddf4a94bea4b2310ab0ef1b26bdbd59b0a892777de18fe61bbfa9a6b73f7da90",
+        "checkpoint_map": "bijective",
+        "covered_instructions": [
+          "cg:0ex0e->0e",
+          "cg:0ex2e->2e",
+          "cg:1ox1o->0e",
+          "cg:1ox1o->2e",
+          "cg:2ex0e->2e",
+          "cg:2ex2e->0e",
+          "cg:2ex2e->2e",
+          "cg:2ex2e->4e",
+          "operator:parameter",
+          "operator:symmetric_operator",
+          "operator:spectral_positive"
+        ],
+        "exact": true,
+        "executor": "spherical_cg",
+        "feature_fingerprint": "123ab15702d77b4f37e286a1062c01469fa673731b4441ba8e13f108bc392e1d",
+        "fidelity": {
+          "effective": "exact",
+          "effective_contraction_rank": null,
+          "normalization_reason": null,
+          "requested": "exact_only",
+          "requested_contraction_rank": null
+        },
+        "missing_instructions": [],
+        "operator_program_hash": "b989d0c3c5b3f22ea4d2f5c42ada2127a7891e7a01693db85a1dd3339f1159c8",
+        "reasons": [],
+        "supported": true
+      },
       "cost_policy": {
         "kind": "minimize_measured_latency",
         "measurements": [
           {
             "executor": "spherical_cg",
-            "iqr_ms": 3.027527272934094,
-            "median_ms": 23.20226951269433
+            "iqr_ms": 3.1317119719460607,
+            "median_ms": 22.90701004676521
           },
           {
             "executor": "cartesian_stf",
-            "iqr_ms": 2.157612791052088,
-            "median_ms": 25.724339007865638
+            "iqr_ms": 1.3749766803812236,
+            "median_ms": 25.356962985824794
           }
         ],
         "signature": {
-          "batch_size": 16,
+          "active_plan_hash": "ddf4a94bea4b2310ab0ef1b26bdbd59b0a892777de18fe61bbfa9a6b73f7da90",
+          "batch_shape": [
+            16,
+            160
+          ],
+          "compilation_mode": "eager",
           "device": "cuda",
+          "device_uuid": "25ca0b59526a9112eefaef9137150930f72cb0584e45359b1e39e8c5dcbb887f",
           "dtype": "float32",
-          "feature_dimension": 160,
-          "phase": "forward_backward"
+          "feature_fingerprint": "123ab15702d77b4f37e286a1062c01469fa673731b4441ba8e13f108bc392e1d",
+          "operator_program_hash": "b989d0c3c5b3f22ea4d2f5c42ada2127a7891e7a01693db85a1dd3339f1159c8",
+          "phase": "forward_backward",
+          "requires_input_grad": true,
+          "requires_parameter_grad": true,
+          "semantic_plan_hash": "3bba3003cf1ea66c789caa36ad8dff4a8467c69a462128ed3a3de9914b5345c5",
+          "software_fingerprint": "bffe137979e3d40e7c26d495191ba0573cfb4a954a40b8f11db8fcaa976d0f82",
+          "tensor_layout": "contiguous"
         }
       },
       "executor_policy": {
@@ -736,25 +1257,37 @@
       "measurements": [
         {
           "executor": "spherical_cg",
-          "iqr_ms": 3.027527272934094,
-          "median_ms": 23.20226951269433
+          "iqr_ms": 3.1317119719460607,
+          "median_ms": 22.90701004676521
         },
         {
           "executor": "cartesian_stf",
-          "iqr_ms": 2.157612791052088,
-          "median_ms": 25.724339007865638
+          "iqr_ms": 1.3749766803812236,
+          "median_ms": 25.356962985824794
         }
       ],
       "method": "measured_autotune",
       "performance_claim": "measured_for_exact_shape_signature",
       "selected_executor": "spherical_cg",
-      "selected_median_ms": 23.20226951269433,
+      "selected_median_ms": 22.90701004676521,
       "signature": {
-        "batch_size": 16,
+        "active_plan_hash": "ddf4a94bea4b2310ab0ef1b26bdbd59b0a892777de18fe61bbfa9a6b73f7da90",
+        "batch_shape": [
+          16,
+          160
+        ],
+        "compilation_mode": "eager",
         "device": "cuda",
+        "device_uuid": "25ca0b59526a9112eefaef9137150930f72cb0584e45359b1e39e8c5dcbb887f",
         "dtype": "float32",
-        "feature_dimension": 160,
-        "phase": "forward_backward"
+        "feature_fingerprint": "123ab15702d77b4f37e286a1062c01469fa673731b4441ba8e13f108bc392e1d",
+        "operator_program_hash": "b989d0c3c5b3f22ea4d2f5c42ada2127a7891e7a01693db85a1dd3339f1159c8",
+        "phase": "forward_backward",
+        "requires_input_grad": true,
+        "requires_parameter_grad": true,
+        "semantic_plan_hash": "3bba3003cf1ea66c789caa36ad8dff4a8467c69a462128ed3a3de9914b5345c5",
+        "software_fingerprint": "bffe137979e3d40e7c26d495191ba0573cfb4a954a40b8f11db8fcaa976d0f82",
+        "tensor_layout": "contiguous"
       }
     },
     "strict_checkpoint_load_succeeded": true,

@@ -11,6 +11,7 @@ from equivcompiler.policies import (
     AutoBudget,
     ExactExecutorCandidates,
     ExactOnly,
+    ExecutionSignature,
     ExecutorMeasurement,
     FirstFeasible,
     FullCovariance,
@@ -21,15 +22,18 @@ from equivcompiler.policies import (
     MinParameterCount,
     OperatorFamilySpec,
     PreferExecutor,
-    ShapeSignature,
     SpecificExecutor,
     TruncatedMultiplicityRank,
 )
 from equivcompiler.distributions import (
     DistributionSpec,
     EllipticalDistribution,
+    GaussianRadial,
+    RadialLaw,
+    StudentTRadial,
 )
 from equivcompiler.autotune import BenchmarkTask, DeviceAutotuner
+from equivcompiler.signatures import execution_signature_for_plan
 from equivcompiler.executors import (
     CandidateEnumerator,
     ExactLoweringRegistry,
@@ -63,7 +67,7 @@ __all__ = [
     "SpecificExecutor",
     "PreferExecutor",
     "MinimizeLatency",
-    "ShapeSignature",
+    "ExecutionSignature",
     "ExecutorMeasurement",
     "FullCovariance",
     "GraphPrecision",
@@ -72,11 +76,15 @@ __all__ = [
     "TruncatedMultiplicityRank",
     "DistributionSpec",
     "EllipticalDistribution",
+    "RadialLaw",
+    "GaussianRadial",
+    "StudentTRadial",
     "DeviceAutotuner",
     "BenchmarkTask",
     "ExactLoweringRegistry",
     "CandidateEnumerator",
     "ExecutionContext",
+    "execution_signature_for_plan",
     "compile_predictor",
     "compile_readout",
     "convert_checkpoint",

@@ -99,31 +99,8 @@ def _readout_parameter_count(compilation: "O3Compilation") -> int:
 
     active = compilation.active_target_irreps
     count += _linear_parameter_count(active, compilation.mean_irreps)
-    if compilation.covariance_mode == "full":
-        count += _linear_parameter_count(active, compilation.covariance_irreps)
-    elif compilation.covariance_mode == "low_rank":
-        from representations.irrep_layout import RepeatedIrrepLayout
-
-        factors = RepeatedIrrepLayout(
-            compilation.mean_irreps, int(compilation.covariance_rank)
-        ).expanded_irreps
-        count += _linear_parameter_count(active, factors)
-        count += _linear_parameter_count(active, o3.Irreps("1x0e"))
-    elif compilation.covariance_mode == "graph":
-        assert compilation.graph_structure is not None
-        from representations.irrep_layout import RepeatedIrrepLayout
-        from representations.o3_irreps import O3IrrepsSpec
-
-        local = o3.Irreps([(1, compilation.graph_structure.node_irrep)])
-        operator = O3IrrepsSpec(local).symmetric_square_irreps
-        potentials = RepeatedIrrepLayout(
-            operator, compilation.graph_structure.num_potentials
-        ).expanded_irreps
-        count += _linear_parameter_count(active, potentials)
-    else:
-        count += _linear_parameter_count(
-            active, o3.Irreps(f"{compilation.covariance_parameter_count}x0e")
-        )
+    for binding in compilation.operator_family.parameter_bindings:
+        count += _linear_parameter_count(active, binding.irreps)
     return count
 
 
@@ -157,31 +134,41 @@ def _covariance_complexity(compilation: "O3Compilation") -> dict[str, Any]:
             "likelihood_linear_algebra": "O(d r^2 + r^3)",
             "rank": rank,
         }
-    assert compilation.graph_structure is not None
-    graph = compilation.graph_structure
-    block = graph.block_dim
+    if mode == "graph":
+        assert compilation.graph_structure is not None
+        graph = compilation.graph_structure
+        block = graph.block_dim
+        return {
+            "parameterization": "local_spd_graph_precision",
+            "emitted_coordinates": compilation.covariance_parameter_count,
+            "storage": "O((J+E) d0^2)",
+            "likelihood_linear_algebra": (
+                "O(J d0^3 + E d0^2)" if graph.is_tree else "O((J d0)^3)"
+            ),
+            "nodes": graph.num_nodes,
+            "edges": graph.num_edges,
+            "block_dimension": block,
+            "tree_elimination": graph.is_tree,
+        }
     return {
-        "parameterization": "local_spd_graph_precision",
+        "parameterization": mode,
         "emitted_coordinates": compilation.covariance_parameter_count,
-        "storage": "O((J+E) d0^2)",
-        "likelihood_linear_algebra": (
-            "O(J d0^3 + E d0^2)" if graph.is_tree else "O((J d0)^3)"
-        ),
-        "nodes": graph.num_nodes,
-        "edges": graph.num_edges,
-        "block_dimension": block,
-        "tree_elimination": graph.is_tree,
+        "storage": "derived_from_operator_program",
+        "likelihood_linear_algebra": "generic_dense_O(d^3)",
+        "operator_program_hash": compilation.operator_family.assembly.fingerprint,
     }
 
 
 def _probability_semantics(compilation: "O3Compilation") -> dict[str, Any]:
-    objective = compilation.config.objective
+    specification = compilation.distribution_spec
+    objective = specification.objective_name()
     if objective == "gaussian":
         scale_semantics = "covariance"
         covariance_relation = "covariance = scale"
         likelihood = {"name": "multivariate_gaussian", "proper": True}
-    else:
-        degrees = compilation.config.student_t_dof
+    elif objective == "student_t":
+        degrees = specification.student_t_dof
+        assert degrees is not None
         scale_semantics = "scatter"
         covariance_relation = (
             f"covariance = {degrees}/({degrees}-2) * scatter"
@@ -193,6 +180,10 @@ def _probability_semantics(compilation: "O3Compilation") -> dict[str, Any]:
             "proper": True,
             "degrees_of_freedom": degrees,
         }
+    else:
+        scale_semantics = "distribution_defined_scatter"
+        covariance_relation = "defined by radial-law plugin"
+        likelihood = specification.objective()
 
     if compilation.covariance_mode == "graph":
         raw_semantics = "local symmetric precision generators"
@@ -203,7 +194,10 @@ def _probability_semantics(compilation: "O3Compilation") -> dict[str, Any]:
             "full": "symmetric scale generator",
             "block": "isotypic multiplicity-space generators",
             "low_rank": "equivariant factor and isotropic variance generator",
-        }[compilation.covariance_mode]
+        }.get(
+            compilation.covariance_mode,
+            "typed coordinates consumed by the verified operator program",
+        )
         positive_definite_object = scale_semantics
         precision_semantics = "inverse of the predicted scale matrix"
     return {
@@ -259,16 +253,12 @@ class CompilationReport:
         return self["targets"]
 
     @property
-    def reachability(self) -> dict[str, Any]:
-        return self["reachability"]
+    def representation_reachability(self) -> dict[str, Any]:
+        return self["representation_reachability"]
 
     @property
     def family(self) -> dict[str, Any]:
         return self["family"]
-
-    @property
-    def lowering(self) -> dict[str, Any]:
-        return self["lowering"]
 
     @property
     def execution_fidelity(self) -> dict[str, Any]:
@@ -410,7 +400,7 @@ def build_compilation_report(
         "block": "isotypic_block_covariance",
         "low_rank": "low_rank_plus_isotropic",
         "graph": "graph_precision",
-    }[compilation.covariance_mode]
+    }.get(compilation.covariance_mode, compilation.covariance_mode)
     lowering_approximation = (
         None
         if compilation.backend_exact
@@ -451,53 +441,26 @@ def build_compilation_report(
             "bijective" if compilation.backend_exact else "not_available"
         ),
         "approximation": lowering_approximation,
+        "decision": compilation.executor_decision.capability.fidelity.as_dict(),
     }
     backend_selection_record = {
         "selected_executor": compilation.backend,
-        "method": "core_compiler_default",
-        "performance_claim": "none",
+        **compilation.executor_decision.selection_basis,
+        "capability_certificate": (
+            compilation.executor_decision.capability.as_dict()
+        ),
     }
     record = {
-        "schema_version": "2.0",
+        "schema_version": "3.0",
         "group": "O(3)",
-        "cartesian_formula": compilation.output_spec.cartesian_formula,
         "output": output_record,
+        "covariance_representation": _irrep_record(compilation.covariance_irreps),
         "seed": seed_record,
         "targets": {
             "canonical": canonical_record,
             "active": active_record,
         },
-        "semantic_family_coverage": family_record,
         "representation_reachability": {
-            "canonical": canonical_reachability,
-            "active": active_reachability,
-            "active_is_compilation_gate": True,
-            "canonical_is_compilation_gate": canonical_is_active,
-            "canonical_is_diagnostic": not canonical_is_active,
-            "canonical_is_diagnostic_for_restricted_families": not covariance_is_full,
-        },
-        "execution_fidelity": fidelity_record,
-        "backend_selection_basis": backend_selection_record,
-        "family": family_record,
-        "lowering": fidelity_record,
-        "objective": probability["likelihood"],
-        "complexity": {
-            "covariance": covariance_complexity,
-            "lifting_edges": compilation.active_plan.depth,
-            "canonical_lifting_edges": (
-                canonical_plan.depth if canonical_plan is not None else None
-            ),
-            "parameter_counts": parameter_counts,
-        },
-        "compatibility_hash": None,
-        "output_representation": output_record,
-        "symmetric_square_representation": _irrep_record(
-            compilation.covariance_irreps
-        ),
-        "seed_representation": seed_record,
-        "canonical_target": canonical_record,
-        "active_target": active_record,
-        "reachability": {
             "status": "active_reachable",
             "proof_kind": "breadth_first_shortest_cg_paths",
             "canonical": canonical_reachability,
@@ -508,49 +471,26 @@ def build_compilation_report(
                 ),
                 "active_deficit": {},
             },
+            "active_is_compilation_gate": True,
+            "canonical_is_compilation_gate": canonical_is_active,
+            "canonical_is_diagnostic": not canonical_is_active,
+            "canonical_is_diagnostic_for_restricted_families": not covariance_is_full,
         },
-        "covariance": {
-            "requested": compilation.config.covariance,
-            "selected": compilation.covariance_mode,
-            "unrestricted_full_family": covariance_is_full,
-            "rank": compilation.covariance_rank,
-            "complexity": covariance_complexity,
+        "execution_fidelity": fidelity_record,
+        "backend_selection_basis": backend_selection_record,
+        "family": family_record,
+        "objective": probability["likelihood"],
+        "complexity": {
+            "covariance": covariance_complexity,
+            "lifting_edges": compilation.active_plan.depth,
+            "canonical_lifting_edges": (
+                canonical_plan.depth if canonical_plan is not None else None
+            ),
+            "parameter_counts": parameter_counts,
         },
-        "execution": {
-            "requested_backend": compilation.config.backend,
-            "selected_backend": compilation.backend,
-            "equivalence": "exact" if compilation.backend_exact else "approximate",
-            "checkpoint_coordinates_preserved": compilation.backend_exact,
-            "contraction_rank": compilation.stf_contraction_rank,
-        },
+        "compatibility_hash": None,
         "probability": probability,
         "output_scope": compilation.config.output_scope,
-        "parameter_counts": parameter_counts,
         "certificates": certificates,
-        # Stable compatibility keys retained for existing experiment records.
-        "output_irreps": str(compilation.mean_irreps),
-        "seed_irreps": str(compilation.seed_irreps),
-        "canonical_target_irreps": str(compilation.canonical_target_irreps),
-        "active_target_irreps": str(compilation.active_target_irreps),
-        "covariance_mode": compilation.covariance_mode,
-        "covariance_rank": compilation.covariance_rank,
-        "covariance_parameter_count": compilation.covariance_parameter_count,
-        "canonical_covariance_parameter_count": parameter_counts[
-            "canonical_covariance_coordinates"
-        ],
-        "active_covariance_parameter_count": compilation.covariance_parameter_count,
-        "objective_name": compilation.config.objective,
-        "backend": compilation.backend,
-        "backend_exact": compilation.backend_exact,
-        "stf_contraction_rank": compilation.stf_contraction_rank,
-        "canonical_lifting": (
-            canonical_plan.as_dict() if canonical_plan is not None else None
-        ),
-        "active_lifting": compilation.active_plan.as_dict(),
-        "graph_structure": (
-            compilation.graph_structure.as_dict()
-            if compilation.graph_structure is not None
-            else None
-        ),
     }
     return CompilationReport.from_dict(record)
