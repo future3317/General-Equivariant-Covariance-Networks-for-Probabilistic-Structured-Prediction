@@ -4,20 +4,8 @@ from __future__ import annotations
 
 import importlib
 from types import ModuleType
-import warnings
 
 import torch
-
-
-# cuEquivariance 0.10 creates a short-lived capability-probe temporary
-# directory without retaining its context manager.  Its interpreter-shutdown
-# warning is external to this project; keep the filter limited to tempfile's
-# exact message so project ResourceWarnings remain visible.
-warnings.filterwarnings(
-    "ignore",
-    message=r"Implicitly cleaning up <TemporaryDirectory",
-    category=ResourceWarning,
-)
 
 
 def load_cuequivariance() -> tuple[ModuleType, ModuleType]:
