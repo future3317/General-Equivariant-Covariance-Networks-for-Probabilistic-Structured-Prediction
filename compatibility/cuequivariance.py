@@ -17,7 +17,6 @@ warnings.filterwarnings(
     "ignore",
     message=r"Implicitly cleaning up <TemporaryDirectory",
     category=ResourceWarning,
-    module=r"tempfile",
 )
 
 
