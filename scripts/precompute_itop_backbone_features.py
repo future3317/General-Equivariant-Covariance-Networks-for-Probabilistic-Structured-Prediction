@@ -35,7 +35,9 @@ def _extract(backbone, loader, device: torch.device, *, use_bf16: bool) -> dict:
             enabled=enabled,
         ):
             node_features, graph_batch = backbone(batch)
-        records["features"].append(mean_pool(node_features, graph_batch).float().cpu())
+        # Match training exactly: the BF16 backbone output crosses the typed
+        # readout boundary in FP32 before graph pooling.
+        records["features"].append(mean_pool(node_features.float(), graph_batch).cpu())
         records["target"].append(batch.y_pose.cpu())
         records["visible_joints"].append(batch.visible_joints.cpu())
         records["frame_index"].append(batch.frame_index.cpu())
