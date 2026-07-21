@@ -233,6 +233,8 @@ def _select_executor(
     fidelity: FidelityPolicy,
     executor: ExecutorPolicy,
     cost: CostPolicy,
+    lifting_backend: str = "e3nn",
+    cueq_method: str = "naive",
 ) -> ExecutorDecision:
     context = ExecutionContext(
         feature=seed,
@@ -292,8 +294,12 @@ def _select_executor(
             feature_record=seed.as_dict(),
             output_record=semantics.as_dict(),
             active_plan_record=active_plan.as_dict(),
-            operator_record=family.assembly.semantic_dict(),
-            distribution_record=distribution.as_dict(),
+                operator_record=family.assembly.semantic_dict(),
+                distribution_record=distribution.as_dict(),
+                lowering_record={
+                    "lifting_backend": lifting_backend,
+                    "cueq_method": cueq_method,
+                },
         )
         mismatches = {
             "feature_fingerprint": (
@@ -559,6 +565,8 @@ def plan_readout(
             fidelity_policy,
             executor,
             cost,
+            lifting_backend,
+            cueq_method,
         )
         backend_selection_basis = executor_decision.selection_basis
 
