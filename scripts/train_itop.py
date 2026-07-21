@@ -40,10 +40,10 @@ from evaluation import (
     visible_occluded_mpjpe,
 )
 from models import (
-    BaselineProbabilisticPredictor,
     ControlledMeanOperatorHead,
     DeterministicHead,
     EquivariantBackbone,
+    StructuredProbabilisticPredictor,
 )
 from representations import O3IrrepsSpec
 from scripts._common import add_tensor_product_arguments, tensor_product_kwargs
@@ -113,10 +113,10 @@ def _build_model(args: argparse.Namespace):
     output = O3IrrepsSpec(ITOP_OUTPUT_GRAPH.output_irreps)
     if args.model == "deterministic":
         head = DeterministicHead(backbone.irreps_out, output, pool=True)
-        model = BaselineProbabilisticPredictor(
+        model = StructuredProbabilisticPredictor(
             backbone,
             output,
-            head,
+            joint_head=head,
             spd_map=None,
             distribution=None,
         )
@@ -357,7 +357,12 @@ def train_epoch(
         optimizer.step()
         batch_size = target.shape[0]
         total += float(loss.detach()) * batch_size
-        for name, value in result["components"].items():
+        components = (
+            {"loss_fit": loss.detach()}
+            if model.distribution is None
+            else result["components"]
+        )
+        for name, value in components.items():
             _require_finite_tensor(f"training component {name}", value)
             component_totals[name] += float(value) * batch_size
         count += batch_size
@@ -450,7 +455,12 @@ def evaluate(
         _require_finite_tensor("evaluation loss", result["loss"])
         _require_finite_tensor("evaluation mean", result["mu"])
         total_loss += float(result["loss"]) * batch_size
-        for name, value in result["components"].items():
+        components = (
+            {"loss_fit": result["loss"].detach()}
+            if model_kind == "deterministic"
+            else result["components"]
+        )
+        for name, value in components.items():
             _require_finite_tensor(f"evaluation component {name}", value)
             component_totals[name] += float(value) * batch_size
         count += batch_size

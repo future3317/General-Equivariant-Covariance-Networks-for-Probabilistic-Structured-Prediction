@@ -37,6 +37,7 @@ class _TinyCachedFeatureModel(torch.nn.Module):
         super().__init__()
         self.backbone = torch.nn.Identity()
         self.readout = torch.nn.Linear(3, 45)
+        self.distribution = object()
         self.failure = failure
 
     def forward_from_features(

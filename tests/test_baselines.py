@@ -11,7 +11,7 @@ from models import (
     DeterministicHead,
     IsotropicCovarianceHead,
     IrrepBlockDiagonalCovarianceHead,
-    BaselineProbabilisticPredictor,
+    StructuredProbabilisticPredictor,
 )
 from distributions import GaussianNLL
 
@@ -104,30 +104,30 @@ def test_irrep_block_diag_head_and_map(output_irreps):
     assert eigs.min().item() > 0
 
 
-def test_baseline_predictor_isotropic():
+def test_structured_predictor_with_isotropic_head():
     output_spec = O3IrrepsSpec("0e + 2e")
     backbone = EquivariantBackbone(
         hidden_dim=16, lmax=2, num_layers=1, atom_feature_dim=49, num_basis=8
     )
     head = IsotropicCovarianceHead(backbone.irreps_out, output_spec, pool=True)
     spd_map = IsotropicMap(dim=output_spec.dim)
-    model = BaselineProbabilisticPredictor(
+    model = StructuredProbabilisticPredictor(
         backbone=backbone,
         output_spec=output_spec,
-        baseline_head=head,
+        joint_head=head,
         spd_map=spd_map,
         distribution=GaussianNLL(),
     )
     data = _make_graph_data()
     target = torch.randn(2, output_spec.dim)
-    result = model(data, target=target)
+    result = model(data, target=target, return_scale=True)
     assert "mu" in result
     assert "scale" in result
     assert "loss" in result
     result["loss"].backward()
 
 
-def test_deterministic_baseline_uses_unified_predictor_path():
+def test_deterministic_head_uses_structured_predictor_directly():
     output_spec = O3IrrepsSpec("0e + 2e")
     backbone = EquivariantBackbone(
         hidden_dim=8,
@@ -136,15 +136,13 @@ def test_deterministic_baseline_uses_unified_predictor_path():
         atom_feature_dim=49,
         num_basis=8,
     )
-    model = BaselineProbabilisticPredictor(
+    model = StructuredProbabilisticPredictor(
         backbone=backbone,
         output_spec=output_spec,
-        baseline_head=DeterministicHead(backbone.irreps_out, output_spec),
+        joint_head=DeterministicHead(backbone.irreps_out, output_spec),
         spd_map=None,
         distribution=None,
     )
     target = torch.randn(2, output_spec.dim)
     result = model(_make_graph_data(), target=target)
     assert set(result) == {"mu", "loss"}
-    assert model.baseline_head is model.joint_head
-    assert not any(key.startswith("baseline_head.") for key in model.state_dict())

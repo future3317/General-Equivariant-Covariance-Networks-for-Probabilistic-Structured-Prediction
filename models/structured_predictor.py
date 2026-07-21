@@ -154,9 +154,7 @@ class StructuredProbabilisticPredictor(torch.nn.Module):
             if self.spd_map is not None:
                 raise TypeError("a probabilistic joint_head must return (mu, params)")
             if target is not None:
-                loss = torch.nn.functional.mse_loss(mu, target)
-                result["loss"] = loss
-                result["components"] = {"loss_fit": loss.detach()}
+                result["loss"] = torch.nn.functional.mse_loss(mu, target)
             return result
 
         if self.spd_map is None or self.distribution is None:
