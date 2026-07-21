@@ -117,6 +117,29 @@ class StructuredProbabilisticPredictor(torch.nn.Module):
             provided.
         """
         node_features, batch = self.backbone(data)
+        return self.forward_from_features(
+            node_features,
+            batch,
+            target=target,
+            return_scale=return_scale,
+            return_precision=return_precision,
+        )
+
+    def forward_from_features(
+        self,
+        node_features: torch.Tensor,
+        batch: torch.Tensor,
+        *,
+        target: torch.Tensor | None = None,
+        return_scale: bool = False,
+        return_precision: bool = False,
+    ) -> dict[str, torch.Tensor | dict[str, torch.Tensor]]:
+        """Evaluate the typed readout from already computed backbone features.
+
+        This boundary supports frozen-backbone studies and mixed precision in
+        which the backbone runs under autocast while operator assembly and the
+        proper likelihood remain in FP32.
+        """
         mu, params = self._predict(node_features, batch)
         result: dict[str, torch.Tensor | dict[str, torch.Tensor]] = {"mu": mu}
 

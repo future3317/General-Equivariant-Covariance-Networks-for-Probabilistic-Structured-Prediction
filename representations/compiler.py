@@ -104,7 +104,9 @@ class O3Compilation:
     def active_plan(self) -> O3LiftingPlan:
         plan = self.active_reachability.plan
         if plan is None:
-            raise RuntimeError("a completed compilation must have an active lifting plan")
+            raise RuntimeError(
+                "a completed compilation must have an active lifting plan"
+            )
         return plan
 
     @property
@@ -229,9 +231,11 @@ class O3ProgramCompiler:
         output_irreps = self.output_spec.irreps
         covariance_irreps = self.output_spec.symmetric_square_irreps
         canonical_target = direct_sum_irreps(output_irreps, covariance_irreps)
-        active_target = operator_family.active_expression(
-            self._output_expression()
-        ).decompose_o3().irreps
+        active_target = (
+            operator_family.active_expression(self._output_expression())
+            .decompose_o3()
+            .irreps
+        )
 
         if canonical_reachability is None:
             canonical_reachability = analyze_lifting_graph(seed, canonical_target)
@@ -358,9 +362,9 @@ class O3CompiledOutputHead(torch.nn.Module):
         self.mean_projection = o3.Linear(active_irreps, self.output_spec.irreps)
         install_parameter_projections(self)
 
-    def forward(
-        self, node_features: torch.Tensor, batch: torch.Tensor | None = None
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    def _compiled_features(
+        self, node_features: torch.Tensor, batch: torch.Tensor | None
+    ) -> torch.Tensor:
         hidden = node_features
         if self.pool:
             if batch is None:
@@ -368,7 +372,19 @@ class O3CompiledOutputHead(torch.nn.Module):
             from models.pooling import mean_pool
 
             hidden = mean_pool(hidden, batch)
-        compiled = self.lifting(hidden)
+        return self.lifting(hidden)
+
+    def forward_parameters(
+        self, node_features: torch.Tensor, batch: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        """Project only certified operator parameters from input features."""
+        compiled = self._compiled_features(node_features, batch)
+        return project_parameter_bindings(self, compiled)
+
+    def forward(
+        self, node_features: torch.Tensor, batch: torch.Tensor | None = None
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        compiled = self._compiled_features(node_features, batch)
         mean = self.mean_projection(compiled)
         parameters = project_parameter_bindings(self, compiled)
         return mean, parameters

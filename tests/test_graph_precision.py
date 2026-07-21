@@ -5,6 +5,7 @@ import math
 import torch
 from e3nn import o3
 
+from data.itop_dataset import ITOP_INDEPENDENT_GRAPH
 from distributions import GaussianNLL, StudentTNLL
 from equivcompiler import (
     FeatureSpec,
@@ -17,6 +18,7 @@ from equivcompiler import (
 )
 from representations import (
     EquivariantOutputGraph,
+    O3IrrepsSpec,
 )
 from spd_maps import GraphStructuredPrecisionMap
 
@@ -137,6 +139,24 @@ def test_cyclic_graph_uses_dense_logdet_path():
     precision = spd_map.precision(params)
     expected = -torch.linalg.slogdet(precision).logabsdet
     torch.testing.assert_close(spd_map.logdet(params), expected, atol=2e-5, rtol=2e-5)
+
+
+def test_edgeless_graph_uses_exact_independent_joint_logdet():
+    graph = EquivariantOutputGraph(num_nodes=15, edges=(), node_irrep="1o")
+    spd_map = GraphStructuredPrecisionMap(graph)
+    raw = torch.randn(2, graph.num_potentials, 3, 3, dtype=torch.float64)
+    params = 0.5 * (raw + raw.transpose(-1, -2))
+    precision = spd_map.precision(params)
+    expected = -torch.linalg.slogdet(precision).logabsdet
+    torch.testing.assert_close(spd_map.logdet(params), expected, atol=1e-10, rtol=1e-10)
+
+
+def test_itop_independent_joint_family_has_fifteen_full_3x3_blocks():
+    plan = GraphPrecision(ITOP_INDEPENDENT_GRAPH).compile(
+        O3IrrepsSpec(ITOP_INDEPENDENT_GRAPH.output_irreps)
+    )
+    assert plan.parameter_count == 15 * 6
+    assert plan.graph.num_edges == 0
 
 
 def test_graph_precision_equivariance():

@@ -346,20 +346,32 @@ python -m scripts.precompute_modelnet40_graphs \
 # Download only ITOP depth/label files, compact labels, and skip point clouds.
 python -m scripts.download_itop --view side
 
-# ITOP standard side-view protocol with graph precision selected at B=192.
-python -m scripts.train_itop \
-  --protocol side --covariance auto \
-  --parameter_budget 192 --num_points 1024 --device cuda
+# Dry-run the complete one-seed/256-point development schedule. The runner
+# exposes exactly one physical GPU to all children and never launches DDP.
+python -m scripts.run_itop_study \
+  --data_dir /home/workspace/lrh/DATA/Tpami/ITOP \
+  --study_dir /home/workspace/lrh/RESULTS/Tpami/ITOP \
+  --profile development --gpu 3 --dry_run
 
-# Cross-view OOD protocols use the same entry point.
-python -m scripts.train_itop --protocol side_to_top --device cuda
+# Remove --dry_run to execute. The final protocol uses 512 points and seeds
+# 42/43/44 on the same single GPU. Completed stages are skipped, interrupted
+# training resumes from last_state.pt, and patience is five validation epochs.
+python -m scripts.run_itop_study \
+  --data_dir /home/workspace/lrh/DATA/Tpami/ITOP \
+  --study_dir /home/workspace/lrh/RESULTS/Tpami/ITOP \
+  --profile final --gpu 3
 ```
 
 The ITOP loader reconstructs XYZ points from the documented depth calibration,
 centers only by the observable point-cloud centroid, filters invalid frames,
-and preserves joint visibility for visible/occluded calibration analysis. It
-supports depth noise, point dropout, synthetic occlusion, and 256--2048 point
-input budgets without using ground-truth torso centering.
+and preserves joint visibility for visible/occluded calibration analysis. The
+controlled study trains a deterministic model, caches its frozen pooled
+features, then compares independent-joint Gaussian, graph Gaussian, and graph
+Student-t operators behind the same frozen backbone and deterministic mean
+readout. It reports side-view IID and side-to-top OOD accuracy, likelihood,
+calibration, risk--coverage, occlusion, and residual-correlation metrics. The
+development/final point budgets are 256/512; no ground-truth torso centering is
+used.
 
 Each training run writes `compilation.json` beside its checkpoint so the exact
 representation target, lifting stages, covariance complexity, execution

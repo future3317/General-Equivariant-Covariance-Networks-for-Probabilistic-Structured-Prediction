@@ -9,6 +9,7 @@ from typing import Literal
 import torch
 from compatibility.cuequivariance import load_cuequivariance
 from compatibility.e3nn import FullyConnectedNet, Gate, o3
+from data.point_cloud_graph import compute_edge_features
 
 
 TENSOR_PRODUCT_BACKENDS = ("e3nn", "cueq")
@@ -287,9 +288,21 @@ class EquivariantBackbone(torch.nn.Module):
         batch = data.batch
         edge_src = data.edge_index[0]
         edge_dst = data.edge_index[1]
-        edge_attr = data.edge_sh
-        edge_length_embedding = data.edge_rbf
-        edge_weights = data.edge_weights
+        if all(hasattr(data, name) for name in ("edge_sh", "edge_rbf", "edge_weights")):
+            edge_attr = data.edge_sh
+            edge_length_embedding = data.edge_rbf
+            edge_weights = data.edge_weights
+        else:
+            edge_features = compute_edge_features(
+                data.pos,
+                data.edge_index,
+                self.max_radius,
+                self.num_basis,
+                self.lmax,
+            )
+            edge_attr = edge_features["edge_sh"]
+            edge_length_embedding = edge_features["edge_rbf"]
+            edge_weights = edge_features["edge_weights"]
         node_counts = torch.bincount(edge_dst, minlength=node_feats.size(0)).to(
             dtype=node_feats.dtype
         )

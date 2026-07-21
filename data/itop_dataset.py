@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import json
 from pathlib import Path
 
 import h5py
@@ -58,6 +59,29 @@ ITOP_OUTPUT_GRAPH = EquivariantOutputGraph(
     node_irrep="1o",
     node_names=ITOP_JOINT_NAMES,
 )
+ITOP_INDEPENDENT_GRAPH = EquivariantOutputGraph(
+    num_nodes=15,
+    edges=(),
+    node_irrep="1o",
+    node_names=ITOP_JOINT_NAMES,
+)
+
+
+def itop_train_validation_indices(
+    length: int,
+    *,
+    seed: int,
+    val_fraction: float = 0.1,
+) -> tuple[list[int], list[int]]:
+    """Return the canonical deterministic ITOP train/validation split."""
+    if length < 2:
+        raise ValueError("ITOP training split must contain at least two samples")
+    if not 0.0 < val_fraction < 1.0:
+        raise ValueError("val_fraction must be in (0, 1)")
+    generator = torch.Generator().manual_seed(seed)
+    permutation = torch.randperm(length, generator=generator).tolist()
+    validation_count = max(1, int(length * val_fraction))
+    return permutation[validation_count:], permutation[:validation_count]
 
 
 def resolve_itop_h5(path: str | Path) -> Path:
@@ -242,20 +266,8 @@ class ITOPDepthDataset(Dataset):
         return points[selected]
 
     def __getitem__(self, item: int) -> Data:
-        frame_index = int(self.indices[item])
-        depth = np.asarray(self._depth_data()[frame_index], dtype=np.float32)
-        if self.training and self.depth_noise_std > 0.0:
-            valid = depth > 0.0
-            noise = np.random.normal(0.0, self.depth_noise_std, depth.shape)
-            depth = depth.copy()
-            depth[valid] = np.maximum(depth[valid] + noise[valid], 1e-5)
-
-        observed = self._degrade_points(depth_to_point_cloud(depth))
-        centroid = observed.mean(axis=0, dtype=np.float64).astype(np.float32)
-        points = self._sample_points(observed - centroid)
-        joints = self.real_world_coordinates[frame_index] - centroid
-
-        pos = torch.from_numpy(points).float()
+        record = self.sample_record(item)
+        pos = torch.from_numpy(record["points"]).float()
         edge_index = knn_graph(pos, self.num_neighbors)
         edge_features = compute_edge_features(
             pos,
@@ -271,17 +283,142 @@ class ITOPDepthDataset(Dataset):
             edge_sh=edge_features["edge_sh"],
             edge_rbf=edge_features["edge_rbf"],
             edge_weights=edge_features["edge_weights"],
-            y_pose=torch.from_numpy(joints.reshape(1, -1)).float(),
+            y_pose=torch.from_numpy(record["joints"].reshape(1, -1)).float(),
+            visible_joints=torch.from_numpy(record["visible_joints"].reshape(1, -1)),
+            centroid=torch.from_numpy(record["centroid"].reshape(1, 3)).float(),
+            frame_index=torch.tensor([record["frame_index"]], dtype=torch.long),
+            view_id=torch.tensor([record["view_id"]], dtype=torch.long),
+        )
+
+    def sample_record(self, item: int) -> dict[str, np.ndarray | int]:
+        """Return the deterministic geometric record before graph featurization."""
+        frame_index = int(self.indices[item])
+        depth = np.asarray(self._depth_data()[frame_index], dtype=np.float32)
+        if self.training and self.depth_noise_std > 0.0:
+            valid = depth > 0.0
+            noise = np.random.normal(0.0, self.depth_noise_std, depth.shape)
+            depth = depth.copy()
+            depth[valid] = np.maximum(depth[valid] + noise[valid], 1e-5)
+
+        observed = self._degrade_points(depth_to_point_cloud(depth))
+        centroid = observed.mean(axis=0, dtype=np.float64).astype(np.float32)
+        points = self._sample_points(observed - centroid)
+        joints = self.real_world_coordinates[frame_index] - centroid
+
+        return {
+            "points": points,
+            "joints": joints,
+            "visible_joints": self.visible_joints[frame_index],
+            "centroid": centroid,
+            "frame_index": frame_index,
+            "view_id": 0 if self.view == "side" else 1,
+        }
+
+
+def itop_cache_dir(
+    data_dir: str | Path,
+    view: str,
+    split: str,
+    num_points: int,
+    num_neighbors: int,
+) -> Path:
+    """Return the parameter-bound deterministic geometry-cache directory."""
+    return (
+        Path(data_dir)
+        / "cache"
+        / (f"{view}_{split}_n{num_points}_k{num_neighbors}_centered_v1")
+    )
+
+
+class ITOPCachedDataset(Dataset):
+    """Memory-mapped deterministic ITOP point clouds and exact k-NN indices."""
+
+    def __init__(
+        self,
+        cache_dir: str | Path,
+        *,
+        view: str,
+        num_points: int,
+        num_neighbors: int,
+    ):
+        self.cache_dir = Path(cache_dir)
+        metadata_path = self.cache_dir / "metadata.json"
+        if not metadata_path.is_file():
+            raise FileNotFoundError(metadata_path)
+        self.metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        expected = {
+            "schema_version": 1,
+            "view": view,
+            "num_points": num_points,
+            "num_neighbors": num_neighbors,
+            "centering": "observable_point_cloud_centroid",
+            "sampling": "deterministic_linspace_over_valid_depth_points",
+        }
+        mismatches = {
+            key: {"cache": self.metadata.get(key), "requested": value}
+            for key, value in expected.items()
+            if self.metadata.get(key) != value
+        }
+        if mismatches:
+            raise ValueError(f"ITOP cache contract mismatch: {mismatches}")
+        self.view = view
+        self.num_points = num_points
+        self.num_neighbors = num_neighbors
+        self.points = np.load(self.cache_dir / "points.npy", mmap_mode="r")
+        self.neighbors = np.load(self.cache_dir / "neighbors.npy", mmap_mode="r")
+        self.joints = np.load(self.cache_dir / "joints.npy", mmap_mode="r")
+        self.visible_joints = np.load(
+            self.cache_dir / "visible_joints.npy", mmap_mode="r"
+        )
+        self.centroids = np.load(self.cache_dir / "centroids.npy", mmap_mode="r")
+        self.frame_indices = np.load(
+            self.cache_dir / "frame_indices.npy", mmap_mode="r"
+        )
+        count = int(self.metadata["num_samples"])
+        expected_shapes = {
+            "points": (count, num_points, 3),
+            "neighbors": (count, num_points, num_neighbors),
+            "joints": (count, 15, 3),
+            "visible_joints": (count, 15),
+            "centroids": (count, 3),
+            "frame_indices": (count,),
+        }
+        for name, shape in expected_shapes.items():
+            if getattr(self, name).shape != shape:
+                raise ValueError(
+                    f"ITOP cache {name} shape {getattr(self, name).shape} != {shape}"
+                )
+
+    def __len__(self) -> int:
+        return len(self.points)
+
+    def __getitem__(self, item: int) -> Data:
+        # Copy read-only memory maps into writable tensors to keep PyTorch's
+        # tensor conversion warning-free and worker-safe.
+        pos = torch.from_numpy(np.array(self.points[item], copy=True)).float()
+        targets = torch.from_numpy(
+            np.array(self.neighbors[item], dtype=np.int64, copy=True).reshape(-1)
+        )
+        sources = torch.arange(self.num_points).repeat_interleave(self.num_neighbors)
+        return Data(
+            pos=pos,
+            z=torch.zeros(self.num_points, dtype=torch.long),
+            edge_index=torch.stack((sources, targets)),
+            y_pose=torch.from_numpy(
+                np.array(self.joints[item], copy=True).reshape(1, -1)
+            ).float(),
             visible_joints=torch.from_numpy(
-                self.visible_joints[frame_index].reshape(1, -1)
+                np.array(self.visible_joints[item], copy=True).reshape(1, -1)
             ),
-            centroid=torch.from_numpy(centroid.reshape(1, 3)).float(),
-            frame_index=torch.tensor([frame_index], dtype=torch.long),
+            centroid=torch.from_numpy(
+                np.array(self.centroids[item], copy=True).reshape(1, 3)
+            ).float(),
+            frame_index=torch.tensor([int(self.frame_indices[item])], dtype=torch.long),
             view_id=torch.tensor([0 if self.view == "side" else 1], dtype=torch.long),
         )
 
 
-def _itop_paths(data_dir: Path, view: str, split: str) -> tuple[Path, Path]:
+def itop_paths(data_dir: Path, view: str, split: str) -> tuple[Path, Path]:
     depth = resolve_itop_h5(data_dir / f"ITOP_{view}_{split}_depth_map.h5")
     compact = data_dir / f"ITOP_{view}_{split}_labels_compact.npz"
     labels = (
@@ -312,12 +449,13 @@ def get_itop_loaders(
     depth_noise_std: float = 0.0,
     point_dropout: float = 0.0,
     occlusion_fraction: float = 0.0,
+    use_cache: bool = True,
 ) -> tuple[PyGDataLoader, PyGDataLoader, PyGDataLoader]:
     """Build standard or cross-view ITOP train/validation/test loaders."""
     data_dir = dataset_dir(data_dir, "ITOP")
     test_view = test_view or train_view
-    train_depth, train_labels = _itop_paths(data_dir, train_view, "train")
-    test_depth, test_labels = _itop_paths(data_dir, test_view, "test")
+    train_depth, train_labels = itop_paths(data_dir, train_view, "train")
+    test_depth, test_labels = itop_paths(data_dir, test_view, "test")
     shared = dict(
         num_points=num_points,
         num_neighbors=num_neighbors,
@@ -325,28 +463,58 @@ def get_itop_loaders(
         num_basis=num_basis,
         lmax=lmax,
     )
-    train_full = ITOPDepthDataset(
-        train_depth,
-        train_labels,
-        view=train_view,
-        training=True,
-        depth_noise_std=depth_noise_std,
-        point_dropout=point_dropout,
-        occlusion_fraction=occlusion_fraction,
-        **shared,
+    train_cache = itop_cache_dir(
+        data_dir, train_view, "train", num_points, num_neighbors
     )
-    validation_full = ITOPDepthDataset(
-        train_depth, train_labels, view=train_view, training=False, **shared
+    test_cache = itop_cache_dir(data_dir, test_view, "test", num_points, num_neighbors)
+    cache_is_compatible = (
+        use_cache
+        and depth_noise_std == 0.0
+        and point_dropout == 0.0
+        and occlusion_fraction == 0.0
+        and train_cache.is_dir()
+        and test_cache.is_dir()
     )
-    test_dataset = ITOPDepthDataset(
-        test_depth, test_labels, view=test_view, training=False, **shared
-    )
+    if cache_is_compatible:
+        train_full = ITOPCachedDataset(
+            train_cache,
+            view=train_view,
+            num_points=num_points,
+            num_neighbors=num_neighbors,
+        )
+        validation_full = ITOPCachedDataset(
+            train_cache,
+            view=train_view,
+            num_points=num_points,
+            num_neighbors=num_neighbors,
+        )
+        test_dataset = ITOPCachedDataset(
+            test_cache,
+            view=test_view,
+            num_points=num_points,
+            num_neighbors=num_neighbors,
+        )
+    else:
+        train_full = ITOPDepthDataset(
+            train_depth,
+            train_labels,
+            view=train_view,
+            training=True,
+            depth_noise_std=depth_noise_std,
+            point_dropout=point_dropout,
+            occlusion_fraction=occlusion_fraction,
+            **shared,
+        )
+        validation_full = ITOPDepthDataset(
+            train_depth, train_labels, view=train_view, training=False, **shared
+        )
+        test_dataset = ITOPDepthDataset(
+            test_depth, test_labels, view=test_view, training=False, **shared
+        )
 
-    generator = torch.Generator().manual_seed(seed)
-    permutation = torch.randperm(len(train_full), generator=generator).tolist()
-    validation_count = max(1, int(len(permutation) * val_fraction))
-    validation_indices = permutation[:validation_count]
-    train_indices = permutation[validation_count:]
+    train_indices, validation_indices = itop_train_validation_indices(
+        len(train_full), seed=seed, val_fraction=val_fraction
+    )
     train_dataset = Subset(train_full, train_indices)
     validation_dataset = Subset(validation_full, validation_indices)
 
@@ -358,9 +526,73 @@ def get_itop_loaders(
     if num_workers > 0 and prefetch_factor is not None:
         loader_kwargs["prefetch_factor"] = prefetch_factor
     return (
-        PyGDataLoader(train_dataset, batch_size=batch_size, shuffle=True, **loader_kwargs),
+        PyGDataLoader(
+            train_dataset, batch_size=batch_size, shuffle=True, **loader_kwargs
+        ),
         PyGDataLoader(
             validation_dataset, batch_size=batch_size, shuffle=False, **loader_kwargs
         ),
-        PyGDataLoader(test_dataset, batch_size=batch_size, shuffle=False, **loader_kwargs),
+        PyGDataLoader(
+            test_dataset, batch_size=batch_size, shuffle=False, **loader_kwargs
+        ),
     )
+
+
+def get_itop_split_loader(
+    data_dir: str | Path | None = None,
+    *,
+    view: str,
+    split: str,
+    batch_size: int,
+    num_points: int,
+    num_neighbors: int,
+    max_radius: float,
+    num_basis: int,
+    lmax: int,
+    num_workers: int = 0,
+    pin_memory: bool = False,
+    persistent_workers: bool = False,
+    prefetch_factor: int | None = None,
+    use_cache: bool = True,
+) -> PyGDataLoader:
+    """Build one deterministic split loader without unrelated datasets."""
+    if split not in {"train", "test"}:
+        raise ValueError("split must be 'train' or 'test'")
+    root = dataset_dir(data_dir, "ITOP")
+    cache = itop_cache_dir(root, view, split, num_points, num_neighbors)
+    if use_cache and cache.is_dir():
+        dataset = ITOPCachedDataset(
+            cache,
+            view=view,
+            num_points=num_points,
+            num_neighbors=num_neighbors,
+        )
+    else:
+        depth, labels = itop_paths(root, view, split)
+        dataset = ITOPDepthDataset(
+            depth,
+            labels,
+            view=view,
+            num_points=num_points,
+            num_neighbors=num_neighbors,
+            max_radius=max_radius,
+            num_basis=num_basis,
+            lmax=lmax,
+            training=False,
+        )
+    loader_kwargs = {
+        "num_workers": num_workers,
+        "pin_memory": pin_memory,
+        "persistent_workers": persistent_workers and num_workers > 0,
+    }
+    if num_workers > 0 and prefetch_factor is not None:
+        loader_kwargs["prefetch_factor"] = prefetch_factor
+    return PyGDataLoader(dataset, batch_size=batch_size, shuffle=False, **loader_kwargs)
+
+
+def get_itop_test_loader(
+    data_dir: str | Path | None = None,
+    **kwargs,
+) -> PyGDataLoader:
+    """Compatibility name for a deterministic ITOP test loader."""
+    return get_itop_split_loader(data_dir, split="test", **kwargs)

@@ -1,17 +1,24 @@
 """Tests for the lightweight ITOP depth-map pipeline."""
 
 import h5py
+import json
 import numpy as np
+import pytest
 import torch
 
 from data.itop_dataset import (
+    ITOPCachedDataset,
     ITOPDepthDataset,
     ITOP_OUTPUT_GRAPH,
     compact_itop_labels,
     depth_to_point_cloud,
+    itop_train_validation_indices,
 )
+from data.itop_features import get_itop_feature_loaders
 from equivcompiler import FeatureSpec, GraphPrecision, plan_readout
-from models import EquivariantBackbone
+from models import ControlledMeanOperatorHead, DeterministicHead, EquivariantBackbone
+from representations import O3IrrepsSpec
+from scripts.precompute_itop_geometry import write_itop_geometry_cache
 
 
 def _write_fixture(tmp_path):
@@ -118,3 +125,136 @@ def test_itop_sample_runs_through_compiled_graph_precision_model(tmp_path):
     assert result["params"].shape == (1, 174)
     assert result["precision"].shape == (1, 45, 45)
     assert torch.isfinite(result["loss"])
+
+
+def test_controlled_itop_readout_shares_mean_and_compiles_operator_parameters():
+    backbone = EquivariantBackbone(
+        hidden_dim=4,
+        lmax=2,
+        num_layers=1,
+        num_basis=4,
+        atom_feature_dim=4,
+        atom_features="learnable",
+    )
+    output = O3IrrepsSpec(ITOP_OUTPUT_GRAPH.output_irreps)
+    plan = plan_readout(
+        FeatureSpec.from_backbone(backbone),
+        output=output.irreps,
+        covariance=GraphPrecision(ITOP_OUTPUT_GRAPH),
+        output_scope="global",
+    )
+    direct_mean = DeterministicHead(backbone.irreps_out, output, pool=True)
+    controlled = ControlledMeanOperatorHead(
+        direct_mean,
+        plan.compilation.build_head(),
+    )
+    features = torch.randn(7, backbone.irreps_out.dim)
+    batch = torch.tensor([0, 0, 0, 1, 1, 1, 1])
+    mean, parameters = controlled(features, batch)
+    torch.testing.assert_close(mean, direct_mean(features, batch))
+    assert parameters.shape == (2, 174)
+    assert not any(
+        parameter.requires_grad
+        for parameter in controlled.operator_head.mean_projection.parameters()
+    )
+
+
+def test_precomputed_itop_geometry_is_exact_and_gpu_featurizable(tmp_path):
+    root = tmp_path / "ITOP"
+    root.mkdir()
+    depth_path, labels_path = _write_fixture(tmp_path)
+    expected_depth = root / "ITOP_side_train_depth_map.h5"
+    expected_labels = root / "ITOP_side_train_labels.h5"
+    depth_path.replace(expected_depth)
+    labels_path.replace(expected_labels)
+    cache = write_itop_geometry_cache(
+        root,
+        view="side",
+        split="train",
+        num_points=8,
+        num_neighbors=2,
+    )
+    dataset = ITOPCachedDataset(
+        cache,
+        view="side",
+        num_points=8,
+        num_neighbors=2,
+    )
+    sample = dataset[0]
+    assert sample.edge_index.shape == (2, 16)
+    assert not hasattr(sample, "edge_sh")
+    sample.batch = torch.zeros(8, dtype=torch.long)
+    backbone = EquivariantBackbone(
+        hidden_dim=4,
+        max_radius=0.5,
+        lmax=2,
+        num_layers=1,
+        num_basis=4,
+        atom_feature_dim=4,
+        atom_features="learnable",
+    )
+    node_features, batch = backbone(sample)
+    assert node_features.shape[0] == 8
+    assert batch.shape == (8,)
+
+
+def _write_feature_cache(root, checkpoint, *, checkpoint_hash):
+    from data.itop_features import sha256_file
+
+    root.mkdir()
+    fields = {
+        "features": torch.randn(20, 4),
+        "target": torch.randn(20, 45),
+        "visible_joints": torch.ones(20, 15, dtype=torch.bool),
+        "frame_index": torch.arange(20),
+        "view_id": torch.zeros(20, dtype=torch.long),
+    }
+    torch.save(fields, root / "side_train.pt")
+    torch.save(
+        {name: value[:4] for name, value in fields.items()}, root / "side_test.pt"
+    )
+    top = {name: value[:3] for name, value in fields.items()}
+    top["view_id"] = torch.ones(3, dtype=torch.long)
+    torch.save(top, root / "top_test.pt")
+    metadata = {
+        "backbone_checkpoint_sha256": (
+            sha256_file(checkpoint) if checkpoint_hash == "actual" else checkpoint_hash
+        )
+    }
+    (root / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+
+
+def test_feature_cache_reuses_canonical_seed_split(tmp_path):
+    checkpoint = tmp_path / "backbone.pt"
+    torch.save({"state": 1}, checkpoint)
+    cache = tmp_path / "features"
+    _write_feature_cache(cache, checkpoint, checkpoint_hash="actual")
+    train, validation, side, top, _ = get_itop_feature_loaders(
+        cache,
+        backbone_checkpoint=checkpoint,
+        seed=17,
+        batch_size=4,
+        num_workers=0,
+        pin_memory=False,
+    )
+    expected_train, expected_validation = itop_train_validation_indices(20, seed=17)
+    assert train.dataset.indices == expected_train
+    assert validation.dataset.indices == expected_validation
+    assert len(side.dataset) == 4
+    assert len(top.dataset) == 3
+
+
+def test_feature_cache_rejects_wrong_backbone_checkpoint(tmp_path):
+    checkpoint = tmp_path / "backbone.pt"
+    torch.save({"state": 1}, checkpoint)
+    cache = tmp_path / "features"
+    _write_feature_cache(cache, checkpoint, checkpoint_hash="not-the-checkpoint")
+    with pytest.raises(ValueError, match="different backbone checkpoint"):
+        get_itop_feature_loaders(
+            cache,
+            backbone_checkpoint=checkpoint,
+            seed=17,
+            batch_size=4,
+            num_workers=0,
+            pin_memory=False,
+        )

@@ -164,6 +164,14 @@ class GraphStructuredPrecisionMap(SPDMap):
         unary: torch.Tensor,
         relational: torch.Tensor,
     ) -> torch.Tensor:
+        if self.graph.num_edges == 0:
+            return -sum(
+                (
+                    self._cholesky_logdet(unary[..., node, :, :])
+                    for node in range(self.graph.num_nodes)
+                ),
+                unary.new_zeros(unary.shape[:-3]),
+            )
         if self.graph.is_tree:
             return -self._tree_logdet_precision(unary, relational)
         precision = self._precision_from_blocks(params, unary, relational)

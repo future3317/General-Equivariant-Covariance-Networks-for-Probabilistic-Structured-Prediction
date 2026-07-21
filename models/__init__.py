@@ -15,6 +15,7 @@ from models.baselines import (
     IrrepBlockDiagonalCovarianceHead,
 )
 from models.baseline_predictor import BaselineProbabilisticPredictor
+from models.controlled_readout import ControlledMeanOperatorHead
 
 __all__ = [
     "EquivariantBackbone",
@@ -28,4 +29,5 @@ __all__ = [
     "IsotropicCovarianceHead",
     "IrrepBlockDiagonalCovarianceHead",
     "BaselineProbabilisticPredictor",
+    "ControlledMeanOperatorHead",
 ]

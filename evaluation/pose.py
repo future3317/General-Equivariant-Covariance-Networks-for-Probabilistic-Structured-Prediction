@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import torch
-from scipy.stats import chi2
+from scipy.stats import chi2, f, rankdata
 
 
 def as_joint_positions(pose: torch.Tensor, num_joints: int = 15) -> torch.Tensor:
@@ -76,12 +76,115 @@ def calibration_absolute_error(
     mahalanobis2: torch.Tensor,
     degrees_of_freedom: int,
     levels: tuple[float, ...] = tuple(index / 10 for index in range(1, 10)),
+    *,
+    student_t_dof: float | None = None,
 ) -> float:
+    """Mean absolute coverage error for Gaussian or Student-t residuals."""
     values = mahalanobis2.detach().cpu().numpy().reshape(-1)
-    observed = np.array(
-        [np.mean(values <= chi2.ppf(level, df=degrees_of_freedom)) for level in levels]
-    )
+    if student_t_dof is None:
+        thresholds = [chi2.ppf(level, df=degrees_of_freedom) for level in levels]
+    else:
+        if student_t_dof <= 0:
+            raise ValueError("student_t_dof must be positive")
+        thresholds = [
+            degrees_of_freedom * f.ppf(level, dfn=degrees_of_freedom, dfd=student_t_dof)
+            for level in levels
+        ]
+    observed = np.array([np.mean(values <= threshold) for threshold in thresholds])
     return float(np.mean(np.abs(observed - np.asarray(levels))))
+
+
+def per_joint_marginal_coverage(
+    mahalanobis2: torch.Tensor,
+    *,
+    levels: tuple[float, ...] = (0.5, 0.8, 0.9, 0.95),
+    student_t_dof: float | None = None,
+) -> dict[str, list[float] | float]:
+    """Coverage of each 3D joint marginal and its aggregate MACE."""
+    if mahalanobis2.ndim != 2:
+        raise ValueError("joint mahalanobis values must have shape (frames, joints)")
+    values = mahalanobis2.detach().cpu().numpy()
+    if student_t_dof is None:
+        thresholds = [chi2.ppf(level, df=3) for level in levels]
+    else:
+        if student_t_dof <= 0:
+            raise ValueError("student_t_dof must be positive")
+        thresholds = [3 * f.ppf(level, dfn=3, dfd=student_t_dof) for level in levels]
+    observed = np.stack(
+        [(values <= threshold).mean(axis=0) for threshold in thresholds], axis=0
+    )
+    errors = np.abs(observed - np.asarray(levels)[:, None])
+    return {
+        "levels": list(levels),
+        "coverage_by_level_and_joint": observed.tolist(),
+        "mace_by_joint": errors.mean(axis=0).tolist(),
+        "mace": float(errors.mean()),
+    }
+
+
+def joint_residual_correlation(
+    pose: torch.Tensor,
+    target: torch.Tensor,
+) -> torch.Tensor:
+    """Rotation-invariant Pearson-like correlation between vector residuals."""
+    num_joints = (
+        pose.shape[-2]
+        if pose.ndim >= 3 and pose.shape[-1] == 3
+        else pose.shape[-1] // 3
+    )
+    residual = as_joint_positions(target, num_joints) - as_joint_positions(
+        pose, num_joints
+    )
+    centered = residual - residual.mean(dim=0, keepdim=True)
+    covariance = torch.einsum("fja,fka->jk", centered, centered)
+    energy = torch.diagonal(covariance).clamp_min(torch.finfo(covariance.dtype).eps)
+    return covariance / torch.sqrt(energy[:, None] * energy[None, :])
+
+
+def residual_correlation_by_graph_distance(
+    correlation: torch.Tensor,
+    edges: tuple[tuple[int, int], ...],
+) -> dict[str, float]:
+    """Average residual correlation grouped by shortest skeleton distance."""
+    if correlation.ndim != 2 or correlation.shape[0] != correlation.shape[1]:
+        raise ValueError("correlation must be a square joint matrix")
+    num_nodes = correlation.shape[0]
+    adjacency = [[] for _ in range(num_nodes)]
+    for source, target in edges:
+        adjacency[source].append(target)
+        adjacency[target].append(source)
+    grouped: dict[int, list[torch.Tensor]] = {}
+    for source in range(num_nodes):
+        distance = [-1] * num_nodes
+        distance[source] = 0
+        queue = [source]
+        for node in queue:
+            for neighbor in adjacency[node]:
+                if distance[neighbor] < 0:
+                    distance[neighbor] = distance[node] + 1
+                    queue.append(neighbor)
+        for target in range(source + 1, num_nodes):
+            if distance[target] > 0:
+                grouped.setdefault(distance[target], []).append(
+                    correlation[source, target]
+                )
+    return {
+        str(distance): float(torch.stack(values).mean().item())
+        for distance, values in sorted(grouped.items())
+    }
+
+
+def binary_auroc(scores: torch.Tensor, labels: torch.Tensor) -> float:
+    """Tie-aware AUROC for scalar uncertainty scores and binary OOD labels."""
+    scores_np = scores.detach().cpu().numpy().reshape(-1)
+    labels_np = labels.detach().cpu().numpy().astype(bool).reshape(-1)
+    positives = int(labels_np.sum())
+    negatives = len(labels_np) - positives
+    if positives == 0 or negatives == 0:
+        raise ValueError("AUROC requires both positive and negative examples")
+    ranks = rankdata(scores_np, method="average")
+    statistic = ranks[labels_np].sum() - positives * (positives + 1) / 2
+    return float(statistic / (positives * negatives))
 
 
 def visible_occluded_mpjpe(
