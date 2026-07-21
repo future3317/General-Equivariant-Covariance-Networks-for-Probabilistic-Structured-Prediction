@@ -53,6 +53,21 @@ target and whether backend lowering is algebraically exact. A budget-selected
 low-rank or graph family can therefore never be mislabeled as full covariance,
 and contraction truncation can never be mislabeled as checkpoint-equivalent.
 
+Every operator program is verified in a typed environment containing its
+named representation bindings, declared output representation, and optional
+output graph. The verifier checks parameter slices after layout conversion,
+`Sym^2(V)` and `rV` leaves, trivial-scalar primitives, multiplicity blocks,
+and graph pullback domains before executable lowering. Optimized full,
+low-rank, block, and graph maps are enabled only after exact whole-program
+template identity; the report records the template hash, binding
+correspondence, layout transform, graph identity, and rank. Near-miss programs
+use the generic recursive interpreter.
+
+For `LowRankCovariance(r)`, the isotropic term is `softplus(s) I` with no fixed
+positive floor. It is therefore strictly SPD for every finite parameter and,
+when `r >= dim(V)`, represents the same full SPD family as the unrestricted
+parameterization. For `r < dim(V)` it remains a documented strict subfamily.
+
 ## Stable staged interface
 
 The interface separates output semantics, feature reachability, lowering, and
@@ -400,6 +415,8 @@ equiv-compiler convert-checkpoint \
 | `representations/cartesian_stf.py` | Rank-2 STF-coordinate operator basis and specialized tensor square |
 | `representations/dense_projector.py` | Checkpoint-preserving multiplicity-first lowering of compiled CG stages |
 | `representations/graph_structure.py` | Typed repeated-variable output graphs |
+| `representations/operator_ir.py` | Typed operator IR and binding-aware soundness verifier |
+| `representations/operator_lowering.py` | Recursive lowering and exact-template optimization certificates |
 | `spd_maps/` | Full, block, low-rank, and graph-precision SPD maps |
 | `data/itop_dataset.py` | ITOP depth reconstruction, label compaction, and loaders |
 | `evaluation/pose.py` | Pose accuracy, calibration, risk-coverage, and sampling metrics |
@@ -426,3 +443,6 @@ parity failures, multiplicity coverage, Cartesian round trips, dense/global
 heads, complexity selection, equivariance, finite gradients, SPD validity,
 CG/STF output and gradient equivalence, projector orthogonality, explicit rank
 truncation, graph-precision algebra, and real depth-to-point-cloud data contracts.
+The suite also covers typed binding failures and optimization near-misses.
+GitHub Actions runs the CPU suite and Ruff without requiring cuEquivariance,
+Triton, or CUDA.

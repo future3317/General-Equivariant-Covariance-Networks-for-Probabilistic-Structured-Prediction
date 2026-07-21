@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable
+import hashlib
+import json
+from typing import TYPE_CHECKING, Any, Callable
 
 import torch
 from compatibility.e3nn import o3
@@ -46,7 +48,9 @@ class RecursiveOperatorMap(SPDMap):
         self._binding_slices: dict[str, slice] = {}
         cursor = 0
         for binding in compilation.operator_family.parameter_bindings:
-            self._binding_slices[binding.name] = slice(cursor, cursor + binding.dimension)
+            self._binding_slices[binding.name] = slice(
+                cursor, cursor + binding.dimension
+            )
             cursor += binding.dimension
         self.parameter_count = cursor
 
@@ -90,7 +94,12 @@ class RecursiveOperatorMap(SPDMap):
                 copies = int(attributes.get("copies", 1))
                 if copies == 0:
                     return coefficients.new_zeros(
-                        (*coefficients.shape[:-1], 0, self.graph.block_dim, self.graph.block_dim)
+                        (
+                            *coefficients.shape[:-1],
+                            0,
+                            self.graph.block_dim,
+                            self.graph.block_dim,
+                        )
                     )
                 local_count = self._local_basis.shape[0]
                 reshaped = coefficients.reshape(
@@ -124,10 +133,9 @@ class RecursiveOperatorMap(SPDMap):
             )
             lower[..., rows, cols] = children[0]
             diagonal = torch.arange(dimension, device=children[0].device)
-            lower[..., diagonal, diagonal] = (
-                torch.nn.functional.softplus(lower[..., diagonal, diagonal])
-                + float(attributes.get("minimum", 1e-4))
-            )
+            lower[..., diagonal, diagonal] = torch.nn.functional.softplus(
+                lower[..., diagonal, diagonal]
+            ) + float(attributes.get("minimum", 1e-4))
             return lower @ lower.transpose(-1, -2)
         if node.kind == "spectral_positive":
             if attributes["map"] != "matrix_exponential":
@@ -152,10 +160,14 @@ class RecursiveOperatorMap(SPDMap):
             copies = attributes.get("copies")
             if copies is not None:
                 matrices = children[0]
-                return _batched_block_diag(
-                    tuple(matrices[..., index, :, :] for index in range(int(copies)))
-                ) if int(copies) else matrices.new_zeros(
-                    (*matrices.shape[:-3], 0, 0)
+                return (
+                    _batched_block_diag(
+                        tuple(
+                            matrices[..., index, :, :] for index in range(int(copies))
+                        )
+                    )
+                    if int(copies)
+                    else matrices.new_zeros((*matrices.shape[:-3], 0, 0))
                 )
             return _batched_block_diag(children)
         if node.kind == "pullback":
@@ -197,7 +209,9 @@ class RecursiveOperatorMap(SPDMap):
             torch.diagonal(cholesky, dim1=-2, dim2=-1)
         ).sum(-1)
         if self.domain == "precision":
-            quadratic = torch.einsum("...i,...ij,...j->...", residual, operator, residual)
+            quadratic = torch.einsum(
+                "...i,...ij,...j->...", residual, operator, residual
+            )
             return -logdet_operator, quadratic
         solved = torch.cholesky_solve(residual.unsqueeze(-1), cholesky).squeeze(-1)
         return logdet_operator, torch.sum(residual * solved, dim=-1)
@@ -236,12 +250,13 @@ class OptimizedProgramMap(SPDMap):
         compilation: "O3Compilation",
         delegate: SPDMap,
         transform: Callable[[torch.Tensor], torch.Tensor],
-        optimization_name: str,
+        certificate: "OptimizationCertificate",
     ):
         super().__init__()
         self.delegate = delegate
         self._transform = transform
-        self.optimization_name = optimization_name
+        self.optimization_certificate = certificate
+        self.optimization_name = certificate.optimization_name
         self.output_dim = compilation.output_spec.dim
 
     def _transform_parameters(self, params: torch.Tensor) -> torch.Tensor:
@@ -296,6 +311,168 @@ def _binding_slices(family: OperatorFamilyPlan) -> dict[str, slice]:
     return result
 
 
+@dataclass(frozen=True)
+class OptimizationCertificate:
+    """Proof that an optimized delegate exactly matches a registered template."""
+
+    optimization_name: str
+    semantic_template_hash: str
+    operator_program_hash: str
+    binding_correspondence: tuple[tuple[str, str], ...]
+    parameter_layout_transform: tuple[str, ...]
+    operator_domain: str
+    output_dimension: int
+    graph_identity: str | None
+    rank: int | None
+    match_evidence: tuple[str, ...]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "optimization_name": self.optimization_name,
+            "semantic_template_hash": self.semantic_template_hash,
+            "operator_program_hash": self.operator_program_hash,
+            "binding_correspondence": [
+                {"template": template, "program": program}
+                for template, program in self.binding_correspondence
+            ],
+            "parameter_layout_transform": list(self.parameter_layout_transform),
+            "operator_domain": self.operator_domain,
+            "output_dimension": self.output_dimension,
+            "graph_identity": self.graph_identity,
+            "rank": self.rank,
+            "match_evidence": list(self.match_evidence),
+            "proof_scope": "exact_registered_template_identity",
+        }
+
+
+@dataclass(frozen=True)
+class _OptimizationTemplate:
+    family: OperatorFamilyPlan
+    optimization_name: str
+    parameter_layout_transform: tuple[str, ...]
+
+
+def _stable_hash(record: dict[str, Any]) -> str:
+    payload = json.dumps(record, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _graph_identity(family: OperatorFamilyPlan) -> str | None:
+    return _stable_hash(family.graph.as_dict()) if family.graph is not None else None
+
+
+def _optimization_semantics(family: OperatorFamilyPlan) -> dict[str, Any]:
+    return {
+        "operator_program": family.assembly.semantic_dict(),
+        "bindings": [
+            {
+                "name": binding.name,
+                "expression": binding.expression.as_dict(),
+                "dimension": binding.dimension,
+            }
+            for binding in family.parameter_bindings
+        ],
+        "parameter_count": family.parameter_count,
+        "output_irreps": str(family.output_irreps),
+        "domain": family.domain,
+        "rank": family.rank,
+        "graph": family.graph.as_dict() if family.graph is not None else None,
+    }
+
+
+def _registered_optimization_templates(
+    family: OperatorFamilyPlan,
+) -> tuple[_OptimizationTemplate, ...]:
+    from equivcompiler.policies import (
+        FullCovariance,
+        GraphPrecision,
+        IsotypicBlockCovariance,
+        LowRankCovariance,
+    )
+    from representations.o3_irreps import O3IrrepsSpec
+
+    output = O3IrrepsSpec(family.output_irreps)
+    templates = [
+        _OptimizationTemplate(
+            FullCovariance().compile(output),
+            "spectral_trace_and_exponential_oracle",
+            ("operator: Sym^2(V) coefficients -> dense symmetric generator",),
+        ),
+    ]
+    try:
+        block = IsotypicBlockCovariance().compile(output)
+    except ValueError:
+        block = None
+    if block is not None:
+        templates.append(
+            _OptimizationTemplate(
+                block,
+                "multiplicity_block_oracle",
+                ("blocks: identity ordering over registered multiplicity blocks",),
+            )
+        )
+    if family.rank is not None and family.rank > 0:
+        templates.append(
+            _OptimizationTemplate(
+                LowRankCovariance(family.rank).compile(output),
+                "woodbury_and_determinant_lemma_oracle",
+                (
+                    "factor: irrep-major rV -> copy-major (d,r) matrix",
+                    "scale: append the exact scalar primitive parameter",
+                ),
+            )
+        )
+    if family.graph is not None:
+        templates.append(
+            _OptimizationTemplate(
+                GraphPrecision(family.graph).compile(output),
+                "graph_elimination_or_dense_precision_oracle",
+                (
+                    "potentials: irrep-major copies -> potential-major coefficients",
+                    "potentials: expand each local Sym^2(V0) coefficient in its basis",
+                ),
+            )
+        )
+    return tuple(templates)
+
+
+def match_optimized_program(
+    family: OperatorFamilyPlan,
+) -> OptimizationCertificate | None:
+    """Return a certificate only for exact typed whole-program identity."""
+    actual = _optimization_semantics(family)
+    for template in _registered_optimization_templates(family):
+        expected = _optimization_semantics(template.family)
+        if actual != expected:
+            continue
+        bindings = tuple(
+            (expected_binding.name, actual_binding.name)
+            for expected_binding, actual_binding in zip(
+                template.family.parameter_bindings,
+                family.parameter_bindings,
+            )
+        )
+        return OptimizationCertificate(
+            optimization_name=template.optimization_name,
+            semantic_template_hash=_stable_hash(expected),
+            operator_program_hash=family.assembly.fingerprint,
+            binding_correspondence=bindings,
+            parameter_layout_transform=template.parameter_layout_transform,
+            operator_domain=family.domain,
+            output_dimension=family.output_irreps.dim,
+            graph_identity=_graph_identity(family),
+            rank=family.rank,
+            match_evidence=(
+                "complete_operator_tree_identity",
+                "typed_binding_expression_identity",
+                "parameter_slice_and_layout_identity",
+                "operator_domain_and_output_identity",
+                "graph_and_rank_metadata_identity",
+            ),
+        )
+    return None
+
+
 def _try_optimized_map(compilation: "O3Compilation") -> OptimizedProgramMap | None:
     from spd_maps import (
         GraphStructuredPrecisionMap,
@@ -305,55 +482,57 @@ def _try_optimized_map(compilation: "O3Compilation") -> OptimizedProgramMap | No
     )
 
     family = compilation.operator_family
-    root = family.assembly
     slices = _binding_slices(family)
-    if (
-        root.kind == "spectral_positive"
-        and len(root.inputs) == 1
-        and root.inputs[0].kind == "symmetric_operator"
-        and root.attribute_dict().get("map") == "matrix_exponential"
-    ):
+    certificate = match_optimized_program(family)
+    if certificate is None:
+        return None
+    if certificate.optimization_name == "spectral_trace_and_exponential_oracle":
         basis = O3SymmetricOperatorBasis(compilation.output_spec.irreps).basis
 
         def full_transform(params: torch.Tensor) -> torch.Tensor:
             coefficients = params[..., slices["operator"]]
-            return symmetrize(torch.einsum("...q,qij->...ij", coefficients, basis.to(params)))
+            return symmetrize(
+                torch.einsum("...q,qij->...ij", coefficients, basis.to(params))
+            )
 
         return OptimizedProgramMap(
             compilation,
             MatrixExponentialMap(),
             full_transform,
-            "spectral_trace_and_exponential_oracle",
+            certificate,
         )
 
-    child_kinds = {child.kind for child in root.inputs}
-    if root.kind == "add" and child_kinds == {"gram", "positive_scalar_identity"}:
-        rank = int(family.rank or 0)
+    if certificate.optimization_name == "woodbury_and_determinant_lemma_oracle":
+        rank = int(certificate.rank or 0)
         factor_layout = RepeatedIrrepLayout(compilation.output_spec.irreps, rank)
+        minimum = float(family.assembly.inputs[0].attribute_dict()["minimum"])
 
         def low_rank_transform(params: torch.Tensor) -> torch.Tensor:
-            factors = factor_layout.pack(params[..., slices["factor"]]).transpose(-1, -2)
+            factors = factor_layout.pack(params[..., slices["factor"]]).transpose(
+                -1, -2
+            )
             scale = params[..., slices["scale"]]
             return torch.cat([factors.flatten(start_dim=-2), scale], dim=-1)
 
         return OptimizedProgramMap(
             compilation,
-            LowRankPlusIsotropicMap(compilation.output_spec.dim, rank),
+            LowRankPlusIsotropicMap(
+                compilation.output_spec.dim, rank, min_sigma2=minimum
+            ),
             low_rank_transform,
-            "woodbury_and_determinant_lemma_oracle",
+            certificate,
         )
 
-    if root.kind == "direct_sum" and all(
-        child.kind == "kronecker_identity" for child in root.inputs
-    ):
+    if certificate.optimization_name == "multiplicity_block_oracle":
         return OptimizedProgramMap(
             compilation,
             IsotypicBlockMap(compilation.output_spec.irreps),
             lambda params: params[..., slices["blocks"]],
-            "multiplicity_block_oracle",
+            certificate,
         )
 
-    if family.graph is not None and "pullback" in root.verify().instructions:
+    if certificate.optimization_name == "graph_elimination_or_dense_precision_oracle":
+        assert family.graph is not None
         graph = family.graph
         local_irreps = o3.Irreps([(1, graph.node_irrep)])
         basis = O3SymmetricOperatorBasis(local_irreps).basis
@@ -372,9 +551,11 @@ def _try_optimized_map(compilation: "O3Compilation") -> OptimizedProgramMap | No
             compilation,
             GraphStructuredPrecisionMap(graph),
             graph_transform,
-            "graph_elimination_or_dense_precision_oracle",
+            certificate,
         )
-    return None
+    raise RuntimeError(
+        f"unregistered certified optimization {certificate.optimization_name!r}"
+    )
 
 
 @dataclass(frozen=True)
@@ -396,7 +577,13 @@ class PrimitiveLoweringRegistry:
             raise ValueError(f"primitive lowering {op!r} is already registered")
         self._rules[op] = PrimitiveLowering(op, validate)
 
-    def analyze(self, node: OperatorIR) -> tuple[str, ...]:
+    def analyze(self, family: OperatorFamilyPlan) -> tuple[str, ...]:
+        verification = family.verification
+        if not verification.valid:
+            raise ValueError(
+                "operator program failed typed verification: "
+                f"unknown={verification.unknown_instructions}, errors={verification.errors}"
+            )
         covered: list[str] = []
 
         def visit(current: OperatorIR) -> None:
@@ -411,19 +598,27 @@ class PrimitiveLoweringRegistry:
             rule.validate(current)
             covered.append(current.kind)
 
-        visit(node)
+        visit(family.assembly)
         return tuple(covered)
 
     def materialize(self, compilation: "O3Compilation") -> RecursiveOperatorMap:
-        self.analyze(compilation.operator_family.assembly)
+        self.analyze(compilation.operator_family)
         optimized = _try_optimized_map(compilation)
         return optimized if optimized is not None else RecursiveOperatorMap(compilation)
 
 
-def _verified_node(node: OperatorIR) -> None:
-    certificate = node.verify()
-    if not certificate.valid:
-        raise ValueError(f"invalid operator instruction {node.kind}: {certificate.errors}")
+def _registered_runtime_node(node: OperatorIR) -> None:
+    attributes = node.attribute_dict()
+    if (
+        node.kind == "spectral_positive"
+        and attributes.get("map") != "matrix_exponential"
+    ):
+        raise ValueError(f"no spectral runtime for {attributes.get('map')!r}")
+    if (
+        node.kind == "pullback"
+        and attributes.get("intertwiner") != "homogeneous_graph_coboundary"
+    ):
+        raise ValueError(f"no pullback runtime for {attributes.get('intertwiner')!r}")
 
 
 DEFAULT_PRIMITIVE_LOWERINGS = PrimitiveLoweringRegistry()
@@ -440,14 +635,16 @@ for _op in (
     "pullback",
     "add",
 ):
-    DEFAULT_PRIMITIVE_LOWERINGS.register(_op, _verified_node)
+    DEFAULT_PRIMITIVE_LOWERINGS.register(_op, _registered_runtime_node)
 
 
 def install_parameter_projections(head: "O3CompiledOutputHead") -> None:
     compilation = head.compilation
     for binding in compilation.operator_family.parameter_bindings:
         if hasattr(head, binding.projection_name):
-            raise ValueError(f"duplicate projection module name {binding.projection_name!r}")
+            raise ValueError(
+                f"duplicate projection module name {binding.projection_name!r}"
+            )
         setattr(
             head,
             binding.projection_name,

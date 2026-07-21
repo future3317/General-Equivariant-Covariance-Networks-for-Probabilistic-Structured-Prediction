@@ -8,11 +8,6 @@ using sklearn's OneHotEncoder for categorical encoding.
 """
 import torch
 import numpy as np
-import pandas as pd
-from typing import List, Dict, Optional
-from sklearn.preprocessing import OneHotEncoder
-from ase.data import chemical_symbols
-from ase.atoms import Atom
 
 # Element feature array - will be populated by initialize_features()
 ELEMENT_FEATURES = None

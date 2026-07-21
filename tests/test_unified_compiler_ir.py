@@ -1,5 +1,7 @@
 """Unified representation/distribution/operator IR regression tests."""
 
+from dataclasses import dataclass
+
 import pytest
 import torch
 
@@ -41,7 +43,12 @@ from representations.operator_ir import (
     OperatorIR,
     ParameterBinding,
 )
-from representations.representation_ir import IrrepsExpr, SymmetricSquareExpr, TrivialScalarsExpr
+from representations.representation_ir import (
+    IrrepsExpr,
+    RepeatedExpr,
+    SymmetricSquareExpr,
+    TrivialScalarsExpr,
+)
 
 
 SEED = FeatureSpec.from_irreps("4x0e + 2x1o + 2x2e", scope="global")
@@ -131,8 +138,12 @@ def test_restricted_family_treats_canonical_failure_as_diagnostic():
     output = O3IrrepsSpec.from_cartesian("ij=ji")
     family = IsotypicBlockCovariance().compile(output)
     compiler = O3ProgramCompiler(output)
-    canonical = EllipticalDistribution().canonical_reference(output).decompose_o3().irreps
-    active = family.active_expression(compiler._output_expression()).decompose_o3().irreps
+    canonical = (
+        EllipticalDistribution().canonical_reference(output).decompose_o3().irreps
+    )
+    active = (
+        family.active_expression(compiler._output_expression()).decompose_o3().irreps
+    )
     seed = output.irreps
     synthetic_failure = O3ReachabilityAnalysis(
         seed,
@@ -167,8 +178,12 @@ def test_alternative_full_family_parameterization_keeps_canonical_diagnostic():
     family = LowRankCovariance(output.dim).compile(output)
     assert family.relation_to_full == FamilyRelation.EQUAL_TO_FULL
     compiler = O3ProgramCompiler(output)
-    canonical = EllipticalDistribution().canonical_reference(output).decompose_o3().irreps
-    active = family.active_expression(compiler._output_expression()).decompose_o3().irreps
+    canonical = (
+        EllipticalDistribution().canonical_reference(output).decompose_o3().irreps
+    )
+    active = (
+        family.active_expression(compiler._output_expression()).decompose_o3().irreps
+    )
     seed = output.irreps
     synthetic_failure = O3ReachabilityAnalysis(
         seed,
@@ -201,7 +216,9 @@ def test_full_family_still_rejects_the_same_active_failure():
     output = O3IrrepsSpec.from_cartesian("ij=ji")
     family = FullCovariance().compile(output)
     compiler = O3ProgramCompiler(output)
-    target = family.active_expression(compiler._output_expression()).decompose_o3().irreps
+    target = (
+        family.active_expression(compiler._output_expression()).decompose_o3().irreps
+    )
     failure = O3ReachabilityAnalysis(
         output.irreps,
         target,
@@ -265,14 +282,15 @@ def test_fidelity_executor_and_measured_cost_are_independent():
         executor=SpecificExecutor("cartesian_stf"),
         cost=PreferExecutor(("cartesian_stf",)),
     )
-    assert approximate.report.execution_fidelity["exactness"] == "approximate_for_active_family"
+    assert (
+        approximate.report.execution_fidelity["exactness"]
+        == "approximate_for_active_family"
+    )
 
 
 def test_nonorthogonal_coordinates_require_a_gram_identity():
     with pytest.raises(ValueError, match="gram_matrix_id"):
-        FeatureSpec.from_irreps(
-            "1x0e", metric_kind="nonorthogonal_invariant_metric"
-        )
+        FeatureSpec.from_irreps("1x0e", metric_kind="nonorthogonal_invariant_metric")
 
 
 @pytest.mark.parametrize(
@@ -305,6 +323,7 @@ class _JitteredSpectralFamily(OperatorFamilySpec):
         )
         return OperatorFamilyPlan(
             kind="test_jittered_spectral",
+            output_irreps=output.irreps,
             parameter_bindings=(
                 ParameterBinding("operator", operator, "covariance_projection"),
                 ParameterBinding("jitter", jitter, "jitter_projection"),
@@ -345,11 +364,165 @@ def test_unknown_operator_node_cannot_claim_spd_or_equivariance():
     assert certificate.equivariance.value == "unknown"
 
 
+def _full_family_with(
+    output: O3IrrepsSpec,
+    *,
+    expression,
+    parameter: OperatorIR,
+    spectral_map: str = "matrix_exponential",
+) -> OperatorFamilyPlan:
+    assembly = OperatorIR.spectral_positive(
+        OperatorIR.symmetric_operator(
+            parameter=parameter,
+            coordinate_space="output_representation",
+            output_irreps=str(output.irreps),
+        ),
+        map=spectral_map,
+    )
+    return OperatorFamilyPlan(
+        kind="test_full",
+        output_irreps=output.irreps,
+        parameter_bindings=(ParameterBinding("operator", expression, "projection"),),
+        parameter_count=expression.decompose_o3().irreps.dim,
+        domain="scatter",
+        assembly=assembly,
+        relation_to_full=FamilyRelation.UNKNOWN,
+    )
+
+
+def test_typed_verifier_rejects_unlowered_spectral_primitive():
+    output = O3IrrepsSpec.from_cartesian("ij=ji")
+    expression = SymmetricSquareExpr(IrrepsExpr(output.irreps, "output"))
+    with pytest.raises(ValueError, match="unregistered positive spectral map"):
+        _full_family_with(
+            output,
+            expression=expression,
+            parameter=OperatorIR.parameter("operator"),
+            spectral_map="multiplicity_cholesky",
+        )
+
+
+def test_typed_verifier_rejects_binding_that_is_not_symmetric_square():
+    output = O3IrrepsSpec.from_cartesian("ij=ji")
+    wrong = TrivialScalarsExpr(output.dim * (output.dim + 1) // 2)
+    with pytest.raises(ValueError, match=r"must be Sym\^2\(V\)"):
+        _full_family_with(
+            output,
+            expression=wrong,
+            parameter=OperatorIR.parameter("operator"),
+        )
+
+
+def test_typed_verifier_rejects_parameter_slice_outside_binding():
+    output = O3IrrepsSpec.from_cartesian("ij=ji")
+    expression = SymmetricSquareExpr(IrrepsExpr(output.irreps, "output"))
+    with pytest.raises(ValueError, match="outside transformed dimension"):
+        _full_family_with(
+            output,
+            expression=expression,
+            parameter=OperatorIR.parameter(
+                "operator", stop=expression.decompose_o3().irreps.dim + 1
+            ),
+        )
+
+
+def test_typed_verifier_checks_factor_and_scalar_binding_types():
+    output = O3IrrepsSpec.from_cartesian("ij=ji")
+    factor = OperatorIR.gram(
+        OperatorIR.equivariant_factor(
+            OperatorIR.parameter("factor"),
+            rank=2,
+            output_irreps=str(output.irreps),
+        )
+    )
+    isotropic = OperatorIR.positive_scalar_identity(
+        OperatorIR.parameter("scale"), dimension=output.dim, minimum=0.0
+    )
+    with pytest.raises(ValueError, match="r copies of V"):
+        OperatorFamilyPlan(
+            kind="bad_factor",
+            output_irreps=output.irreps,
+            parameter_bindings=(
+                ParameterBinding(
+                    "factor", TrivialScalarsExpr(output.dim * 2), "factor_projection"
+                ),
+                ParameterBinding("scale", TrivialScalarsExpr(1), "scale_projection"),
+            ),
+            parameter_count=output.dim * 2 + 1,
+            domain="scatter",
+            assembly=OperatorIR.add(isotropic, factor),
+            relation_to_full=FamilyRelation.UNKNOWN,
+            rank=2,
+        )
+
+    pseudoscalar = IrrepsExpr("1x0o", "nontrivial_scale")
+    with pytest.raises(ValueError, match="exactly one trivial scalar"):
+        OperatorFamilyPlan(
+            kind="bad_scale",
+            output_irreps=output.irreps,
+            parameter_bindings=(ParameterBinding("scale", pseudoscalar, "projection"),),
+            parameter_count=1,
+            domain="scatter",
+            assembly=isotropic,
+            relation_to_full=FamilyRelation.UNKNOWN,
+        )
+
+
+def test_typed_verifier_checks_cholesky_scalar_count():
+    output = O3IrrepsSpec("2x0e")
+    with pytest.raises(ValueError, match=r"requires 3 trivial scalars"):
+        OperatorFamilyPlan(
+            kind="bad_cholesky",
+            output_irreps=output.irreps,
+            parameter_bindings=(
+                ParameterBinding("block", TrivialScalarsExpr(2), "projection"),
+            ),
+            parameter_count=2,
+            domain="scatter",
+            assembly=OperatorIR.cholesky_positive(
+                OperatorIR.parameter("block"), dimension=2
+            ),
+            relation_to_full=FamilyRelation.UNKNOWN,
+        )
+
+
+def _rewrite_parameter_layout(node: OperatorIR) -> OperatorIR:
+    attributes = node.attribute_dict()
+    if (
+        node.kind == "parameter"
+        and attributes.get("coordinate_layout") == "repeated_irrep"
+    ):
+        attributes["copies"] = int(attributes["copies"]) + 1
+    return OperatorIR.node(
+        node.kind,
+        *(_rewrite_parameter_layout(child) for child in node.inputs),
+        **attributes,
+    )
+
+
+def test_typed_verifier_checks_graph_repeated_layout_against_binding():
+    graph = _graph()
+    valid = GraphPrecision(graph).compile(O3IrrepsSpec(graph.output_irreps))
+    with pytest.raises(ValueError, match="layout does not match the binding"):
+        OperatorFamilyPlan(
+            kind="bad_graph_layout",
+            output_irreps=valid.output_irreps,
+            parameter_bindings=valid.parameter_bindings,
+            parameter_count=valid.parameter_count,
+            domain=valid.domain,
+            assembly=_rewrite_parameter_layout(valid.assembly),
+            relation_to_full=valid.relation_to_full,
+            graph=graph,
+        )
+
+
 def test_low_rank_request_is_never_silently_clamped():
     family = LowRankCovariance(10).compile(O3IrrepsSpec.from_cartesian("ij=ji"))
     assert family.rank == 10
     assert family.parameter_count == 61
     assert family.relation_to_full == FamilyRelation.EQUAL_TO_FULL
+    restricted = LowRankCovariance(5).compile(O3IrrepsSpec.from_cartesian("ij=ji"))
+    assert restricted.relation_to_full == FamilyRelation.STRICT_SUBSET
 
 
 def test_non_truncating_rank_preserves_request_and_reports_effective_exactness():
@@ -401,9 +574,7 @@ def test_core_rejects_executor_decision_for_a_different_feature_contract():
 
 
 def test_measured_cost_rejects_a_different_semantic_plan_signature():
-    measured_plan = plan_readout(
-        SEED, output="ij=ji", covariance=FullCovariance()
-    )
+    measured_plan = plan_readout(SEED, output="ij=ji", covariance=FullCovariance())
     signature = execution_signature_for_plan(
         measured_plan,
         batch_shape=(8, SEED.irreps.dim),
@@ -495,3 +666,139 @@ def test_pattern_optimized_maps_match_recursive_ir_interpreter(output, family):
     torch.testing.assert_close(
         optimized_gradient, recursive_gradient, atol=2e-8, rtol=2e-8
     )
+
+
+@dataclass(frozen=True)
+class _AugmentedLowRankFamily(OperatorFamilySpec):
+    rank: int = 2
+
+    def compile(self, output: O3IrrepsSpec) -> OperatorFamilyPlan:
+        base = LowRankCovariance(self.rank).compile(output)
+        extra = TrivialScalarsExpr(1)
+        return OperatorFamilyPlan(
+            kind="augmented_low_rank",
+            output_irreps=output.irreps,
+            parameter_bindings=base.parameter_bindings
+            + (ParameterBinding("extra", extra, "extra_projection"),),
+            parameter_count=base.parameter_count + 1,
+            domain="scatter",
+            assembly=OperatorIR.add(
+                *base.assembly.inputs,
+                OperatorIR.positive_scalar_identity(
+                    OperatorIR.parameter("extra"),
+                    dimension=output.dim,
+                    minimum=0.0,
+                ),
+            ),
+            relation_to_full=FamilyRelation.UNKNOWN,
+            rank=self.rank,
+        )
+
+    def as_dict(self):
+        return {"kind": "augmented_low_rank", "rank": self.rank}
+
+
+@dataclass(frozen=True)
+class _RenamedLowRankFamily(OperatorFamilySpec):
+    rank: int = 2
+
+    def compile(self, output: O3IrrepsSpec) -> OperatorFamilyPlan:
+        output_expression = IrrepsExpr(output.irreps, "output")
+        factor_expression = RepeatedExpr(output_expression, self.rank)
+        scale_expression = TrivialScalarsExpr(1)
+        assembly = OperatorIR.add(
+            OperatorIR.positive_scalar_identity(
+                OperatorIR.parameter("noise"), dimension=output.dim, minimum=0.0
+            ),
+            OperatorIR.gram(
+                OperatorIR.equivariant_factor(
+                    OperatorIR.parameter("latent"),
+                    rank=self.rank,
+                    output_irreps=str(output.irreps),
+                )
+            ),
+        )
+        return OperatorFamilyPlan(
+            kind="renamed_low_rank",
+            output_irreps=output.irreps,
+            parameter_bindings=(
+                ParameterBinding("latent", factor_expression, "latent_projection"),
+                ParameterBinding("noise", scale_expression, "noise_projection"),
+            ),
+            parameter_count=output.dim * self.rank + 1,
+            domain="scatter",
+            assembly=assembly,
+            relation_to_full=FamilyRelation.UNKNOWN,
+            rank=self.rank,
+        )
+
+    def as_dict(self):
+        return {"kind": "renamed_low_rank", "rank": self.rank}
+
+
+@dataclass(frozen=True)
+class _AugmentedGraphFamily(OperatorFamilySpec):
+    graph: EquivariantOutputGraph
+
+    def compile(self, output: O3IrrepsSpec) -> OperatorFamilyPlan:
+        base = GraphPrecision(self.graph).compile(output)
+        extra = TrivialScalarsExpr(1)
+        return OperatorFamilyPlan(
+            kind="augmented_graph",
+            output_irreps=output.irreps,
+            parameter_bindings=base.parameter_bindings
+            + (ParameterBinding("extra", extra, "extra_projection"),),
+            parameter_count=base.parameter_count + 1,
+            domain="precision",
+            assembly=OperatorIR.add(
+                base.assembly,
+                OperatorIR.positive_scalar_identity(
+                    OperatorIR.parameter("extra"),
+                    dimension=output.dim,
+                    minimum=0.0,
+                ),
+            ),
+            relation_to_full=FamilyRelation.UNKNOWN,
+            graph=self.graph,
+        )
+
+    def as_dict(self):
+        return {"kind": "augmented_graph", "graph": self.graph.as_dict()}
+
+
+@pytest.mark.parametrize(
+    "output,family",
+    (
+        ("ij=ji", _AugmentedLowRankFamily()),
+        ("ij=ji", _RenamedLowRankFamily()),
+        (_graph().output_irreps, _AugmentedGraphFamily(_graph())),
+    ),
+)
+def test_near_miss_programs_fall_back_to_recursive_interpreter(output, family):
+    plan = plan_readout(SEED, output=output, covariance=family)
+    lowered = plan.compilation.build_spd_map()
+    assert isinstance(lowered, RecursiveOperatorMap)
+    optimization = plan.report.family["optimization"]
+    assert optimization == {
+        "optimization_name": None,
+        "fallback": "generic_recursive_interpreter",
+        "reason": "no_exact_registered_template_match",
+    }
+
+
+def test_optimization_certificate_is_exposed_in_report():
+    plan = plan_readout(SEED, output="ij=ji", covariance=LowRankCovariance(2))
+    lowered = plan.compilation.build_spd_map()
+    certificate = lowered.optimization_certificate
+    report_certificate = plan.report.family["optimization"]
+    assert report_certificate == certificate.as_dict()
+    assert certificate.semantic_template_hash
+    assert (
+        certificate.operator_program_hash
+        == plan.compilation.operator_family.assembly.fingerprint
+    )
+    assert certificate.binding_correspondence == (
+        ("factor", "factor"),
+        ("scale", "scale"),
+    )
+    assert certificate.rank == 2

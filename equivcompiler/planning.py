@@ -61,7 +61,10 @@ def _policy_record(policy: object) -> dict[str, Any]:
     if isinstance(policy, TruncatedMultiplicityRank):
         return {"kind": "truncated_multiplicity_rank", "rank": policy.rank}
     if isinstance(policy, ExactExecutorCandidates):
-        return {"kind": "exact_executor_candidates", "candidates": list(policy.candidates)}
+        return {
+            "kind": "exact_executor_candidates",
+            "candidates": list(policy.candidates),
+        }
     if isinstance(policy, SpecificExecutor):
         return {"kind": "specific_executor", "name": policy.name}
     if isinstance(policy, PreferExecutor):
@@ -94,7 +97,9 @@ def _select_family(
             "selected_parameters": plan.parameter_count,
         }
 
-    candidates = policy.candidates if isinstance(policy, AutoBudget) else policy.priority
+    candidates = (
+        policy.candidates if isinstance(policy, AutoBudget) else policy.priority
+    )
     compiled = [candidate.compile(semantics.output_spec) for candidate in candidates]
     considered = [
         {
@@ -233,8 +238,7 @@ def _select_executor(
         feature=seed,
         output=semantics.output_spec,
         active_plan=active_plan,
-        operator_program=family.assembly,
-        operator_domain=family.domain,
+        operator_family=family,
         fidelity=fidelity,
     )
     support = DEFAULT_EXACT_LOWERINGS.as_dict(context)
@@ -271,7 +275,10 @@ def _select_executor(
                     code="cost_policy_no_candidate",
                     status="failure",
                     message="the static cost priority contains no supported executor",
-                    details={"available": list(available), "priority": list(cost.priority)},
+                    details={
+                        "available": list(available),
+                        "priority": list(cost.priority),
+                    },
                 )
             )
         basis = {
@@ -289,7 +296,10 @@ def _select_executor(
             distribution_record=distribution.as_dict(),
         )
         mismatches = {
-            "feature_fingerprint": (cost.signature.feature_fingerprint, seed.fingerprint),
+            "feature_fingerprint": (
+                cost.signature.feature_fingerprint,
+                seed.fingerprint,
+            ),
             "active_plan_hash": (
                 cost.signature.active_plan_hash,
                 expected["active_plan_hash"],
@@ -339,7 +349,11 @@ def _select_executor(
             "available_candidates": list(available),
             "selected_median_ms": best.median_ms,
             "measurements": [
-                {"executor": item.executor, "median_ms": item.median_ms, "iqr_ms": item.iqr_ms}
+                {
+                    "executor": item.executor,
+                    "median_ms": item.median_ms,
+                    "iqr_ms": item.iqr_ms,
+                }
                 for item in measured
             ],
         }

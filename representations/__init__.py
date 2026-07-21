@@ -58,7 +58,9 @@ from representations.operator_ir import (
     ParameterBinding,
     Positivity,
     Equivariance,
+    OperatorVerificationContext,
 )
+from representations.operator_lowering import OptimizationCertificate
 from representations.report import CompilationReport, build_compilation_report
 
 __all__ = [
@@ -108,6 +110,8 @@ __all__ = [
     "ParameterBinding",
     "Positivity",
     "Equivariance",
+    "OperatorVerificationContext",
+    "OptimizationCertificate",
     "OperatorFamilyPlan",
     "CompilationReport",
     "build_compilation_report",

@@ -122,7 +122,8 @@ def _covariance_complexity(compilation: "O3Compilation") -> dict[str, Any]:
             "storage": "O(sum_lambda m_lambda^2)",
             "likelihood_linear_algebra": "O(sum_lambda m_lambda^3)",
             "multiplicity_block_sizes": {
-                str(irrep): multiplicity for irrep, multiplicity in multiplicities.items()
+                str(irrep): multiplicity
+                for irrep, multiplicity in multiplicities.items()
             },
         }
     if mode == "low_rank":
@@ -188,7 +189,9 @@ def _probability_semantics(compilation: "O3Compilation") -> dict[str, Any]:
     if compilation.covariance_mode == "graph":
         raw_semantics = "local symmetric precision generators"
         positive_definite_object = "global precision"
-        precision_semantics = "assembled directly from unary and relational SPD potentials"
+        precision_semantics = (
+            "assembled directly from unary and relational SPD potentials"
+        )
     else:
         raw_semantics = {
             "full": "symmetric scale generator",
@@ -232,9 +235,7 @@ class CompilationReport:
         return self.from_dict(record)
 
     def save(self, path: str | Path) -> None:
-        Path(path).write_text(
-            json.dumps(self.as_dict(), indent=2), encoding="utf-8"
-        )
+        Path(path).write_text(json.dumps(self.as_dict(), indent=2), encoding="utf-8")
 
     @property
     def schema_version(self) -> str:
@@ -285,6 +286,8 @@ def build_compilation_report(
     compilation: "O3Compilation",
     executable: torch.nn.Module | None = None,
 ) -> CompilationReport:
+    from representations.operator_lowering import match_optimized_program
+
     canonical_plan = compilation.canonical_plan
     canonical_deficit = (
         coverage_deficit(canonical_plan.irreps_out, compilation.canonical_target_irreps)
@@ -296,9 +299,13 @@ def build_compilation_report(
         compilation.active_target_irreps,
     )
     if canonical_plan is not None and canonical_deficit:
-        raise RuntimeError("a reachable canonical plan contains an irrep coverage deficit")
+        raise RuntimeError(
+            "a reachable canonical plan contains an irrep coverage deficit"
+        )
     if active_deficit:
-        raise RuntimeError("a completed compilation contains an active coverage deficit")
+        raise RuntimeError(
+            "a completed compilation contains an active coverage deficit"
+        )
 
     certificates = [
         CompilationCertificate(
@@ -430,6 +437,16 @@ def build_compilation_report(
         ),
         "relation_to_full": relation,
     }
+    optimization = match_optimized_program(compilation.operator_family)
+    family_record["optimization"] = (
+        optimization.as_dict()
+        if optimization is not None
+        else {
+            "optimization_name": None,
+            "fallback": "generic_recursive_interpreter",
+            "reason": "no_exact_registered_template_match",
+        }
+    )
     fidelity_record = {
         "selected_executor": compilation.backend,
         "exactness": (
@@ -446,9 +463,7 @@ def build_compilation_report(
     backend_selection_record = {
         "selected_executor": compilation.backend,
         **compilation.executor_decision.selection_basis,
-        "capability_certificate": (
-            compilation.executor_decision.capability.as_dict()
-        ),
+        "capability_certificate": (compilation.executor_decision.capability.as_dict()),
     }
     record = {
         "schema_version": "3.0",

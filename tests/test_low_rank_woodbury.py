@@ -1,5 +1,6 @@
 """Tests for low-rank-plus-isotropic SPD map using Woodbury identity."""
 
+import pytest
 import torch
 
 from spd_maps import LowRankPlusIsotropicMap
@@ -87,3 +88,30 @@ def test_joint_statistics_build_factor_system_once():
     residual = torch.randn(2, 21)
     spd_map.statistics(params, residual)
     assert spd_map.calls == 1
+
+
+def test_zero_minimum_represents_arbitrarily_small_spd_when_rank_covers_dimension():
+    dimension = 4
+    diagonal = torch.tensor([1e-10, 2e-10, 4e-10, 8e-10], dtype=torch.float64)
+    sigma2 = diagonal.min() / 2
+    factor = torch.diag(torch.sqrt(diagonal - sigma2))
+    raw_sigma2 = torch.log(torch.expm1(sigma2))
+    params = torch.cat((factor.flatten(), raw_sigma2.reshape(1)))
+    spd_map = LowRankPlusIsotropicMap(
+        dim=dimension,
+        rank=dimension,
+        min_sigma2=0.0,
+    ).double()
+    actual = spd_map(params)
+    torch.testing.assert_close(
+        actual,
+        torch.diag(diagonal),
+        atol=1e-20,
+        rtol=1e-10,
+    )
+    assert torch.linalg.eigvalsh(actual).min() > 0
+
+
+def test_low_rank_map_rejects_negative_minimum():
+    with pytest.raises(ValueError, match="nonnegative"):
+        LowRankPlusIsotropicMap(dim=4, rank=4, min_sigma2=-1e-4)

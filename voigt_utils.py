@@ -534,7 +534,7 @@ def test_voigt_transformations():
     rho_km = get_kelvin_mandel_rotation_matrix(R)
     identity_km = rho_km @ rho_km.T
     assert torch.allclose(identity_km, torch.eye(6), atol=1e-6), "KM rotation matrix should be orthogonal"
-    print(f"PASS: Single KM rotation matrix is orthogonal")
+    print("PASS: Single KM rotation matrix is orthogonal")
 
     # Test batch rotation matrices
     print("\nTesting batch rotation matrices...")

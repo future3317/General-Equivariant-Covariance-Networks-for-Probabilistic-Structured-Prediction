@@ -5,7 +5,6 @@ Matrix logarithm and exponential transformations for dielectric tensors.
 These transformations preserve E(3) equivariance while improving training stability.
 """
 import torch
-import numpy as np
 from voigt_utils import voigt_to_tensor
 
 
@@ -213,7 +212,7 @@ def analyze_log_transform_statistics(dataloader):
 
     # Print statistics
     print("\n[Original Physical Values]")
-    print(f"  Diagonal (εxx, εyy, εzz):")
+    print("  Diagonal (εxx, εyy, εzz):")
     diag_mean = stats['original']['mean'][:3].numpy()
     diag_std = stats['original']['std'][:3].numpy()
     diag_min = stats['original']['min'][:3].numpy()
@@ -221,7 +220,7 @@ def analyze_log_transform_statistics(dataloader):
     print(f"    Mean: [{diag_mean[0]:.3f}, {diag_mean[1]:.3f}, {diag_mean[2]:.3f}]")
     print(f"    Std:  [{diag_std[0]:.3f}, {diag_std[1]:.3f}, {diag_std[2]:.3f}]")
     print(f"    Range: [{diag_min[0]:.1f}, {diag_min[1]:.1f}, {diag_min[2]:.1f}] to [{diag_max[0]:.1f}, {diag_max[1]:.1f}, {diag_max[2]:.1f}]")
-    print(f"  Off-diagonal (εyz, εxz, εxy):")
+    print("  Off-diagonal (εyz, εxz, εxy):")
     off_mean = stats['original']['mean'][3:].numpy()
     off_std = stats['original']['std'][3:].numpy()
     off_min = stats['original']['min'][3:].numpy()
@@ -231,7 +230,7 @@ def analyze_log_transform_statistics(dataloader):
     print(f"    Range: [{off_min[0]:.1f}, {off_min[1]:.1f}, {off_min[2]:.1f}] to [{off_max[0]:.1f}, {off_max[1]:.1f}, {off_max[2]:.1f}]")
 
     print("\n[After Matrix Log Transform]")
-    print(f"  Diagonal (log εxx, log εyy, log εzz):")
+    print("  Diagonal (log εxx, log εyy, log εzz):")
     log_diag_mean = stats['log']['mean'][:3].numpy()
     log_diag_std = stats['log']['std'][:3].numpy()
     log_diag_min = stats['log']['min'][:3].numpy()
@@ -239,7 +238,7 @@ def analyze_log_transform_statistics(dataloader):
     print(f"    Mean: [{log_diag_mean[0]:.3f}, {log_diag_mean[1]:.3f}, {log_diag_mean[2]:.3f}]")
     print(f"    Std:  [{log_diag_std[0]:.3f}, {log_diag_std[1]:.3f}, {log_diag_std[2]:.3f}]")
     print(f"    Range: [{log_diag_min[0]:.1f}, {log_diag_min[1]:.1f}, {log_diag_min[2]:.1f}] to [{log_diag_max[0]:.1f}, {log_diag_max[1]:.1f}, {log_diag_max[2]:.1f}]")
-    print(f"  Off-diagonal (log εyz, log εxz, log εxy):")
+    print("  Off-diagonal (log εyz, log εxz, log εxy):")
     log_off_mean = stats['log']['mean'][3:].numpy()
     log_off_std = stats['log']['std'][3:].numpy()
     log_off_min = stats['log']['min'][3:].numpy()
@@ -253,7 +252,7 @@ def analyze_log_transform_statistics(dataloader):
     log_range = stats['log']['range'].mean().item()
     compression = original_range / log_range if log_range > 0 else float('inf')
 
-    print(f"\n[Compression Ratio]")
+    print("\n[Compression Ratio]")
     print(f"  Average range compression: {compression:.2f}x")
     print(f"  Original avg range: {original_range:.2f}")
     print(f"  Log avg range: {log_range:.2f}")

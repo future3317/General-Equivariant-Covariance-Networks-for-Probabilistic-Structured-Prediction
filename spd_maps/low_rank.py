@@ -18,6 +18,8 @@ class LowRankPlusIsotropicMap(SPDMap):
         super().__init__()
         if dim < 1 or rank < 1:
             raise ValueError("dim and rank must be positive")
+        if min_sigma2 < 0:
+            raise ValueError("min_sigma2 must be nonnegative")
         self.dim = dim
         self.rank = rank
         self.min_sigma2 = min_sigma2

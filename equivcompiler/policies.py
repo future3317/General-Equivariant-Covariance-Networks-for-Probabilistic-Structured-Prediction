@@ -51,14 +51,13 @@ class FullCovariance(OperatorFamilySpec):
         )
         return OperatorFamilyPlan(
             kind="full",
+            output_irreps=output.irreps,
             parameter_bindings=(
                 ParameterBinding("operator", parameter, "covariance_projection"),
             ),
             parameter_count=output.dim * (output.dim + 1) // 2,
             domain="scatter",
-            assembly=OperatorIR.spectral_positive(
-                symmetric, map="matrix_exponential"
-            ),
+            assembly=OperatorIR.spectral_positive(symmetric, map="matrix_exponential"),
             relation_to_full=FamilyRelation.EQUAL_TO_FULL,
         )
 
@@ -82,7 +81,7 @@ class LowRankCovariance(OperatorFamilySpec):
         factor_expression = RepeatedExpr(base, rank)
         scale_expression = TrivialScalarsExpr(1)
         isotropic = OperatorIR.positive_scalar_identity(
-            OperatorIR.parameter("scale"), dimension=output.dim
+            OperatorIR.parameter("scale"), dimension=output.dim, minimum=0.0
         )
         gram = OperatorIR.gram(
             OperatorIR.equivariant_factor(
@@ -93,10 +92,9 @@ class LowRankCovariance(OperatorFamilySpec):
         )
         return OperatorFamilyPlan(
             kind="low_rank",
+            output_irreps=output.irreps,
             parameter_bindings=(
-                ParameterBinding(
-                    "factor", factor_expression, "covariance_projection"
-                ),
+                ParameterBinding("factor", factor_expression, "covariance_projection"),
                 ParameterBinding("scale", scale_expression, "scale_projection"),
             ),
             parameter_count=output.dim * rank + 1,
@@ -124,10 +122,7 @@ class IsotypicBlockCovariance(OperatorFamilySpec):
     def compile(self, output: O3IrrepsSpec) -> OperatorFamilyPlan:
         multiplicities = irrep_multiplicities(output.irreps)
         count = sum(value * (value + 1) // 2 for value in multiplicities.values())
-        equals_full = (
-            len(multiplicities) == 1
-            and next(iter(multiplicities)).dim == 1
-        )
+        equals_full = len(multiplicities) == 1 and next(iter(multiplicities)).dim == 1
         blocks = []
         cursor = 0
         for irrep, multiplicity in multiplicities.items():
@@ -148,6 +143,7 @@ class IsotypicBlockCovariance(OperatorFamilySpec):
             cursor += block_count
         return OperatorFamilyPlan(
             kind="block",
+            output_irreps=output.irreps,
             parameter_bindings=(
                 ParameterBinding(
                     "blocks", TrivialScalarsExpr(count), "covariance_projection"
@@ -209,13 +205,13 @@ class GraphPrecision(OperatorFamilySpec):
         local_factor = OperatorIR.spectral_positive(
             OperatorIR.symmetric_operator(
                 parameter=OperatorIR.parameter(
-                        "potentials",
-                        start=unary_stop,
-                        stop=self.graph.num_potentials * local_count,
-                        coordinate_layout="repeated_irrep",
-                        unit_irreps=local_operator_irreps,
-                        copies=self.graph.num_potentials,
-                    ),
+                    "potentials",
+                    start=unary_stop,
+                    stop=self.graph.num_potentials * local_count,
+                    coordinate_layout="repeated_irrep",
+                    unit_irreps=local_operator_irreps,
+                    copies=self.graph.num_potentials,
+                ),
                 coordinate_space="graph_local",
                 role="factor",
                 irrep=str(self.graph.node_irrep),
@@ -232,10 +228,9 @@ class GraphPrecision(OperatorFamilySpec):
         )
         return OperatorFamilyPlan(
             kind="graph",
+            output_irreps=output.irreps,
             parameter_bindings=(
-                ParameterBinding(
-                    "potentials", parameter, "covariance_projection"
-                ),
+                ParameterBinding("potentials", parameter, "covariance_projection"),
             ),
             parameter_count=local_count * self.graph.num_potentials,
             domain="precision",
@@ -247,9 +242,7 @@ class GraphPrecision(OperatorFamilySpec):
             ),
             graph=self.graph,
             restriction=(
-                None
-                if self.graph.num_nodes == 1
-                else "fixed_skeleton_precision_cone"
+                None if self.graph.num_nodes == 1 else "fixed_skeleton_precision_cone"
             ),
         )
 

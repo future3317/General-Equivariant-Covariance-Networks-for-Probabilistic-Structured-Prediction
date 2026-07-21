@@ -167,6 +167,7 @@ def _recursive_oracle_validation(
             {
                 "family": name,
                 "optimization": optimized.optimization_name,
+                "optimization_certificate": optimized.optimization_certificate.as_dict(),
                 "covariance_max_abs": float(
                     (optimized_covariance - recursive_covariance).abs().max().detach()
                 ),
@@ -219,7 +220,9 @@ def _executor_validation(
     repeats: int,
 ) -> dict:
     spherical_plan, spherical, cartesian = _build_exact_pair(seed, device, dtype)
-    features = (0.1 * seed.irreps.randn(batch_size, -1, device=device, dtype=dtype)).requires_grad_()
+    features = (
+        0.1 * seed.irreps.randn(batch_size, -1, device=device, dtype=dtype)
+    ).requires_grad_()
     with torch.no_grad():
         spherical_output = spherical(features, return_scale=True)
         cartesian_output = cartesian(features, return_scale=True)
@@ -230,9 +233,7 @@ def _executor_validation(
     relative_error = {
         key: float(
             (spherical_output[key] - cartesian_output[key]).abs().max()
-            / spherical_output[key].abs().max().clamp_min(
-                torch.finfo(dtype).tiny
-            )
+            / spherical_output[key].abs().max().clamp_min(torch.finfo(dtype).tiny)
         )
         for key in ("mu", "params", "scale")
     }
@@ -334,7 +335,9 @@ def validate(args: argparse.Namespace) -> dict:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument(
+        "--device", default="cuda" if torch.cuda.is_available() else "cpu"
+    )
     parser.add_argument(
         "--dtype", choices=("float64", "float32", "bfloat16"), default="float32"
     )

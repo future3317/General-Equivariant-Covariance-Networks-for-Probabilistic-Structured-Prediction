@@ -13,7 +13,7 @@ from equivcompiler.specs import FeatureSpec
 from representations import O3IrrepsSpec
 from representations.adaptive_lifting import O3LiftingPlan
 from representations.cartesian_stf import is_rank2_stf_output
-from representations.operator_ir import Equivariance, OperatorIR
+from representations.operator_ir import Equivariance, OperatorFamilyPlan
 from representations.operator_lowering import DEFAULT_PRIMITIVE_LOWERINGS
 
 
@@ -27,9 +27,16 @@ class ExecutionContext:
     feature: FeatureSpec
     output: O3IrrepsSpec
     active_plan: O3LiftingPlan
-    operator_program: OperatorIR
-    operator_domain: Literal["scatter", "precision"]
+    operator_family: OperatorFamilyPlan
     fidelity: FidelityPolicy
+
+    @property
+    def operator_program(self):
+        return self.operator_family.assembly
+
+    @property
+    def operator_domain(self) -> Literal["scatter", "precision"]:
+        return self.operator_family.domain
 
 
 @dataclass(frozen=True)
@@ -101,7 +108,9 @@ class ExecutorDecision:
 
     def __post_init__(self) -> None:
         if not self.capability.supported or self.capability.executor != self.name:
-            raise ValueError("executor decision requires a matching supported certificate")
+            raise ValueError(
+                "executor decision requires a matching supported certificate"
+            )
 
 
 def _cg_instruction_multiset(plan: O3LiftingPlan) -> tuple[str, ...]:
@@ -192,7 +201,7 @@ class ExecutorAnalyzer(ABC):
     def _common_instructions(context: ExecutionContext) -> tuple[str, ...]:
         operator = tuple(
             f"operator:{item}"
-            for item in DEFAULT_PRIMITIVE_LOWERINGS.analyze(context.operator_program)
+            for item in DEFAULT_PRIMITIVE_LOWERINGS.analyze(context.operator_family)
         )
         return _cg_instruction_multiset(context.active_plan) + operator
 
@@ -204,7 +213,10 @@ class SphericalCGAnalyzer(ExecutorAnalyzer):
         reasons: list[str] = []
         if context.feature.group != "O3":
             reasons.append("released spherical executor requires O3 features")
-        if context.feature.layout != "e3nn" or not context.feature.metric.is_orthonormal:
+        if (
+            context.feature.layout != "e3nn"
+            or not context.feature.metric.is_orthonormal
+        ):
             reasons.append("spherical executor requires orthonormal e3nn coordinates")
         fidelity = _fidelity_decision(
             context.fidelity, context.active_plan, supports_truncation=False
@@ -233,11 +245,16 @@ class CartesianSTFAnalyzer(ExecutorAnalyzer):
         reasons: list[str] = []
         if context.feature.group != "O3":
             reasons.append("dense-projector executor requires O3 features")
-        if context.feature.layout != "e3nn" or not context.feature.metric.is_orthonormal:
-            reasons.append("dense-projector executor requires orthonormal e3nn coordinates")
+        if (
+            context.feature.layout != "e3nn"
+            or not context.feature.metric.is_orthonormal
+        ):
+            reasons.append(
+                "dense-projector executor requires orthonormal e3nn coordinates"
+            )
         if not is_rank2_stf_output(context.output.irreps):
             reasons.append("cartesian_stf is registered for V=0e+2e")
-        verification = context.operator_program.verify()
+        verification = context.operator_family.verification
         if verification.equivariance is not Equivariance.VERIFIED:
             reasons.append("operator program lacks a verified equivariance derivation")
         if not (
@@ -298,9 +315,7 @@ class CandidateEnumerator:
     def enumerate(
         self, requested: tuple[str, ...], context: ExecutionContext
     ) -> tuple[CapabilityCertificate, ...]:
-        certificates = tuple(
-            self.registry.analyze(name, context) for name in requested
-        )
+        certificates = tuple(self.registry.analyze(name, context) for name in requested)
         return tuple(item for item in certificates if item.supported)
 
 
