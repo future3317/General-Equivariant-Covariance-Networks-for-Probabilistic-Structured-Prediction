@@ -50,7 +50,7 @@ from representations.operator_ir import OperatorFamilyPlan
 
 
 OutputScope = Literal["global", "node", "edge"]
-COMPILER_VERSION = "0.3"
+COMPILER_VERSION = "0.4"
 
 
 def _policy_record(policy: object) -> dict[str, Any]:
