@@ -8,11 +8,15 @@ import torch
 
 from equivcompiler.planning import CompilationPlan, plan_readout
 from equivcompiler.policies import (
+    CostPolicy,
     CovariancePolicy,
-    ExactOnly,
+    ExactExecutorCandidates,
+    ExecutorPolicy,
+    FidelityPolicy,
     FullCovariance,
-    LoweringPolicy,
+    PreferExecutor,
 )
+from equivcompiler.distributions import DistributionSpec
 from equivcompiler.specs import FeatureSpec
 from representations import CompilationReport
 
@@ -48,8 +52,11 @@ def compile_readout(
     *,
     output,
     covariance: CovariancePolicy = FullCovariance(),
-    lowering: LoweringPolicy = ExactOnly(),
-    distribution: Literal["gaussian", "student_t"] = "gaussian",
+    distribution: DistributionSpec | Literal["gaussian", "student_t"] = "gaussian",
+    fidelity: FidelityPolicy | None = None,
+    executor: ExecutorPolicy = ExactExecutorCandidates(),
+    cost: CostPolicy = PreferExecutor(),
+    lowering: FidelityPolicy | None = None,
     student_t_dof: float = 5.0,
     output_scope: Literal["global", "node", "edge"] = "global",
     device: torch.device | str | None = None,
@@ -60,6 +67,9 @@ def compile_readout(
         seed,
         output=output,
         covariance=covariance,
+        fidelity=fidelity,
+        executor=executor,
+        cost=cost,
         lowering=lowering,
         distribution=distribution,
         student_t_dof=student_t_dof,
@@ -74,8 +84,11 @@ def compile_predictor(
     *,
     output,
     covariance: CovariancePolicy = FullCovariance(),
-    lowering: LoweringPolicy = ExactOnly(),
-    distribution: Literal["gaussian", "student_t"] = "gaussian",
+    distribution: DistributionSpec | Literal["gaussian", "student_t"] = "gaussian",
+    fidelity: FidelityPolicy | None = None,
+    executor: ExecutorPolicy = ExactExecutorCandidates(),
+    cost: CostPolicy = PreferExecutor(),
+    lowering: FidelityPolicy | None = None,
     student_t_dof: float = 5.0,
     output_scope: Literal["global", "node", "edge"] = "global",
 ) -> tuple[torch.nn.Module, CompilationReport]:
@@ -85,6 +98,9 @@ def compile_predictor(
         seed,
         output=output,
         covariance=covariance,
+        fidelity=fidelity,
+        executor=executor,
+        cost=cost,
         lowering=lowering,
         distribution=distribution,
         student_t_dof=student_t_dof,

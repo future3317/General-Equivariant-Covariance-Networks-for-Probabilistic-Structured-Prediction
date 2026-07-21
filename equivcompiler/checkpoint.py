@@ -18,6 +18,7 @@ from equivcompiler.policies import (
     FullCovariance,
     IsotypicBlockCovariance,
     LowRankCovariance,
+    SpecificExecutor,
 )
 from equivcompiler.specs import FeatureSpec
 from representations import (
@@ -139,7 +140,8 @@ def _compiler(
         seed,
         output=output,
         covariance=family,
-        lowering=ExactOnly(backend=backend),
+        fidelity=ExactOnly(),
+        executor=SpecificExecutor(backend),
         distribution=distribution,
         output_scope=semantic_output_scope,
     )

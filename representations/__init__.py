@@ -10,7 +10,9 @@ from representations.cartesian_outputs import (
 from representations.adaptive_lifting import (
     O3AdaptiveLifting,
     O3LiftingPlan,
+    O3ReachabilityAnalysis,
     LiftingStage,
+    analyze_lifting_graph,
     coverage_deficit,
     direct_sum_irreps,
     irrep_multiplicities,
@@ -34,7 +36,25 @@ from representations.dense_projector import MultiplicityFirstDenseTensorProduct
 from representations.diagnostics import (
     CompilationCertificate,
     CompilationError,
+    UnreachableActiveTargetError,
     UnreachableTargetError,
+)
+from representations.representation_ir import (
+    CoordinateSpec,
+    DecomposedRep,
+    DirectSumExpr,
+    InnerProductRep,
+    InvariantMetricSpec,
+    IrrepsExpr,
+    RepExpr,
+    RepeatedExpr,
+    SymmetricSquareExpr,
+    TrivialScalarsExpr,
+)
+from representations.operator_ir import (
+    FamilyRelation,
+    OperatorFamilyPlan,
+    OperatorIR,
 )
 from representations.report import CompilationReport, build_compilation_report
 
@@ -48,7 +68,9 @@ __all__ = [
     "rank4_elasticity_irreps",
     "O3AdaptiveLifting",
     "O3LiftingPlan",
+    "O3ReachabilityAnalysis",
     "LiftingStage",
+    "analyze_lifting_graph",
     "coverage_deficit",
     "direct_sum_irreps",
     "irrep_multiplicities",
@@ -66,7 +88,21 @@ __all__ = [
     "supports_cartesian_stf_seed",
     "CompilationCertificate",
     "CompilationError",
+    "UnreachableActiveTargetError",
     "UnreachableTargetError",
+    "RepExpr",
+    "DecomposedRep",
+    "IrrepsExpr",
+    "DirectSumExpr",
+    "SymmetricSquareExpr",
+    "RepeatedExpr",
+    "TrivialScalarsExpr",
+    "InvariantMetricSpec",
+    "CoordinateSpec",
+    "InnerProductRep",
+    "FamilyRelation",
+    "OperatorIR",
+    "OperatorFamilyPlan",
     "CompilationReport",
     "build_compilation_report",
 ]

@@ -9,7 +9,16 @@ from typing import Any, Literal
 
 from compatibility.e3nn import o3
 
-from representations import O3IrrepsSpec, direct_sum_irreps, irrep_multiplicities
+from representations import O3IrrepsSpec, irrep_multiplicities
+from representations.representation_ir import (
+    CoordinateSpec,
+    DirectSumExpr,
+    InnerProductRep,
+    InvariantMetricSpec,
+    IrrepsExpr,
+    RepExpr,
+    SymmetricSquareExpr,
+)
 
 
 FeatureScope = Literal["global", "node", "edge"]
@@ -43,6 +52,8 @@ class FeatureSpec:
     basis_convention: str = "e3nn_real_v1"
     parity_convention: str = "e3nn_o3_v1"
     allow_pooling: bool = True
+    metric_kind: str = "orthonormal_identity"
+    gram_matrix_id: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "irreps", o3.Irreps(self.irreps))
@@ -54,6 +65,10 @@ class FeatureSpec:
             raise ValueError(f"unsupported feature layout: {self.layout}")
         if not self.basis_convention:
             raise ValueError("basis_convention must not be empty")
+        if self.metric_kind != "orthonormal_identity" and not self.gram_matrix_id:
+            raise ValueError(
+                "a non-orthonormal coordinate contract requires gram_matrix_id"
+            )
 
     @classmethod
     def from_irreps(
@@ -66,6 +81,8 @@ class FeatureSpec:
         basis_convention: str = "e3nn_real_v1",
         parity_convention: str = "e3nn_o3_v1",
         allow_pooling: bool = True,
+        metric_kind: str = "orthonormal_identity",
+        gram_matrix_id: str | None = None,
     ) -> "FeatureSpec":
         return cls(
             o3.Irreps(irreps),
@@ -75,6 +92,8 @@ class FeatureSpec:
             basis_convention=basis_convention,
             parity_convention=parity_convention,
             allow_pooling=allow_pooling,
+            metric_kind=metric_kind,
+            gram_matrix_id=gram_matrix_id,
         )
 
     @classmethod
@@ -103,7 +122,27 @@ class FeatureSpec:
                 backbone, "feature_parity_convention", "e3nn_o3_v1"
             ),
             allow_pooling=getattr(backbone, "allow_output_pooling", True),
+            metric_kind=getattr(
+                backbone, "feature_metric_kind", "orthonormal_identity"
+            ),
+            gram_matrix_id=getattr(backbone, "feature_gram_matrix_id", None),
         )
+
+    @property
+    def metric(self) -> InvariantMetricSpec:
+        return InvariantMetricSpec(self.metric_kind, self.gram_matrix_id)
+
+    @property
+    def fiber(self) -> InnerProductRep:
+        return InnerProductRep(
+            self.group,
+            IrrepsExpr(self.irreps, "feature_fiber"),
+            self.metric,
+        )
+
+    @property
+    def coordinates(self) -> CoordinateSpec:
+        return CoordinateSpec(self.basis_convention, self.layout, self.metric)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -117,6 +156,8 @@ class FeatureSpec:
             "parity_convention": self.parity_convention,
             "allow_pooling": self.allow_pooling,
             "last_dimension_layout": "contiguous_irrep_terms_in_declared_order",
+            "inner_product_rep": self.fiber.as_dict(),
+            "coordinates": self.coordinates.as_dict(),
         }
 
     @property
@@ -130,6 +171,8 @@ class OutputSemantics:
     """Canonical probabilistic semantics derivable from ``V`` alone."""
 
     output_spec: O3IrrepsSpec
+    output_expression: RepExpr
+    full_reference_expression: RepExpr
     output_representation: str
     covariance_representation: str
     canonical_target: str
@@ -156,6 +199,11 @@ class OutputSemantics:
             "covariance_components": list(self.covariance_components),
             "executable": self.executable,
             "reachability": self.reachability,
+            "representation_ir": {
+                "output_expression": self.output_expression.as_dict(),
+                "full_reference_expression": self.full_reference_expression.as_dict(),
+                "full_reference_decomposition": self.full_reference_expression.decompose_o3().as_dict(),
+            },
         }
 
 
@@ -172,10 +220,16 @@ def describe_output(
 ) -> OutputSemantics:
     """Analyze ``V``, ``Sym^2(V)``, and ``T(V)`` without planning execution."""
     spec = _output_spec(output)
+    output_expression = IrrepsExpr(spec.irreps, "output")
+    full_reference_expression = DirectSumExpr(
+        (output_expression, SymmetricSquareExpr(output_expression))
+    )
     covariance = spec.symmetric_square_irreps
-    canonical = direct_sum_irreps(spec.irreps, covariance)
+    canonical = full_reference_expression.decompose_o3().irreps
     return OutputSemantics(
         output_spec=spec,
+        output_expression=output_expression,
+        full_reference_expression=full_reference_expression,
         output_representation=str(spec.irreps),
         covariance_representation=str(covariance),
         canonical_target=str(canonical),

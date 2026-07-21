@@ -6,7 +6,13 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 
-CertificateStatus = Literal["success", "failure", "approximation", "restriction"]
+CertificateStatus = Literal[
+    "success",
+    "failure",
+    "approximation",
+    "restriction",
+    "diagnostic",
+]
 
 
 @dataclass(frozen=True)
@@ -42,3 +48,7 @@ class CompilationError(ValueError):
 
 class UnreachableTargetError(CompilationError):
     """A canonical or active target cannot be generated from the seed."""
+
+
+class UnreachableActiveTargetError(UnreachableTargetError):
+    """The selected statistical family's active parameter target is unreachable."""

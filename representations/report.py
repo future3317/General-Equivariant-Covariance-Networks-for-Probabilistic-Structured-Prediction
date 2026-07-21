@@ -271,6 +271,14 @@ class CompilationReport:
         return self["lowering"]
 
     @property
+    def execution_fidelity(self) -> dict[str, Any]:
+        return self["execution_fidelity"]
+
+    @property
+    def backend_selection_basis(self) -> dict[str, Any]:
+        return self["backend_selection_basis"]
+
+    @property
     def objective(self) -> dict[str, Any]:
         return self["objective"]
 
@@ -287,31 +295,58 @@ def build_compilation_report(
     compilation: "O3Compilation",
     executable: torch.nn.Module | None = None,
 ) -> CompilationReport:
-    canonical_deficit = coverage_deficit(
-        compilation.canonical_plan.irreps_out,
-        compilation.canonical_target_irreps,
+    canonical_plan = compilation.canonical_plan
+    canonical_deficit = (
+        coverage_deficit(canonical_plan.irreps_out, compilation.canonical_target_irreps)
+        if canonical_plan is not None
+        else {}
     )
     active_deficit = coverage_deficit(
         compilation.active_plan.irreps_out,
         compilation.active_target_irreps,
     )
-    if canonical_deficit or active_deficit:
-        raise RuntimeError("a completed compilation contains an irrep coverage deficit")
+    if canonical_plan is not None and canonical_deficit:
+        raise RuntimeError("a reachable canonical plan contains an irrep coverage deficit")
+    if active_deficit:
+        raise RuntimeError("a completed compilation contains an active coverage deficit")
 
     certificates = [
         CompilationCertificate(
-            code="target_reachable",
+            code="active_target_reachable",
             status="success",
-            message="Every required irrep type and multiplicity is covered.",
+            message="Every irrep and multiplicity required by the selected family is covered.",
             details={
-                "canonical_depth": compilation.canonical_plan.depth,
                 "active_depth": compilation.active_plan.depth,
-                "canonical_deficit": {},
                 "active_deficit": {},
             },
         ).as_dict()
     ]
-    covariance_is_full = compilation.covariance_mode == "full"
+    if compilation.canonical_reachability.reachable:
+        certificates.append(
+            CompilationCertificate(
+                code="canonical_reference_reachable",
+                status="success",
+                message="The unrestricted full-family reference is also reachable.",
+                details={"canonical_depth": canonical_plan.depth},
+            ).as_dict()
+        )
+    else:
+        assert compilation.canonical_reachability.failure is not None
+        failure = compilation.canonical_reachability.failure
+        certificates.append(
+            CompilationCertificate(
+                code="canonical_reference_unreachable",
+                status="diagnostic",
+                message=(
+                    "The unrestricted full-family reference is unreachable, but it is "
+                    "diagnostic because the selected restricted family is reachable."
+                ),
+                details={"underlying_failure": failure.as_dict()},
+            ).as_dict()
+        )
+    covariance_is_full = (
+        compilation.operator_family.relation_to_full.value == "equal_to_full"
+    )
     if not covariance_is_full:
         certificates.append(
             CompilationCertificate(
@@ -319,14 +354,10 @@ def build_compilation_report(
                 status="restriction",
                 message=(
                     f"The active {compilation.covariance_mode} family is a restriction "
-                    "of the canonical unrestricted covariance target."
+                    "of the unrestricted operator family."
                 ),
                 details={
-                    "selected_by": (
-                        "parameter_budget"
-                        if compilation.config.covariance == "auto"
-                        else "explicit_request"
-                    ),
+                    "selected_by": "operator_family_policy",
                     "budget": compilation.config.parameter_budget,
                     "canonical_coordinates": (
                         compilation.output_spec.dim
@@ -394,8 +425,36 @@ def build_compilation_report(
     active_record = _irrep_record(compilation.active_target_irreps)
     covariance_complexity = _covariance_complexity(compilation)
     probability = _probability_semantics(compilation)
+    canonical_reachability = compilation.canonical_reachability.as_dict()
+    active_reachability = compilation.active_reachability.as_dict()
+    relation = compilation.operator_family.relation_to_full.value
+    family_record = {
+        **compilation.operator_family.as_dict(),
+        "kind": family_kind,
+        "relation_to_canonical": (
+            "canonical_full" if covariance_is_full else "strict_subfamily"
+        ),
+        "relation_to_full": relation,
+    }
+    fidelity_record = {
+        "selected_executor": compilation.backend,
+        "exactness": (
+            "exact_for_active_family"
+            if compilation.backend_exact
+            else "approximate_for_active_family"
+        ),
+        "checkpoint_mapping": (
+            "bijective" if compilation.backend_exact else "not_available"
+        ),
+        "approximation": lowering_approximation,
+    }
+    backend_selection_record = {
+        "selected_executor": compilation.backend,
+        "method": "core_compiler_default",
+        "performance_claim": "none",
+    }
     record = {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "group": "O(3)",
         "cartesian_formula": compilation.output_spec.cartesian_formula,
         "output": output_record,
@@ -404,31 +463,24 @@ def build_compilation_report(
             "canonical": canonical_record,
             "active": active_record,
         },
-        "family": {
-            "kind": family_kind,
-            "relation_to_canonical": (
-                "canonical_full" if covariance_is_full else "strict_subfamily"
-            ),
-            "restriction": None if covariance_is_full else family_kind,
-            "rank": compilation.covariance_rank,
+        "semantic_family_coverage": family_record,
+        "representation_reachability": {
+            "canonical": canonical_reachability,
+            "active": active_reachability,
+            "active_is_compilation_gate": True,
+            "canonical_is_diagnostic_for_restricted_families": not covariance_is_full,
         },
-        "lowering": {
-            "backend": compilation.backend,
-            "exactness": (
-                "exact_for_active_family"
-                if compilation.backend_exact
-                else "approximate_for_active_family"
-            ),
-            "checkpoint_mapping": (
-                "bijective" if compilation.backend_exact else "not_available"
-            ),
-            "approximation": lowering_approximation,
-        },
+        "execution_fidelity": fidelity_record,
+        "backend_selection_basis": backend_selection_record,
+        "family": family_record,
+        "lowering": fidelity_record,
         "objective": probability["likelihood"],
         "complexity": {
             "covariance": covariance_complexity,
             "lifting_edges": compilation.active_plan.depth,
-            "canonical_lifting_edges": compilation.canonical_plan.depth,
+            "canonical_lifting_edges": (
+                canonical_plan.depth if canonical_plan is not None else None
+            ),
             "parameter_counts": parameter_counts,
         },
         "compatibility_hash": None,
@@ -440,22 +492,14 @@ def build_compilation_report(
         "canonical_target": canonical_record,
         "active_target": active_record,
         "reachability": {
-            "status": "reachable",
+            "status": "active_reachable",
             "proof_kind": "breadth_first_shortest_cg_paths",
-            "canonical": {
-                "reachable": True,
-                "depth": compilation.canonical_plan.depth,
-                "missing_irreps": [],
-                "plan": compilation.canonical_plan.as_dict(),
-            },
-            "active": {
-                "reachable": True,
-                "depth": compilation.active_plan.depth,
-                "missing_irreps": [],
-                "plan": compilation.active_plan.as_dict(),
-            },
+            "canonical": canonical_reachability,
+            "active": active_reachability,
             "multiplicity_coverage": {
-                "canonical_deficit": {},
+                "canonical_deficit": (
+                    {} if canonical_plan is not None else "not_computed_unreachable"
+                ),
                 "active_deficit": {},
             },
         },
@@ -493,7 +537,9 @@ def build_compilation_report(
         "backend": compilation.backend,
         "backend_exact": compilation.backend_exact,
         "stf_contraction_rank": compilation.stf_contraction_rank,
-        "canonical_lifting": compilation.canonical_plan.as_dict(),
+        "canonical_lifting": (
+            canonical_plan.as_dict() if canonical_plan is not None else None
+        ),
         "active_lifting": compilation.active_plan.as_dict(),
         "graph_structure": (
             compilation.graph_structure.as_dict()

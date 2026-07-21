@@ -1,4 +1,4 @@
-"""Pure planning between semantic analysis and module materialization."""
+"""Pure planning from semantic representations to executable lowerings."""
 
 from __future__ import annotations
 
@@ -8,18 +8,30 @@ import json
 from typing import Any, Literal
 
 import torch
-from compatibility.e3nn import o3
 
+from equivcompiler.distributions import (
+    DistributionSpec,
+    normalize_distribution,
+)
+from equivcompiler.executors import (
+    CandidateEnumerator,
+    DEFAULT_EXACT_LOWERINGS,
+    ExecutionContext,
+)
 from equivcompiler.modules import CompiledProbabilisticReadout
 from equivcompiler.policies import (
     AutoBudget,
+    CostPolicy,
     CovariancePolicy,
+    ExactExecutorCandidates,
     ExactOnly,
-    FullCovariance,
-    GraphPrecision,
-    IsotypicBlockCovariance,
-    LowRankCovariance,
-    LoweringPolicy,
+    ExecutorPolicy,
+    FidelityPolicy,
+    FirstFeasible,
+    MinimizeLatency,
+    OperatorFamilySpec,
+    PreferExecutor,
+    SpecificExecutor,
     TruncatedMultiplicityRank,
 )
 from equivcompiler.specs import FeatureSpec, OutputSemantics, describe_output
@@ -28,55 +40,42 @@ from representations import (
     CompilationError,
     CompilationReport,
     CompilerConfig,
-    EquivariantOutputGraph,
     O3Compilation,
     O3RepresentationCompiler,
-    direct_sum_irreps,
-    irrep_multiplicities,
-    plan_lifting_graph,
+    analyze_lifting_graph,
 )
+from representations.operator_ir import OperatorFamilyPlan
 
 
 OutputScope = Literal["global", "node", "edge"]
-COMPILER_VERSION = "0.2"
+COMPILER_VERSION = "0.3"
 
 
-def _isotypic_parameters(irreps: o3.Irreps) -> int:
-    return sum(
-        multiplicity * (multiplicity + 1) // 2
-        for multiplicity in irrep_multiplicities(irreps).values()
-    )
-
-
-def _graph_parameters(graph: EquivariantOutputGraph) -> int:
-    local = graph.block_dim * (graph.block_dim + 1) // 2
-    return local * graph.num_potentials
-
-
-def _policy_record(policy: CovariancePolicy | LoweringPolicy) -> dict[str, Any]:
-    if isinstance(policy, FullCovariance):
-        return {"kind": "full_covariance"}
-    if isinstance(policy, LowRankCovariance):
-        return {"kind": "low_rank_plus_isotropic", "rank": policy.rank}
-    if isinstance(policy, IsotypicBlockCovariance):
-        return {"kind": "isotypic_block_covariance"}
-    if isinstance(policy, GraphPrecision):
-        return {"kind": "graph_precision", "graph": policy.graph.as_dict()}
-    if isinstance(policy, AutoBudget):
-        return {
-            "kind": "auto_budget",
-            "budget": policy.budget,
-            "low_rank": policy.low_rank,
-            "allowed_families": list(policy.allowed_families),
-            "graph": policy.graph.as_dict() if policy.graph is not None else None,
-        }
+def _policy_record(policy: object) -> dict[str, Any]:
+    if hasattr(policy, "as_dict"):
+        return policy.as_dict()  # type: ignore[no-any-return]
     if isinstance(policy, ExactOnly):
-        return {"kind": "exact_only", "backend": policy.backend}
+        return {"kind": "exact_only"}
     if isinstance(policy, TruncatedMultiplicityRank):
+        return {"kind": "truncated_multiplicity_rank", "rank": policy.rank}
+    if isinstance(policy, ExactExecutorCandidates):
+        return {"kind": "exact_executor_candidates", "candidates": list(policy.candidates)}
+    if isinstance(policy, SpecificExecutor):
+        return {"kind": "specific_executor", "name": policy.name}
+    if isinstance(policy, PreferExecutor):
+        return {"kind": "prefer_executor", "priority": list(policy.priority)}
+    if isinstance(policy, MinimizeLatency):
         return {
-            "kind": "truncated_multiplicity_rank",
-            "backend": policy.backend,
-            "rank": policy.rank,
+            "kind": "minimize_measured_latency",
+            "signature": policy.signature.as_dict(),
+            "measurements": [
+                {
+                    "executor": item.executor,
+                    "median_ms": item.median_ms,
+                    "iqr_ms": item.iqr_ms,
+                }
+                for item in policy.measurements
+            ],
         }
     raise TypeError(f"unsupported policy: {type(policy).__name__}")
 
@@ -84,80 +83,85 @@ def _policy_record(policy: CovariancePolicy | LoweringPolicy) -> dict[str, Any]:
 def _select_family(
     policy: CovariancePolicy,
     semantics: OutputSemantics,
-) -> tuple[str, int, EquivariantOutputGraph | None, dict[str, Any]]:
-    dimension = semantics.output_dimension
-    if isinstance(policy, FullCovariance):
-        return "full", min(8, dimension), None, {
+) -> tuple[OperatorFamilyPlan, dict[str, Any]]:
+    if isinstance(policy, OperatorFamilySpec):
+        plan = policy.compile(semantics.output_spec)
+        return plan, {
             "rule": "explicit_request",
-            "requested_family": "full",
+            "selected_family": plan.kind,
+            "selected_parameters": plan.parameter_count,
         }
-    if isinstance(policy, LowRankCovariance):
-        return "low_rank", min(policy.rank, dimension), None, {
-            "rule": "explicit_request",
-            "requested_family": "low_rank",
-            "rank": min(policy.rank, dimension),
-        }
-    if isinstance(policy, IsotypicBlockCovariance):
-        return "block", min(8, dimension), None, {
-            "rule": "explicit_request",
-            "requested_family": "block",
-        }
-    if isinstance(policy, GraphPrecision):
-        return "graph", min(8, dimension), policy.graph, {
-            "rule": "explicit_request",
-            "requested_family": "graph",
-        }
-    if not isinstance(policy, AutoBudget):
-        raise TypeError(f"unsupported covariance policy: {type(policy).__name__}")
 
-    rank = min(policy.low_rank, dimension)
-    counts: dict[str, int | None] = {
-        "full": semantics.full_covariance_parameters,
-        "graph": _graph_parameters(policy.graph) if policy.graph is not None else None,
-        "low_rank": dimension * rank + 1,
-        "block": _isotypic_parameters(semantics.output_spec.irreps),
-    }
-    considered = []
-    selected = None
-    for family in policy.allowed_families:
-        parameters = counts[family]
-        eligible = parameters is not None and parameters <= policy.budget
-        considered.append(
-            {
-                "family": family,
-                "parameters": parameters,
-                "within_budget": eligible,
-            }
-        )
-        if selected is None and eligible:
-            selected = family
-    if selected is None:
+    candidates = policy.candidates if isinstance(policy, AutoBudget) else policy.priority
+    compiled = [candidate.compile(semantics.output_spec) for candidate in candidates]
+    considered = [
+        {
+            "family": item.kind,
+            "parameters": item.parameter_count,
+            "within_budget": item.parameter_count <= policy.max_parameters,
+            "relation_to_full": item.relation_to_full.value,
+        }
+        for item in compiled
+    ]
+    pairwise_relations = []
+    for left_index, left in enumerate(compiled):
+        for right in compiled[left_index + 1 :]:
+            if left.kind == right.kind:
+                relation = "same_family_kind"
+            elif left.kind == "full":
+                relation = "right_is_subset_or_equal_to_left"
+            elif right.kind == "full":
+                relation = "left_is_subset_or_equal_to_right"
+            else:
+                relation = "incomparable_or_unknown"
+            pairwise_relations.append(
+                {"left": left.kind, "right": right.kind, "relation": relation}
+            )
+    feasible = [
+        (index, item)
+        for index, item in enumerate(compiled)
+        if item.parameter_count <= policy.max_parameters
+    ]
+    if not feasible:
         raise CompilationError(
             CompilationCertificate(
                 code="covariance_budget_unsatisfied",
                 status="failure",
-                message="no authorized covariance family satisfies the parameter budget",
+                message="no authorized operator family satisfies the parameter budget",
                 details={
-                    "budget": policy.budget,
-                    "allowed_families": list(policy.allowed_families),
+                    "budget": policy.max_parameters,
                     "considered": considered,
                 },
             )
         )
-    return selected, rank, policy.graph if selected == "graph" else None, {
-        "rule": "parameter_budget",
-        "budget": policy.budget,
-        "selected_family": selected,
-        "selected_parameters": counts[selected],
-        "full_parameters": counts["full"],
+
+    if isinstance(policy, AutoBudget):
+        selected_index, selected = min(
+            feasible, key=lambda pair: (pair[1].parameter_count, pair[0])
+        )
+        rule = "min_parameter_count_under_budget"
+        selection_semantics = "cost_objective_with_declaration_order_tie_break"
+    elif isinstance(policy, FirstFeasible):
+        selected_index, selected = feasible[0]
+        rule = "user_declared_priority"
+        selection_semantics = "first_feasible_in_explicit_priority"
+    else:  # pragma: no cover - guarded by the public policy union
+        raise TypeError(f"unsupported covariance policy: {type(policy).__name__}")
+
+    return selected, {
+        "rule": rule,
+        "selection_semantics": selection_semantics,
+        "budget": policy.max_parameters,
+        "selected_family": selected.kind,
+        "selected_candidate_index": selected_index,
+        "selected_parameters": selected.parameter_count,
         "considered": considered,
+        "pairwise_family_relations": pairwise_relations,
+        "candidate_family_order_is_not_a_mathematical_inclusion_order": True,
     }
 
 
-def _validate_contract(
-    seed: FeatureSpec,
-    output_scope: OutputScope,
-) -> bool:
+def _validate_contract(seed: FeatureSpec, output_scope: OutputScope) -> bool:
     if seed.group != "O3":
         raise CompilationError(
             CompilationCertificate(
@@ -172,15 +176,21 @@ def _validate_contract(
             CompilationCertificate(
                 code="unsupported_feature_layout",
                 status="failure",
-                message="feature layout or real-basis convention has no registered lowering",
+                message="feature coordinates have no registered executable lowering",
                 details={
                     "layout": seed.layout,
                     "basis_convention": seed.basis_convention,
-                    "supported": {
-                        "layout": "e3nn",
-                        "basis_convention": "e3nn_real_v1",
-                    },
+                    "supported": {"layout": "e3nn", "basis_convention": "e3nn_real_v1"},
                 },
+            )
+        )
+    if not seed.metric.is_orthonormal:
+        raise CompilationError(
+            CompilationCertificate(
+                code="metric_lowering_unavailable",
+                status="failure",
+                message="the metric is typed, but this release has no Gram-whitening lowering",
+                details={"metric": seed.metric.as_dict()},
             )
         )
     if output_scope == "global":
@@ -207,37 +217,114 @@ def _validate_contract(
     return False
 
 
-def _validate_graph(
-    graph: EquivariantOutputGraph | None,
+def _select_executor(
     semantics: OutputSemantics,
-) -> None:
-    if graph is not None and graph.output_irreps != semantics.output_spec.irreps:
+    family: OperatorFamilyPlan,
+    active_depth: int,
+    fidelity: FidelityPolicy,
+    executor: ExecutorPolicy,
+    cost: CostPolicy,
+) -> tuple[str, int | None, dict[str, Any]]:
+    context = ExecutionContext(semantics.output_spec, family.kind, active_depth)
+    support = DEFAULT_EXACT_LOWERINGS.as_dict(context)
+    requested = (
+        executor.candidates
+        if isinstance(executor, ExactExecutorCandidates)
+        else (executor.name,)
+    )
+    available = CandidateEnumerator(DEFAULT_EXACT_LOWERINGS).enumerate(
+        requested, context
+    )
+    if isinstance(fidelity, TruncatedMultiplicityRank):
+        available = tuple(name for name in available if name == "cartesian_stf")
+    if not available:
         raise CompilationError(
             CompilationCertificate(
-                code="graph_output_mismatch",
+                code="backend_incompatible",
                 status="failure",
-                message="graph output representation does not match declared output semantics",
+                message="no requested executor supports the active representation program",
                 details={
-                    "graph_output": str(graph.output_irreps),
-                    "declared_output": semantics.output_representation,
+                    "requested": list(requested),
+                    "support": support,
+                    "fidelity": _policy_record(fidelity),
+                    "family": family.kind,
+                    "active_depth": active_depth,
                 },
             )
         )
+
+    if isinstance(cost, PreferExecutor):
+        selected = next((name for name in cost.priority if name in available), None)
+        if selected is None:
+            raise CompilationError(
+                CompilationCertificate(
+                    code="cost_policy_no_candidate",
+                    status="failure",
+                    message="the static cost priority contains no supported executor",
+                    details={"available": list(available), "priority": list(cost.priority)},
+                )
+            )
+        basis = {
+            "method": "explicit_static_priority",
+            "performance_claim": "none",
+            "available_candidates": list(available),
+            "priority": list(cost.priority),
+        }
+    elif isinstance(cost, MinimizeLatency):
+        measured = [item for item in cost.measurements if item.executor in available]
+        if not measured:
+            raise CompilationError(
+                CompilationCertificate(
+                    code="missing_executor_measurement",
+                    status="failure",
+                    message="no compatible latency measurement matches the requested signature",
+                    details={
+                        "available": list(available),
+                        "signature": cost.signature.as_dict(),
+                    },
+                )
+            )
+        best = min(measured, key=lambda item: item.median_ms)
+        selected = best.executor
+        basis = {
+            "method": "measured_autotune",
+            "performance_claim": "measured_for_exact_shape_signature",
+            "signature": cost.signature.as_dict(),
+            "available_candidates": list(available),
+            "selected_median_ms": best.median_ms,
+            "measurements": [
+                {"executor": item.executor, "median_ms": item.median_ms, "iqr_ms": item.iqr_ms}
+                for item in measured
+            ],
+        }
+    else:  # pragma: no cover
+        raise TypeError(f"unsupported cost policy: {type(cost).__name__}")
+
+    contraction_rank = (
+        fidelity.rank if isinstance(fidelity, TruncatedMultiplicityRank) else None
+    )
+    return selected, contraction_rank, basis
 
 
 def _compatibility_hash(
     seed: FeatureSpec,
     semantics: OutputSemantics,
+    distribution: DistributionSpec,
     covariance: CovariancePolicy,
-    lowering: LoweringPolicy,
+    fidelity: FidelityPolicy,
+    executor: ExecutorPolicy,
+    cost: CostPolicy,
     output_scope: OutputScope,
 ) -> str:
     payload = {
         "compiler_version": COMPILER_VERSION,
         "feature": seed.as_dict(),
         "output": semantics.as_dict(),
+        "distribution": distribution.as_dict(),
         "covariance_policy": _policy_record(covariance),
-        "lowering_policy": _policy_record(lowering),
+        "fidelity_policy": _policy_record(fidelity),
+        "executor_policy": _policy_record(executor),
+        "cost_policy": _policy_record(cost),
         "output_scope": output_scope,
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
@@ -249,10 +336,14 @@ def _decorate_report(
     *,
     seed: FeatureSpec,
     semantics: OutputSemantics,
+    distribution: DistributionSpec,
     covariance_policy: CovariancePolicy,
-    lowering_policy: LoweringPolicy,
+    fidelity_policy: FidelityPolicy,
+    executor_policy: ExecutorPolicy,
+    cost_policy: CostPolicy,
     output_scope: OutputScope,
     selection_reason: dict[str, Any],
+    backend_selection_basis: dict[str, Any],
     compatibility_hash: str,
 ) -> CompilationReport:
     record = report.as_dict()
@@ -267,14 +358,21 @@ def _decorate_report(
     family = dict(record["family"])
     family["policy"] = _policy_record(covariance_policy)
     family["selection_reason"] = selection_reason
-    lowering = dict(record["lowering"])
-    lowering["policy"] = _policy_record(lowering_policy)
+    execution_fidelity = dict(record["execution_fidelity"])
+    execution_fidelity["policy"] = _policy_record(fidelity_policy)
+    backend_selection = dict(record["backend_selection_basis"])
+    backend_selection.update(backend_selection_basis)
+    backend_selection["executor_policy"] = _policy_record(executor_policy)
+    backend_selection["cost_policy"] = _policy_record(cost_policy)
     record.update(
         {
             "seed": seed.as_dict(),
             "output": semantics.as_dict(),
+            "distribution_ir": distribution.as_dict(),
             "family": family,
-            "lowering": lowering,
+            "semantic_family_coverage": family,
+            "execution_fidelity": execution_fidelity,
+            "backend_selection_basis": backend_selection,
             "output_scope": output_scope,
             "pooling_required": output_scope == "global" and seed.scope != "global",
             "compatibility_hash": compatibility_hash,
@@ -282,6 +380,12 @@ def _decorate_report(
             "certificates": certificates,
         }
     )
+    # Compatibility aliases contain the same data, not a second source of truth.
+    record["lowering"] = execution_fidelity
+    record["execution"] = {
+        **record.get("execution", {}),
+        "selection_basis": backend_selection,
+    }
     return CompilationReport.from_dict(record)
 
 
@@ -291,13 +395,22 @@ class CompilationPlan:
 
     seed: FeatureSpec
     semantics: OutputSemantics
+    distribution_spec: DistributionSpec
     covariance_policy: CovariancePolicy
-    lowering_policy: LoweringPolicy
+    fidelity_policy: FidelityPolicy
+    executor_policy: ExecutorPolicy
+    cost_policy: CostPolicy
     output_scope: OutputScope
     compilation: O3Compilation
     selection_reason: dict[str, Any]
+    backend_selection_basis: dict[str, Any]
     compatibility_hash: str
     report: CompilationReport
+
+    @property
+    def lowering_policy(self) -> FidelityPolicy:
+        """Compatibility alias for pre-0.3 clients."""
+        return self.fidelity_policy
 
     def build_readout(
         self,
@@ -333,10 +446,14 @@ class CompilationPlan:
             self.compilation.report(executable),
             seed=self.seed,
             semantics=self.semantics,
+            distribution=self.distribution_spec,
             covariance_policy=self.covariance_policy,
-            lowering_policy=self.lowering_policy,
+            fidelity_policy=self.fidelity_policy,
+            executor_policy=self.executor_policy,
+            cost_policy=self.cost_policy,
             output_scope=self.output_scope,
             selection_reason=self.selection_reason,
+            backend_selection_basis=self.backend_selection_basis,
             compatibility_hash=self.compatibility_hash,
         )
 
@@ -346,73 +463,114 @@ def plan_readout(
     *,
     output,
     covariance: CovariancePolicy,
-    lowering: LoweringPolicy = ExactOnly(),
-    distribution: Literal["gaussian", "student_t"] = "gaussian",
+    distribution: DistributionSpec | Literal["gaussian", "student_t"] = "gaussian",
+    fidelity: FidelityPolicy | None = None,
+    executor: ExecutorPolicy = ExactExecutorCandidates(),
+    cost: CostPolicy = PreferExecutor(),
+    lowering: FidelityPolicy | None = None,
     student_t_dof: float = 5.0,
     output_scope: OutputScope = "global",
 ) -> CompilationPlan:
-    """Plan semantics, reachability, family, and lowering without modules."""
+    """Analyze semantics/reachability and select an independently costed lowering."""
+    if fidelity is not None and lowering is not None:
+        raise ValueError("pass fidelity or the legacy lowering alias, not both")
+    fidelity_policy = fidelity or lowering or ExactOnly()
+    distribution_spec = normalize_distribution(
+        distribution, student_t_dof=student_t_dof
+    )
     semantics = describe_output(output)
     pool_input = _validate_contract(seed, output_scope)
-    canonical_target = direct_sum_irreps(
-        semantics.output_spec.irreps,
-        semantics.output_spec.symmetric_square_irreps,
-    )
-    canonical_plan = plan_lifting_graph(seed.irreps, canonical_target)
-    mode, rank, graph, selection_reason = _select_family(covariance, semantics)
-    _validate_graph(graph, semantics)
+    family, selection_reason = _select_family(covariance, semantics)
 
-    if isinstance(lowering, ExactOnly):
-        backend = lowering.backend
+    canonical_expression = distribution_spec.canonical_reference(semantics.output_spec)
+    active_expression = distribution_spec.active_parameter_rep(
+        semantics.output_spec, family
+    )
+    canonical_target = canonical_expression.decompose_o3().irreps
+    active_target = active_expression.decompose_o3().irreps
+    canonical_reachability = analyze_lifting_graph(seed.irreps, canonical_target)
+    active_reachability = (
+        canonical_reachability
+        if active_target == canonical_target
+        else analyze_lifting_graph(seed.irreps, active_target)
+    )
+    if not active_reachability.reachable:
+        # The core compiler converts this diagnostic into the public active-target error.
+        active_depth = 0
+        backend = "spherical_cg"
         contraction_rank = None
-    elif isinstance(lowering, TruncatedMultiplicityRank):
-        backend = lowering.backend
-        contraction_rank = lowering.rank
+        backend_selection_basis = {"method": "not_selected_active_unreachable"}
     else:
-        raise TypeError(f"unsupported lowering policy: {type(lowering).__name__}")
+        active_depth = active_reachability.plan.depth  # type: ignore[union-attr]
+        backend, contraction_rank, backend_selection_basis = _select_executor(
+            semantics,
+            family,
+            active_depth,
+            fidelity_policy,
+            executor,
+            cost,
+        )
 
     config = CompilerConfig(
-        covariance=mode,
+        covariance=family.kind,
         output_scope="global" if pool_input else "dense",
-        objective=distribution,
-        parameter_budget=(
-            covariance.budget if isinstance(covariance, AutoBudget) else 1
-        ),
-        low_rank=rank,
-        student_t_dof=student_t_dof,
+        objective=distribution_spec.objective_name(),
+        parameter_budget=getattr(covariance, "max_parameters", family.parameter_count),
+        low_rank=family.rank or 1,
+        student_t_dof=getattr(distribution_spec, "student_t_dof", student_t_dof),
         backend=backend,
         stf_contraction_rank=contraction_rank,
     )
-    compiler = (
-        O3RepresentationCompiler.for_graph(graph, config)
-        if graph is not None
-        else O3RepresentationCompiler(semantics.output_spec, config)
+    compiler = O3RepresentationCompiler(
+        semantics.output_spec,
+        config,
+        graph_structure=family.graph,
     )
-    compilation = compiler.compile(seed.irreps, canonical_plan=canonical_plan)
-    if isinstance(lowering, ExactOnly) and not compilation.backend_exact:
-        raise RuntimeError("ExactOnly materialized an approximate backend")
+    compilation = compiler.compile(
+        seed.irreps,
+        operator_family=family,
+        canonical_reachability=canonical_reachability,
+        active_reachability=active_reachability,
+    )
+    if isinstance(fidelity_policy, ExactOnly) and not compilation.backend_exact:
+        raise RuntimeError("ExactOnly materialized an approximate executor")
 
     compatibility_hash = _compatibility_hash(
-        seed, semantics, covariance, lowering, output_scope
+        seed,
+        semantics,
+        distribution_spec,
+        covariance,
+        fidelity_policy,
+        executor,
+        cost,
+        output_scope,
     )
     report = _decorate_report(
         compilation.report(),
         seed=seed,
         semantics=semantics,
+        distribution=distribution_spec,
         covariance_policy=covariance,
-        lowering_policy=lowering,
+        fidelity_policy=fidelity_policy,
+        executor_policy=executor,
+        cost_policy=cost,
         output_scope=output_scope,
         selection_reason=selection_reason,
+        backend_selection_basis=backend_selection_basis,
         compatibility_hash=compatibility_hash,
     )
     return CompilationPlan(
         seed=seed,
         semantics=semantics,
+        distribution_spec=distribution_spec,
         covariance_policy=covariance,
-        lowering_policy=lowering,
+        fidelity_policy=fidelity_policy,
+        executor_policy=executor,
+        cost_policy=cost,
         output_scope=output_scope,
         compilation=compilation,
         selection_reason=selection_reason,
+        backend_selection_basis=backend_selection_basis,
         compatibility_hash=compatibility_hash,
         report=report,
     )

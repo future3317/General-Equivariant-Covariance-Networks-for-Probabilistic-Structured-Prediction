@@ -9,6 +9,7 @@ from equivcompiler import (
     FeatureSpec,
     FullCovariance,
     GraphPrecision,
+    LowRankCovariance,
     TruncatedMultiplicityRank,
     compile_readout,
     describe_output,
@@ -89,21 +90,24 @@ def test_budget_subfamily_is_not_reported_as_lowering_approximation():
     _, report = compile_readout(
         seed,
         output="ijkl=jikl=ijlk=klij",
-        covariance=AutoBudget(budget=192, low_rank=8),
+        covariance=AutoBudget(
+            max_parameters=192,
+            candidates=(FullCovariance(), LowRankCovariance(8)),
+        ),
         output_scope="global",
     )
     assert report.family["kind"] == "low_rank_plus_isotropic"
     assert report.family["relation_to_canonical"] == "strict_subfamily"
     assert report.lowering["exactness"] == "exact_for_active_family"
     assert report.lowering["approximation"] is None
-    assert report.family["selection_reason"]["rule"] == "parameter_budget"
+    assert report.family["selection_reason"]["rule"] == "min_parameter_count_under_budget"
     assert "structured_covariance_restriction" in _certificate_codes(report)
     restriction = next(
         certificate
         for certificate in report["certificates"]
         if certificate["code"] == "structured_covariance_restriction"
     )
-    assert restriction["details"]["selected_by"] == "parameter_budget"
+    assert restriction["details"]["selected_by"] == "min_parameter_count_under_budget"
     counts = report.complexity["parameter_counts"]
     assert counts["canonical_covariance_coordinates"] == 231
     assert counts["active_covariance_coordinates"] == 169
@@ -120,12 +124,12 @@ def test_parity_failure_is_machine_readable():
     assert caught.value.certificate.details["parity_obstruction"]
 
 
-def test_canonical_reachability_precedes_budget_family_selection():
+def test_full_family_active_reachability_remains_a_hard_gate():
     with pytest.raises(CompilationError) as caught:
         plan_readout(
             FeatureSpec.from_irreps("2x0e + 1x2e", scope="global"),
             output="1o",
-            covariance=AutoBudget(budget=1, allowed_families=("full",)),
+            covariance=FullCovariance(),
         )
     assert caught.value.certificate.code == "parity_unreachable"
 

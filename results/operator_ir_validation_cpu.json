@@ -1,0 +1,757 @@
+{
+  "kind": "operator_ir_and_executor_validation",
+  "training_steps": 0,
+  "environment": {
+    "python": "3.11.13",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "torch": "2.12.0+cu126",
+    "torch_cuda_build": "12.6",
+    "e3nn": "0.5.7",
+    "cuequivariance": "0.10.0",
+    "cuequivariance_torch": "0.10.0",
+    "triton": null,
+    "device": "cpu",
+    "device_name": "CPU",
+    "tf32_matmul": null,
+    "cudnn_benchmark": null,
+    "timing": {
+      "synchronize_before_and_after": false,
+      "zero_grad": "set_to_none=True, before timer",
+      "data_transfer": "excluded",
+      "memory": "absolute process peak allocated and reserved; cache emptied and peak counters reset after warmup for each phase"
+    }
+  },
+  "representation_pipeline": [
+    "RepExpr",
+    "DecomposedRep",
+    "ConcreteLayout"
+  ],
+  "operator_families": [
+    {
+      "name": "full",
+      "kind": "full",
+      "parameter_expression": {
+        "kind": "symmetric_square",
+        "operand": {
+          "kind": "atomic_representation",
+          "semantic_name": "output",
+          "declared_irreps": "1x0e+1x2e"
+        }
+      },
+      "parameter_representation": {
+        "group": "O3",
+        "irreps": "2x0e+2x2e+1x4e",
+        "dimension": 21,
+        "multiplicity_basis": "abstract_multiplicity_space"
+      },
+      "parameter_count": 21,
+      "domain": "scatter",
+      "assembly_ir": {
+        "kind": "spectral_positive",
+        "inputs": [
+          {
+            "kind": "symmetric_operator",
+            "inputs": [],
+            "attributes": {},
+            "positivity": "unspecified",
+            "equivariance": "certified"
+          }
+        ],
+        "attributes": {
+          "map": "matrix_exponential"
+        },
+        "positivity": "spd",
+        "equivariance": "certified"
+      },
+      "relation_to_full": "equal_to_full",
+      "rank": null,
+      "graph": null,
+      "restriction": null,
+      "computational_oracles": [
+        "logdet",
+        "quadratic_form",
+        "sampling"
+      ],
+      "certificates": {
+        "equivariance": "compositional",
+        "positivity": "spd"
+      }
+    },
+    {
+      "name": "low_rank",
+      "kind": "low_rank",
+      "parameter_expression": {
+        "kind": "direct_sum",
+        "terms": [
+          {
+            "kind": "repeated_representation",
+            "copies": 2,
+            "operand": {
+              "kind": "atomic_representation",
+              "semantic_name": "output",
+              "declared_irreps": "1x0e+1x2e"
+            }
+          },
+          {
+            "kind": "trivial_scalars",
+            "count": 1
+          }
+        ]
+      },
+      "parameter_representation": {
+        "group": "O3",
+        "irreps": "3x0e+2x2e",
+        "dimension": 13,
+        "multiplicity_basis": "abstract_multiplicity_space"
+      },
+      "parameter_count": 13,
+      "domain": "scatter",
+      "assembly_ir": {
+        "kind": "add",
+        "inputs": [
+          {
+            "kind": "positive_scalar_identity",
+            "inputs": [],
+            "attributes": {},
+            "positivity": "spd",
+            "equivariance": "certified"
+          },
+          {
+            "kind": "gram",
+            "inputs": [
+              {
+                "kind": "equivariant_factor",
+                "inputs": [],
+                "attributes": {
+                  "rank": 2
+                },
+                "positivity": "unspecified",
+                "equivariance": "certified"
+              }
+            ],
+            "attributes": {},
+            "positivity": "psd",
+            "equivariance": "certified"
+          }
+        ],
+        "attributes": {},
+        "positivity": "spd",
+        "equivariance": "certified"
+      },
+      "relation_to_full": "strict_subset",
+      "rank": 2,
+      "graph": null,
+      "restriction": "rank_r_plus_isotropic_scatter",
+      "computational_oracles": [
+        "logdet",
+        "quadratic_form",
+        "sampling"
+      ],
+      "certificates": {
+        "equivariance": "compositional",
+        "positivity": "spd"
+      }
+    },
+    {
+      "name": "isotypic_block",
+      "kind": "block",
+      "parameter_expression": {
+        "kind": "trivial_scalars",
+        "count": 2
+      },
+      "parameter_representation": {
+        "group": "O3",
+        "irreps": "2x0e",
+        "dimension": 2,
+        "multiplicity_basis": "abstract_multiplicity_space"
+      },
+      "parameter_count": 2,
+      "domain": "scatter",
+      "assembly_ir": {
+        "kind": "direct_sum",
+        "inputs": [
+          {
+            "kind": "kronecker_identity",
+            "inputs": [
+              {
+                "kind": "spectral_positive",
+                "inputs": [],
+                "attributes": {
+                  "map": "multiplicity_cholesky"
+                },
+                "positivity": "spd",
+                "equivariance": "certified"
+              }
+            ],
+            "attributes": {
+              "irrep": "0e",
+              "irrep_dimension": 1,
+              "multiplicity": 1
+            },
+            "positivity": "spd",
+            "equivariance": "certified"
+          },
+          {
+            "kind": "kronecker_identity",
+            "inputs": [
+              {
+                "kind": "spectral_positive",
+                "inputs": [],
+                "attributes": {
+                  "map": "multiplicity_cholesky"
+                },
+                "positivity": "spd",
+                "equivariance": "certified"
+              }
+            ],
+            "attributes": {
+              "irrep": "2e",
+              "irrep_dimension": 5,
+              "multiplicity": 1
+            },
+            "positivity": "spd",
+            "equivariance": "certified"
+          }
+        ],
+        "attributes": {},
+        "positivity": "spd",
+        "equivariance": "certified"
+      },
+      "relation_to_full": "strict_subset",
+      "rank": null,
+      "graph": null,
+      "restriction": "isotypic_multiplicity_blocks",
+      "computational_oracles": [
+        "logdet",
+        "quadratic_form",
+        "sampling"
+      ],
+      "certificates": {
+        "equivariance": "compositional",
+        "positivity": "spd"
+      }
+    },
+    {
+      "name": "graph_precision",
+      "kind": "graph",
+      "parameter_expression": {
+        "kind": "repeated_representation",
+        "copies": 7,
+        "operand": {
+          "kind": "symmetric_square",
+          "operand": {
+            "kind": "atomic_representation",
+            "semantic_name": "graph_residual",
+            "declared_irreps": "1x1o"
+          }
+        }
+      },
+      "parameter_representation": {
+        "group": "O3",
+        "irreps": "7x0e+7x2e",
+        "dimension": 42,
+        "multiplicity_basis": "abstract_multiplicity_space"
+      },
+      "parameter_count": 42,
+      "domain": "precision",
+      "assembly_ir": {
+        "kind": "add",
+        "inputs": [
+          {
+            "kind": "direct_sum",
+            "inputs": [
+              {
+                "kind": "local_spectral_positive",
+                "inputs": [],
+                "attributes": {
+                  "role": "unary"
+                },
+                "positivity": "spd",
+                "equivariance": "certified"
+              }
+            ],
+            "attributes": {
+              "copies": 4
+            },
+            "positivity": "spd",
+            "equivariance": "certified"
+          },
+          {
+            "kind": "pullback",
+            "inputs": [
+              {
+                "kind": "direct_sum",
+                "inputs": [
+                  {
+                    "kind": "local_spectral_positive",
+                    "inputs": [],
+                    "attributes": {
+                      "role": "factor"
+                    },
+                    "positivity": "spd",
+                    "equivariance": "certified"
+                  }
+                ],
+                "attributes": {
+                  "copies": 3
+                },
+                "positivity": "spd",
+                "equivariance": "certified"
+              }
+            ],
+            "attributes": {
+              "map": "homogeneous_graph_coboundary"
+            },
+            "positivity": "psd",
+            "equivariance": "certified"
+          }
+        ],
+        "attributes": {},
+        "positivity": "spd",
+        "equivariance": "certified"
+      },
+      "relation_to_full": "strict_subset",
+      "rank": null,
+      "graph": {
+        "num_nodes": 4,
+        "num_edges": 3,
+        "edges": [
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            2,
+            3
+          ]
+        ],
+        "node_irrep": "1o",
+        "node_names": null,
+        "block_dim": 3,
+        "output_dim": 12,
+        "is_tree": true
+      },
+      "restriction": "fixed_skeleton_precision_cone",
+      "computational_oracles": [
+        "logdet",
+        "quadratic_form",
+        "sampling"
+      ],
+      "certificates": {
+        "equivariance": "compositional",
+        "positivity": "spd"
+      }
+    }
+  ],
+  "family_selection": {
+    "auto_budget": {
+      "assembly_ir": {
+        "attributes": {},
+        "equivariance": "certified",
+        "inputs": [
+          {
+            "attributes": {
+              "irrep": "0e",
+              "irrep_dimension": 1,
+              "multiplicity": 1
+            },
+            "equivariance": "certified",
+            "inputs": [
+              {
+                "attributes": {
+                  "map": "multiplicity_cholesky"
+                },
+                "equivariance": "certified",
+                "inputs": [],
+                "kind": "spectral_positive",
+                "positivity": "spd"
+              }
+            ],
+            "kind": "kronecker_identity",
+            "positivity": "spd"
+          },
+          {
+            "attributes": {
+              "irrep": "2e",
+              "irrep_dimension": 5,
+              "multiplicity": 1
+            },
+            "equivariance": "certified",
+            "inputs": [
+              {
+                "attributes": {
+                  "map": "multiplicity_cholesky"
+                },
+                "equivariance": "certified",
+                "inputs": [],
+                "kind": "spectral_positive",
+                "positivity": "spd"
+              }
+            ],
+            "kind": "kronecker_identity",
+            "positivity": "spd"
+          }
+        ],
+        "kind": "direct_sum",
+        "positivity": "spd"
+      },
+      "certificates": {
+        "equivariance": "compositional",
+        "positivity": "spd"
+      },
+      "computational_oracles": [
+        "logdet",
+        "quadratic_form",
+        "sampling"
+      ],
+      "domain": "scatter",
+      "graph": null,
+      "kind": "isotypic_block_covariance",
+      "parameter_count": 2,
+      "parameter_expression": {
+        "count": 2,
+        "kind": "trivial_scalars"
+      },
+      "parameter_representation": {
+        "dimension": 2,
+        "group": "O3",
+        "irreps": "2x0e",
+        "multiplicity_basis": "abstract_multiplicity_space"
+      },
+      "policy": {
+        "candidates": [
+          {
+            "kind": "full_covariance"
+          },
+          {
+            "kind": "low_rank_plus_isotropic",
+            "rank": 1
+          },
+          {
+            "kind": "isotypic_block_covariance"
+          }
+        ],
+        "kind": "auto_budget",
+        "max_parameters": 30,
+        "objective": "min_parameter_count"
+      },
+      "rank": null,
+      "relation_to_canonical": "strict_subfamily",
+      "relation_to_full": "strict_subset",
+      "restriction": "isotypic_multiplicity_blocks",
+      "selection_reason": {
+        "budget": 30,
+        "candidate_family_order_is_not_a_mathematical_inclusion_order": true,
+        "considered": [
+          {
+            "family": "full",
+            "parameters": 21,
+            "relation_to_full": "equal_to_full",
+            "within_budget": true
+          },
+          {
+            "family": "low_rank",
+            "parameters": 7,
+            "relation_to_full": "strict_subset",
+            "within_budget": true
+          },
+          {
+            "family": "block",
+            "parameters": 2,
+            "relation_to_full": "strict_subset",
+            "within_budget": true
+          }
+        ],
+        "pairwise_family_relations": [
+          {
+            "left": "full",
+            "relation": "right_is_subset_or_equal_to_left",
+            "right": "low_rank"
+          },
+          {
+            "left": "full",
+            "relation": "right_is_subset_or_equal_to_left",
+            "right": "block"
+          },
+          {
+            "left": "low_rank",
+            "relation": "incomparable_or_unknown",
+            "right": "block"
+          }
+        ],
+        "rule": "min_parameter_count_under_budget",
+        "selected_candidate_index": 2,
+        "selected_family": "block",
+        "selected_parameters": 2,
+        "selection_semantics": "cost_objective_with_declaration_order_tie_break"
+      }
+    },
+    "first_feasible": {
+      "assembly_ir": {
+        "attributes": {
+          "map": "matrix_exponential"
+        },
+        "equivariance": "certified",
+        "inputs": [
+          {
+            "attributes": {},
+            "equivariance": "certified",
+            "inputs": [],
+            "kind": "symmetric_operator",
+            "positivity": "unspecified"
+          }
+        ],
+        "kind": "spectral_positive",
+        "positivity": "spd"
+      },
+      "certificates": {
+        "equivariance": "compositional",
+        "positivity": "spd"
+      },
+      "computational_oracles": [
+        "logdet",
+        "quadratic_form",
+        "sampling"
+      ],
+      "domain": "scatter",
+      "graph": null,
+      "kind": "full_covariance",
+      "parameter_count": 21,
+      "parameter_expression": {
+        "kind": "symmetric_square",
+        "operand": {
+          "declared_irreps": "1x0e+1x2e",
+          "kind": "atomic_representation",
+          "semantic_name": "output"
+        }
+      },
+      "parameter_representation": {
+        "dimension": 21,
+        "group": "O3",
+        "irreps": "2x0e+2x2e+1x4e",
+        "multiplicity_basis": "abstract_multiplicity_space"
+      },
+      "policy": {
+        "kind": "first_feasible",
+        "max_parameters": 30,
+        "priority": [
+          {
+            "kind": "full_covariance"
+          },
+          {
+            "kind": "low_rank_plus_isotropic",
+            "rank": 1
+          },
+          {
+            "kind": "isotypic_block_covariance"
+          }
+        ],
+        "selection_semantics": "user_declared_priority"
+      },
+      "rank": null,
+      "relation_to_canonical": "canonical_full",
+      "relation_to_full": "equal_to_full",
+      "restriction": null,
+      "selection_reason": {
+        "budget": 30,
+        "candidate_family_order_is_not_a_mathematical_inclusion_order": true,
+        "considered": [
+          {
+            "family": "full",
+            "parameters": 21,
+            "relation_to_full": "equal_to_full",
+            "within_budget": true
+          },
+          {
+            "family": "low_rank",
+            "parameters": 7,
+            "relation_to_full": "strict_subset",
+            "within_budget": true
+          },
+          {
+            "family": "block",
+            "parameters": 2,
+            "relation_to_full": "strict_subset",
+            "within_budget": true
+          }
+        ],
+        "pairwise_family_relations": [
+          {
+            "left": "full",
+            "relation": "right_is_subset_or_equal_to_left",
+            "right": "low_rank"
+          },
+          {
+            "left": "full",
+            "relation": "right_is_subset_or_equal_to_left",
+            "right": "block"
+          },
+          {
+            "left": "low_rank",
+            "relation": "incomparable_or_unknown",
+            "right": "block"
+          }
+        ],
+        "rule": "user_declared_priority",
+        "selected_candidate_index": 0,
+        "selected_family": "full",
+        "selected_parameters": 21,
+        "selection_semantics": "first_feasible_in_explicit_priority"
+      }
+    }
+  },
+  "reachability_gate": {
+    "search_contract": "zero tensor-product edges",
+    "canonical": {
+      "depth": null,
+      "failure": {
+        "code": "target_unreachable",
+        "details": {
+          "angular_momentum_obstruction": false,
+          "max_depth": 0,
+          "missing_irrep_multiplicities": {
+            "4e": 1
+          },
+          "missing_irreps": [
+            "4e"
+          ],
+          "parity_obstruction": false,
+          "possible_remedies": [
+            "increase the backbone angular cutoff or expose additional parity types",
+            "inspect the missing_irrep_multiplicities field",
+            "explicitly select a restricted covariance family if scientifically justified"
+          ],
+          "reason": "no CG path was found within the declared search contract",
+          "restricted_family_changes_statistical_model": true,
+          "seed_irreps": "1x0e+1x2e",
+          "target_irreps": "3x0e+3x2e+1x4e"
+        },
+        "message": "target irreps [4e] are unreachable from seed 1x0e+1x2e; the seed lacks the required angular-momentum/parity CG paths",
+        "status": "failure"
+      },
+      "missing_irreps": [
+        "4e"
+      ],
+      "plan": null,
+      "reachable": false,
+      "seed_irreps": "1x0e+1x2e",
+      "target_irreps": "3x0e+3x2e+1x4e"
+    },
+    "active": {
+      "depth": 0,
+      "failure": null,
+      "missing_irreps": [],
+      "plan": {
+        "depth": 0,
+        "execution": "fully_connected_within_retained_frontiers",
+        "minimality": "tensor_product_depth",
+        "paths": {
+          "0e": [
+            "0e"
+          ],
+          "2e": [
+            "2e"
+          ]
+        },
+        "pruning": "union_of_selected_shortest_path_frontiers",
+        "seed_irreps": "1x0e+1x2e",
+        "stages": [],
+        "target_irreps": "3x0e+1x2e"
+      },
+      "reachable": true,
+      "seed_irreps": "1x0e+1x2e",
+      "target_irreps": "3x0e+1x2e"
+    },
+    "compilation_succeeded": true
+  },
+  "executor_autotune": {
+    "signature": {
+      "batch_size": 2,
+      "feature_dimension": 20,
+      "dtype": "float32",
+      "device": "cpu",
+      "phase": "forward_backward"
+    },
+    "maximum_absolute_error": {
+      "mu": 3.725290298461914e-09,
+      "params": 3.725290298461914e-09,
+      "scale": 1.862645149230957e-09
+    },
+    "measurements": [
+      {
+        "executor": "spherical_cg",
+        "median_ms": 3.07654999778606,
+        "iqr_ms": 0.5502499698195606
+      },
+      {
+        "executor": "cartesian_stf",
+        "median_ms": 3.1032000260893255,
+        "iqr_ms": 0.12620000052265823
+      }
+    ],
+    "selected_executor": "spherical_cg",
+    "selection_basis": {
+      "available_candidates": [
+        "spherical_cg",
+        "cartesian_stf"
+      ],
+      "cost_policy": {
+        "kind": "minimize_measured_latency",
+        "measurements": [
+          {
+            "executor": "spherical_cg",
+            "iqr_ms": 0.5502499698195606,
+            "median_ms": 3.07654999778606
+          },
+          {
+            "executor": "cartesian_stf",
+            "iqr_ms": 0.12620000052265823,
+            "median_ms": 3.1032000260893255
+          }
+        ],
+        "signature": {
+          "batch_size": 2,
+          "device": "cpu",
+          "dtype": "float32",
+          "feature_dimension": 20,
+          "phase": "forward_backward"
+        }
+      },
+      "executor_policy": {
+        "candidates": [
+          "spherical_cg",
+          "cartesian_stf"
+        ],
+        "kind": "exact_executor_candidates"
+      },
+      "measurements": [
+        {
+          "executor": "spherical_cg",
+          "iqr_ms": 0.5502499698195606,
+          "median_ms": 3.07654999778606
+        },
+        {
+          "executor": "cartesian_stf",
+          "iqr_ms": 0.12620000052265823,
+          "median_ms": 3.1032000260893255
+        }
+      ],
+      "method": "measured_autotune",
+      "performance_claim": "measured_for_exact_shape_signature",
+      "selected_executor": "spherical_cg",
+      "selected_median_ms": 3.07654999778606,
+      "signature": {
+        "batch_size": 2,
+        "device": "cpu",
+        "dtype": "float32",
+        "feature_dimension": 20,
+        "phase": "forward_backward"
+      }
+    },
+    "checkpoint_state_keys_identical": false
+  }
+}

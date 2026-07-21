@@ -122,6 +122,35 @@ class O3LiftingPlan:
         }
 
 
+@dataclass(frozen=True)
+class O3ReachabilityAnalysis:
+    """Non-throwing reachability result for canonical or active diagnostics."""
+
+    seed_irreps: o3.Irreps
+    target_irreps: o3.Irreps
+    plan: O3LiftingPlan | None
+    failure: CompilationCertificate | None = None
+
+    @property
+    def reachable(self) -> bool:
+        return self.plan is not None
+
+    def as_dict(self) -> dict:
+        return {
+            "reachable": self.reachable,
+            "seed_irreps": str(self.seed_irreps),
+            "target_irreps": str(self.target_irreps),
+            "depth": self.plan.depth if self.plan is not None else None,
+            "missing_irreps": (
+                []
+                if self.failure is None
+                else list(self.failure.details.get("missing_irreps", []))
+            ),
+            "failure": self.failure.as_dict() if self.failure is not None else None,
+            "plan": self.plan.as_dict() if self.plan is not None else None,
+        }
+
+
 def plan_lifting_graph(
     seed_irreps: o3.Irreps,
     target_irreps: o3.Irreps,
@@ -292,6 +321,22 @@ def plan_lifting_graph(
 def required_lifting_depth(seed_irreps: o3.Irreps, target_irreps: o3.Irreps) -> int:
     """Return the exact number of required tensor-product edges."""
     return plan_lifting_graph(seed_irreps, target_irreps).depth
+
+
+def analyze_lifting_graph(
+    seed_irreps: o3.Irreps,
+    target_irreps: o3.Irreps,
+    *,
+    max_depth: int | None = None,
+) -> O3ReachabilityAnalysis:
+    """Analyze reachability without using failure as a family-selection event."""
+    seed = o3.Irreps(seed_irreps)
+    target = o3.Irreps(target_irreps)
+    try:
+        plan = plan_lifting_graph(seed, target, max_depth=max_depth)
+    except UnreachableTargetError as error:
+        return O3ReachabilityAnalysis(seed, target, None, error.certificate)
+    return O3ReachabilityAnalysis(seed, target, plan)
 
 
 class O3AdaptiveLifting(torch.nn.Module):

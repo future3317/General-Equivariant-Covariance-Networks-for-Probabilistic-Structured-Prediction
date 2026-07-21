@@ -11,18 +11,21 @@ from compatibility.e3nn import o3
 from representations.adaptive_lifting import (
     O3AdaptiveLifting,
     O3LiftingPlan,
+    O3ReachabilityAnalysis,
+    analyze_lifting_graph,
     direct_sum_irreps,
     irrep_multiplicities,
-    plan_lifting_graph,
 )
 from representations.o3_irreps import O3IrrepsSpec
 from representations.graph_structure import EquivariantOutputGraph
-from representations.irrep_layout import RepeatedIrrepLayout
-from representations.cartesian_stf import (
-    Rank2CartesianSTFOperatorBasis,
-    is_rank2_stf_output,
+from representations.cartesian_stf import is_rank2_stf_output
+from representations.diagnostics import (
+    CompilationCertificate,
+    CompilationError,
+    UnreachableActiveTargetError,
 )
-from representations.diagnostics import CompilationCertificate, CompilationError
+from representations.operator_ir import OperatorFamilyPlan
+from representations.operator_runtime import operator_runtime
 
 
 CovarianceMode = Literal["auto", "full", "block", "low_rank", "graph"]
@@ -98,18 +101,42 @@ class O3Compilation:
 
     output_spec: O3IrrepsSpec
     seed_irreps: o3.Irreps
-    covariance_mode: Literal["full", "block", "low_rank", "graph"]
-    covariance_rank: int | None
-    covariance_parameter_count: int
+    operator_family: OperatorFamilyPlan
     canonical_target_irreps: o3.Irreps
     active_target_irreps: o3.Irreps
-    canonical_plan: O3LiftingPlan
-    active_plan: O3LiftingPlan
+    canonical_reachability: O3ReachabilityAnalysis
+    active_reachability: O3ReachabilityAnalysis
     backend: Literal["spherical_cg", "cartesian_stf"]
     backend_exact: bool
     stf_contraction_rank: int | None
     config: CompilerConfig
-    graph_structure: EquivariantOutputGraph | None = None
+
+    @property
+    def covariance_mode(self) -> Literal["full", "block", "low_rank", "graph"]:
+        return self.operator_family.kind
+
+    @property
+    def covariance_rank(self) -> int | None:
+        return self.operator_family.rank
+
+    @property
+    def covariance_parameter_count(self) -> int:
+        return self.operator_family.parameter_count
+
+    @property
+    def graph_structure(self) -> EquivariantOutputGraph | None:
+        return self.operator_family.graph
+
+    @property
+    def canonical_plan(self) -> O3LiftingPlan | None:
+        return self.canonical_reachability.plan
+
+    @property
+    def active_plan(self) -> O3LiftingPlan:
+        plan = self.active_reachability.plan
+        if plan is None:
+            raise RuntimeError("a completed compilation must have an active lifting plan")
+        return plan
 
     @property
     def mean_irreps(self) -> o3.Irreps:
@@ -132,25 +159,7 @@ class O3Compilation:
         return O3CompiledOutputHead(self)
 
     def build_spd_map(self):
-        if self.covariance_mode == "full":
-            from spd_maps import MatrixExponentialMap
-
-            return MatrixExponentialMap()
-        if self.covariance_mode == "block":
-            from spd_maps import IsotypicBlockMap
-
-            return IsotypicBlockMap(self.output_spec.irreps)
-        if self.covariance_mode == "graph":
-            from spd_maps import GraphStructuredPrecisionMap
-
-            if self.graph_structure is None:
-                raise RuntimeError("graph compilation is missing its graph structure")
-            return GraphStructuredPrecisionMap(self.graph_structure)
-        from spd_maps import LowRankPlusIsotropicMap
-
-        return LowRankPlusIsotropicMap(
-            dim=self.output_spec.dim, rank=int(self.covariance_rank)
-        )
+        return operator_runtime(self.operator_family.kind).build_spd_map(self)
 
     def build_distribution(self):
         if self.config.objective == "gaussian":
@@ -181,13 +190,11 @@ class O3Compilation:
 
 
 class O3RepresentationCompiler:
-    r"""Compile ``T(V)=Irreps(V + Sym^2(V))`` and an executable model.
+    r"""Lower typed distribution/operator plans to an executable O(3) model.
 
-    The canonical plan always covers the complete mean/covariance target.  An
-    optional structured covariance choice materializes a cheaper active graph:
-    invariant isotypic blocks or an equivariant low-rank factor.  This makes the
-    approximation explicit in the compilation report rather than hiding it in
-    a hand-written head.
+    ``V + Sym^2(V)`` is retained as the unrestricted diagnostic reference.
+    The selected operator family supplies its own active parameter expression;
+    only that active expression is a compilation gate.
     """
 
     def __init__(
@@ -236,101 +243,126 @@ class O3RepresentationCompiler:
             graph_structure=graph_structure,
         )
 
+    def _output_expression(self):
+        from representations.representation_ir import IrrepsExpr
+
+        return IrrepsExpr(self.output_spec.irreps, "location")
+
+    def _legacy_operator_family(self) -> OperatorFamilyPlan:
+        """Adapt the pre-IR low-level config to an operator-family plugin."""
+        from equivcompiler.policies import (
+            FullCovariance,
+            GraphPrecision,
+            IsotypicBlockCovariance,
+            LowRankCovariance,
+        )
+
+        mode = self.config.covariance
+        if mode == "auto":
+            full = FullCovariance().compile(self.output_spec)
+            graph = (
+                GraphPrecision(self.graph_structure).compile(self.output_spec)
+                if self.graph_structure is not None
+                else None
+            )
+            low_rank = LowRankCovariance(self.config.low_rank).compile(self.output_spec)
+            if full.parameter_count <= self.config.parameter_budget:
+                return full
+            if graph is not None and graph.parameter_count <= self.config.parameter_budget:
+                return graph
+            if low_rank.parameter_count <= self.config.parameter_budget:
+                return low_rank
+            return IsotypicBlockCovariance().compile(self.output_spec)
+        if mode == "full":
+            return FullCovariance().compile(self.output_spec)
+        if mode == "low_rank":
+            return LowRankCovariance(self.config.low_rank).compile(self.output_spec)
+        if mode == "block":
+            return IsotypicBlockCovariance().compile(self.output_spec)
+        if mode == "graph":
+            if self.graph_structure is None:
+                raise ValueError("graph covariance requires graph_structure")
+            return GraphPrecision(self.graph_structure).compile(self.output_spec)
+        raise AssertionError(f"unhandled covariance mode: {mode}")
+
+    @staticmethod
+    def _validate_reachability_contract(
+        analysis: O3ReachabilityAnalysis,
+        seed: o3.Irreps,
+        target: o3.Irreps,
+        role: str,
+    ) -> None:
+        if analysis.seed_irreps != seed or analysis.target_irreps != target:
+            raise CompilationError(
+                CompilationCertificate(
+                    code="reachability_contract_mismatch",
+                    status="failure",
+                    message=f"the supplied {role} reachability analysis has the wrong contract",
+                    details={
+                        "target_role": role,
+                        "expected_seed_irreps": str(seed),
+                        "analyzed_seed_irreps": str(analysis.seed_irreps),
+                        "expected_target_irreps": str(target),
+                        "analyzed_target_irreps": str(analysis.target_irreps),
+                    },
+                )
+            )
+
     def compile(
         self,
         seed_irreps: o3.Irreps,
         *,
-        canonical_plan: O3LiftingPlan | None = None,
+        operator_family: OperatorFamilyPlan | None = None,
+        canonical_reachability: O3ReachabilityAnalysis | None = None,
+        active_reachability: O3ReachabilityAnalysis | None = None,
     ) -> O3Compilation:
         seed = o3.Irreps(seed_irreps)
         output_irreps = self.output_spec.irreps
         covariance_irreps = self.output_spec.symmetric_square_irreps
         canonical_target = direct_sum_irreps(output_irreps, covariance_irreps)
-        if canonical_plan is None:
-            canonical_plan = plan_lifting_graph(seed, canonical_target)
-        elif (
-            canonical_plan.seed_irreps != seed
-            or canonical_plan.target_irreps != canonical_target
-        ):
-            raise CompilationError(
+        if operator_family is None:
+            operator_family = self._legacy_operator_family()
+        active_target = operator_family.active_expression(
+            self._output_expression()
+        ).decompose_o3().irreps
+
+        if canonical_reachability is None:
+            canonical_reachability = analyze_lifting_graph(seed, canonical_target)
+        self._validate_reachability_contract(
+            canonical_reachability, seed, canonical_target, "canonical"
+        )
+
+        if active_reachability is None:
+            active_reachability = (
+                canonical_reachability
+                if active_target == canonical_target
+                else analyze_lifting_graph(seed, active_target)
+            )
+        self._validate_reachability_contract(
+            active_reachability, seed, active_target, "active"
+        )
+        if not active_reachability.reachable:
+            assert active_reachability.failure is not None
+            failure = active_reachability.failure
+            raise UnreachableActiveTargetError(
                 CompilationCertificate(
-                    code="canonical_plan_contract_mismatch",
+                    code=failure.code,
                     status="failure",
-                    message="the supplied canonical lifting plan does not match this compiler contract",
-                    details={
-                        "expected_seed_irreps": str(seed),
-                        "planned_seed_irreps": str(canonical_plan.seed_irreps),
-                        "expected_target_irreps": str(canonical_target),
-                        "planned_target_irreps": str(canonical_plan.target_irreps),
-                    },
+                    message=(
+                        "the selected active parameter target is unreachable; "
+                        + failure.message
+                    ),
+                    details={**failure.details, "target_role": "active"},
                 )
             )
 
-        dim = self.output_spec.dim
-        full_parameters = dim * (dim + 1) // 2
-        rank = min(self.config.low_rank, dim)
-        low_rank_parameters = dim * rank + 1
-        block_parameters = _isotypic_parameter_count(output_irreps)
-        graph_parameters: int | None = None
-        graph_operator_irreps: o3.Irreps | None = None
-        if self.graph_structure is not None:
-            local_spec = O3IrrepsSpec(o3.Irreps([(1, self.graph_structure.node_irrep)]))
-            graph_operator_irreps = local_spec.symmetric_square_irreps
-            graph_parameters = (
-                local_spec.dim * (local_spec.dim + 1) // 2
-                * self.graph_structure.num_potentials
-            )
-
-        mode = self.config.covariance
-        if mode == "auto":
-            if full_parameters <= self.config.parameter_budget:
-                mode = "full"
-            elif (
-                graph_parameters is not None
-                and graph_parameters <= self.config.parameter_budget
-            ):
-                mode = "graph"
-            elif low_rank_parameters <= self.config.parameter_budget:
-                mode = "low_rank"
-            else:
-                mode = "block"
-
-        if mode == "full":
-            active_target = canonical_target
-            parameter_count = full_parameters
-            selected_rank = None
-        elif mode == "low_rank":
-            factors = RepeatedIrrepLayout(output_irreps, rank).expanded_irreps
-            active_target = direct_sum_irreps(output_irreps, factors, o3.Irreps("1x0e"))
-            parameter_count = low_rank_parameters
-            selected_rank = rank
-        elif mode == "graph":
-            if self.graph_structure is None or graph_parameters is None:
-                raise ValueError("graph covariance requires graph_structure")
-            assert graph_operator_irreps is not None
-            potential_irreps = RepeatedIrrepLayout(
-                graph_operator_irreps, self.graph_structure.num_potentials
-            ).expanded_irreps
-            active_target = direct_sum_irreps(output_irreps, potential_irreps)
-            parameter_count = graph_parameters
-            selected_rank = None
-        else:
-            active_target = direct_sum_irreps(
-                output_irreps, o3.Irreps(f"{block_parameters}x0e")
-            )
-            parameter_count = block_parameters
-            selected_rank = None
-
-        active_plan = (
-            canonical_plan
-            if active_target == canonical_target
-            else plan_lifting_graph(seed, active_target)
-        )
+        active_plan = active_reachability.plan
+        assert active_plan is not None
 
         stf_supported = (
-            mode == "full"
+            operator_family.kind == "full"
             and is_rank2_stf_output(output_irreps)
-            and canonical_plan.depth == 1
+            and active_plan.depth == 1
         )
         backend = self.config.backend
         if backend == "auto":
@@ -346,9 +378,9 @@ class O3RepresentationCompiler:
                     ),
                     details={
                         "requested_backend": "cartesian_stf",
-                        "covariance_mode": mode,
+                        "covariance_mode": operator_family.kind,
                         "output_irreps": str(output_irreps),
-                        "canonical_depth": canonical_plan.depth,
+                        "active_depth": active_plan.depth,
                     },
                 )
             )
@@ -373,18 +405,15 @@ class O3RepresentationCompiler:
         return O3Compilation(
             output_spec=self.output_spec,
             seed_irreps=seed,
-            covariance_mode=mode,
-            covariance_rank=selected_rank,
-            covariance_parameter_count=parameter_count,
+            operator_family=operator_family,
             canonical_target_irreps=canonical_target,
             active_target_irreps=active_target,
-            canonical_plan=canonical_plan,
-            active_plan=active_plan,
+            canonical_reachability=canonical_reachability,
+            active_reachability=active_reachability,
             backend=backend,
             backend_exact=backend_exact,
             stf_contraction_rank=contraction_rank,
             config=self.config,
-            graph_structure=self.graph_structure if mode == "graph" else None,
         )
 
 
@@ -409,45 +438,8 @@ class O3CompiledOutputHead(torch.nn.Module):
             contraction_rank=compilation.stf_contraction_rank,
         )
         self.mean_projection = o3.Linear(active_irreps, self.output_spec.irreps)
-
-        if compilation.covariance_mode == "full":
-            self.operator_basis = (
-                Rank2CartesianSTFOperatorBasis()
-                if compilation.backend == "cartesian_stf"
-                else self.output_spec.symmetric_square()
-            )
-            self.covariance_projection = o3.Linear(
-                active_irreps, self.operator_basis.operator_irreps
-            )
-        elif compilation.covariance_mode == "low_rank":
-            self.factor_layout = RepeatedIrrepLayout(
-                self.output_spec.irreps, int(compilation.covariance_rank)
-            )
-            self.factor_irreps = self.factor_layout.expanded_irreps
-            self.covariance_projection = o3.Linear(active_irreps, self.factor_irreps)
-            self.scale_projection = o3.Linear(active_irreps, o3.Irreps("1x0e"))
-        elif compilation.covariance_mode == "graph":
-            if compilation.graph_structure is None:
-                raise RuntimeError("graph compilation is missing its graph structure")
-            local_irreps = o3.Irreps([(1, compilation.graph_structure.node_irrep)])
-            self.operator_basis = O3IrrepsSpec(local_irreps).symmetric_square()
-            self.potential_layout = RepeatedIrrepLayout(
-                self.operator_basis.operator_irreps,
-                compilation.graph_structure.num_potentials,
-            )
-            self.potential_irreps = self.potential_layout.expanded_irreps
-            self.covariance_projection = o3.Linear(active_irreps, self.potential_irreps)
-        else:
-            count = compilation.covariance_parameter_count
-            self.covariance_projection = o3.Linear(
-                active_irreps, o3.Irreps(f"{count}x0e")
-            )
-
-    def _pack_factors(self, coefficients: torch.Tensor) -> torch.Tensor:
-        return self.factor_layout.pack(coefficients).transpose(-1, -2)
-
-    def _pack_repeated_coefficients(self, coefficients: torch.Tensor) -> torch.Tensor:
-        return self.potential_layout.pack(coefficients)
+        self.operator_runtime = operator_runtime(compilation.operator_family.kind)
+        self.operator_runtime.install(self)
 
     def forward(
         self, node_features: torch.Tensor, batch: torch.Tensor | None = None
@@ -461,19 +453,5 @@ class O3CompiledOutputHead(torch.nn.Module):
             hidden = mean_pool(hidden, batch)
         compiled = self.lifting(hidden)
         mean = self.mean_projection(compiled)
-
-        if self.compilation.covariance_mode == "full":
-            coefficients = self.covariance_projection(compiled)
-            parameters = self.operator_basis.assemble(coefficients)
-        elif self.compilation.covariance_mode == "low_rank":
-            factors = self._pack_factors(self.covariance_projection(compiled))
-            log_sigma2 = self.scale_projection(compiled)
-            parameters = torch.cat([factors.flatten(start_dim=-2), log_sigma2], dim=-1)
-        elif self.compilation.covariance_mode == "graph":
-            coefficients = self.covariance_projection(compiled)
-            parameters = self.operator_basis.assemble(
-                self._pack_repeated_coefficients(coefficients)
-            )
-        else:
-            parameters = self.covariance_projection(compiled)
+        parameters = self.operator_runtime.project(self, compiled)
         return mean, parameters
