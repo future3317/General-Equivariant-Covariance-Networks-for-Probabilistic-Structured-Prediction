@@ -22,7 +22,7 @@ from data.dielectric_dataset import get_dielectric_irreps_loaders
 from data.tensor_conversions import irreps_to_km
 from equivcompiler import FeatureSpec, FullCovariance, SpectralWindowCovariance, plan_readout
 from evaluation.calibration import calibration_error, qq_data
-from evaluation.metrics import empirical_coverage
+from evaluation.metrics import empirical_coverage, mahalanobis_distance_squared
 from models import EquivariantBackbone
 from plotting import (
     COLORS,
@@ -74,7 +74,12 @@ def load_model(checkpoint_dir: Path, device: str):
 
 @torch.inference_mode()
 def collect_predictions(model, dataloader, device):
-    """Collect mean, scale and target tensors over a dataloader."""
+    """Collect test predictions in likelihood coordinates.
+
+    The learned generator remains FP32.  For calibration and declared spectral
+    bounds, we materialize the identical spectral map in FP64 to avoid a
+    finite-precision eigendecomposition artifact at the smallest variance.
+    """
     all_mu = []
     all_scale = []
     all_y_irreps = []
@@ -84,11 +89,13 @@ def collect_predictions(model, dataloader, device):
         batch = batch.to(device)
         if batch.edge_index is None or batch.edge_index.numel() == 0:
             continue
-        result = model(batch, return_scale=True)
-        all_mu.append(result["mu"].cpu())
-        all_scale.append(result["scale"].cpu())
-        all_y_irreps.append(batch.y_irreps.cpu())
-        all_y_km.append(batch.y_km.cpu())
+        result = model(batch)
+        if model.spd_map is None:
+            raise TypeError("dielectric figures require a probabilistic SPD map")
+        all_mu.append(result["mu"].double().cpu())
+        all_scale.append(model.spd_map(result["params"].double()).cpu())
+        all_y_irreps.append(batch.y_irreps.double().cpu())
+        all_y_km.append(batch.y_km.double().cpu())
 
     return {
         "mu_irreps": torch.cat(all_mu, dim=0),
@@ -236,40 +243,109 @@ def plot_calibration(
 
 def plot_risk_coverage(
     mu: torch.Tensor, y: torch.Tensor, scale: torch.Tensor, save_path: Path
-) -> None:
-    """Risk-coverage curve: coverage vs MAE when retaining most confident fraction."""
+) -> dict[str, float]:
+    """Compare two equivariant scalar uncertainty rankings in log-KM space."""
     setup_tpami_style()
 
     residual = torch.abs(mu - y)
     mae_per_sample = residual.mean(dim=-1)
 
-    # Use trace of scale as uncertainty score (lower = more confident).
-    uncertainty = torch.diagonal(scale, dim1=-2, dim2=-1).sum(dim=-1)
-
-    sorted_idx = torch.argsort(uncertainty)
-    sorted_mae = mae_per_sample[sorted_idx].numpy()
-
-    fractions = np.linspace(0.1, 1.0, 50)
-    risks = [sorted_mae[: int(f * len(sorted_mae))].mean() for f in fractions]
+    fractions = np.linspace(0.1, 1.0, 91)
+    uncertainty_scores = {
+        r"Trace$(S)$": torch.diagonal(scale, dim1=-2, dim2=-1).sum(dim=-1),
+        r"$\lambda_{\max}(S)$": torch.linalg.eigvalsh(scale)[..., -1],
+    }
+    risks_by_score: dict[str, np.ndarray] = {}
+    for label, uncertainty in uncertainty_scores.items():
+        sorted_mae = mae_per_sample[torch.argsort(uncertainty)].numpy()
+        risks_by_score[label] = np.asarray(
+            [sorted_mae[: max(1, int(f * len(sorted_mae)))].mean() for f in fractions]
+        )
 
     fig, ax = plt.subplots(figsize=cm2inch(10, 7))
-    ax.plot(fractions * 100, risks, "-", color=PALETTE[0], linewidth=2.5)
+    for (label, risks), color in zip(risks_by_score.items(), PALETTE):
+        ax.plot(fractions * 100, risks, "-", color=color, linewidth=2.3, label=label)
     ax.axhline(
-        risks[-1],
+        mae_per_sample.mean().item(),
         color=COLORS["dark_gray"],
         linestyle="--",
         linewidth=1.2,
         label="Full-set MAE",
     )
     ax.set_xlabel("Coverage (%)")
-    ax.set_ylabel("MAE")
-    ax.set_title("Risk-Coverage Curve")
+    ax.set_ylabel("Log-KM MAE")
+    ax.set_title("Uncertainty-Risk Ranking")
     ax.legend()
     ax.set_xlim(10, 100)
 
     fig.tight_layout()
     save_figure(fig, save_path)
     plt.close(fig)
+    return {
+        f"{label}_risk_at_90_percent": float(risks[np.searchsorted(fractions, 0.9)])
+        for label, risks in risks_by_score.items()
+    }
+
+
+def plot_spectral_diagnostics(
+    scale: torch.Tensor,
+    log_variance_bounds: tuple[float, float] | None,
+    save_path: Path,
+) -> dict[str, float]:
+    """Plot covariance-spectrum utilization and condition-number distribution."""
+    setup_tpami_style()
+    log_eigenvalues = torch.log(torch.linalg.eigvalsh(scale)).numpy().ravel()
+    condition_numbers = np.exp(
+        np.ptp(log_eigenvalues.reshape(-1, scale.shape[-1]), axis=1)
+    )
+
+    fig, axes = plt.subplots(1, 2, figsize=cm2inch(16, 6))
+    ax_spectrum, ax_condition = axes
+    ax_spectrum.hist(
+        log_eigenvalues,
+        bins=36,
+        density=True,
+        color=PALETTE[0],
+        edgecolor="white",
+        alpha=0.85,
+    )
+    if log_variance_bounds is not None:
+        lower, upper = log_variance_bounds
+        ax_spectrum.axvline(lower, color=COLORS["tertiary"], linestyle="--", label="Window")
+        ax_spectrum.axvline(upper, color=COLORS["tertiary"], linestyle="--")
+        ax_spectrum.set_xlim(lower - 0.35, upper + 0.35)
+    ax_spectrum.set_xlabel(r"$\log$ covariance eigenvalue")
+    ax_spectrum.set_ylabel("Density")
+    ax_spectrum.set_title("Spectral-Window Utilization")
+    ax_spectrum.legend(loc="upper center")
+
+    sorted_condition = np.sort(condition_numbers)
+    quantiles = np.linspace(0.0, 1.0, len(sorted_condition), endpoint=True)
+    ax_condition.plot(sorted_condition, quantiles, color=PALETTE[1], linewidth=2.3)
+    if log_variance_bounds is not None:
+        upper_condition = np.exp(log_variance_bounds[1] - log_variance_bounds[0])
+        ax_condition.axvline(
+            upper_condition,
+            color=COLORS["tertiary"],
+            linestyle="--",
+            linewidth=1.2,
+            label="Theoretical maximum",
+        )
+    ax_condition.set_xscale("log")
+    ax_condition.set_xlabel("Condition number")
+    ax_condition.set_ylabel("Empirical CDF")
+    ax_condition.set_title("Conditioning of Predicted Covariances")
+    ax_condition.legend(loc="lower right")
+    label_panels(axes, x=-0.18, y=1.04)
+    fig.tight_layout()
+    save_figure(fig, save_path)
+    plt.close(fig)
+    return {
+        "log_eigenvalue_min": float(log_eigenvalues.min()),
+        "log_eigenvalue_max": float(log_eigenvalues.max()),
+        "condition_number_mean": float(condition_numbers.mean()),
+        "condition_number_max": float(condition_numbers.max()),
+    }
 
 
 def main():
@@ -303,6 +379,13 @@ def main():
     _, _, test_loader = get_dielectric_irreps_loaders(
         data_dir=train_args.data_dir,
         batch_size=train_args.batch_size,
+        num_workers=getattr(train_args, "num_workers", 0),
+        persistent_workers=getattr(train_args, "persistent_workers", False),
+        pin_memory=getattr(train_args, "pin_memory", False),
+        prefetch_factor=getattr(train_args, "prefetch_factor", None),
+        lmax=train_args.lmax,
+        storage=getattr(train_args, "dataset_storage", "files"),
+        shard_cache_size=getattr(train_args, "shard_cache_size", 2),
     )
 
     preds = collect_predictions(model, test_loader, args.device)
@@ -320,11 +403,19 @@ def main():
         preds["scale_irreps"],
         output_dir / "dielectric_calibration",
     )
-    plot_risk_coverage(
+    risk_coverage = plot_risk_coverage(
         preds["mu_irreps"],
         preds["y_irreps"],
         preds["scale_irreps"],
         output_dir / "dielectric_risk_coverage",
+    )
+    bounds = (
+        (train_args.log_variance_min, train_args.log_variance_max)
+        if train_args.covariance_parameterization == "spectral_window"
+        else None
+    )
+    spectrum = plot_spectral_diagnostics(
+        preds["scale_irreps"], bounds, output_dir / "dielectric_spectrum"
     )
 
     # Print test calibration metrics.
@@ -334,6 +425,23 @@ def main():
     coverage = empirical_coverage(
         preds["mu_irreps"], preds["y_irreps"], preds["scale_irreps"]
     )
+    mahalanobis2 = mahalanobis_distance_squared(
+        preds["y_irreps"] - preds["mu_irreps"], preds["scale_irreps"]
+    )
+    with open(output_dir / "figure_metrics.json", "w") as f:
+        json.dump(
+            {
+                "coordinate_space": "log_kelvin_mandel",
+                "scale_materialization_dtype": "float64",
+                "calibration": cal_err,
+                "coverage": coverage,
+                "mahalanobis2_mean": float(mahalanobis2.mean().item()),
+                "risk_coverage": risk_coverage,
+                "spectrum": spectrum,
+            },
+            f,
+            indent=2,
+        )
     print(f"ECE: {cal_err['ece']:.4f}, ACE: {cal_err['ace']:.4f}")
     print(f"Coverage: {coverage}")
     print(f"Figures saved to {output_dir}")
