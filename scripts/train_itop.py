@@ -798,7 +798,9 @@ def main() -> None:
         if model.spd_map is None:
             raise ValueError("representation_metric requires a probabilistic model")
         base_dataset = train_loader.dataset.dataset
-        target_values = torch.as_tensor(base_dataset.joints, dtype=torch.float32).reshape(-1, 45)
+        target_values = torch.from_numpy(
+            np.array(base_dataset.joints, dtype=np.float32, copy=True)
+        ).reshape(-1, 45)
         metric, metric_stats = infer_representation_block_metric(
             target_values, ITOP_OUTPUT_GRAPH.output_irreps
         )

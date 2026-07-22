@@ -8,6 +8,7 @@ from representations import (
     rank2_symmetric_irreps,
     rank4_elasticity_irreps,
 )
+from representations.symmetric_square import symmetric_square_irreps
 
 
 def test_representation_matrix_preserves_floating_dtype():
@@ -59,3 +60,14 @@ def test_coefficient_round_trip():
     coeffs_back = basis.project(A)
     err = torch.max(torch.abs(coeffs - coeffs_back)).item()
     assert err < 1e-5
+
+
+def test_symmetric_square_high_multiplicity_matches_dimension_and_rank2_case():
+    from compatibility.e3nn import o3
+
+    assert symmetric_square_irreps(o3.Irreps("0e + 2e")) == o3.Irreps(
+        "2x0e + 2x2e + 1x4e"
+    )
+    result = symmetric_square_irreps(o3.Irreps("15x1o"))
+    assert result == o3.Irreps("120x0e + 105x1e + 120x2e")
+    assert result.dim == 45 * 46 // 2
