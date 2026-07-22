@@ -14,6 +14,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from matplotlib.colors import Normalize
 from scipy.stats import beta as beta_dist
 from tqdm import tqdm
 
@@ -28,6 +29,7 @@ from models import EquivariantBackbone
 from plotting import (
     COLORS,
     DENSITY_CMAP,
+    DIVERGING_CMAP,
     cm2inch,
     label_panels,
     save_figure,
@@ -236,6 +238,104 @@ def plot_parity(pred_km: np.ndarray, target_km: np.ndarray, save_path: Path) -> 
     fig.subplots_adjust(left=0.07, right=0.92, bottom=0.08, top=0.94, wspace=0.34, hspace=0.36)
     save_figure(fig, save_path)
     plt.close(fig)
+
+
+def plot_uncertainty_alignment(
+    mu_irreps: torch.Tensor,
+    y_irreps: torch.Tensor,
+    scale_irreps: torch.Tensor,
+    save_path: Path,
+) -> dict[str, object]:
+    """Diagnose whether predicted uncertainty matches residual structure.
+
+    The first two panels compare residual and predicted correlation structure;
+    the third reports marginal coverage.  The covariance basis conversion uses
+    the row-vector convention of :func:`irreps_to_km`.
+    """
+    setup_tpami_style()
+    mu = irreps_to_km(mu_irreps).double()
+    target = irreps_to_km(y_irreps).double()
+    residual = mu - target
+    basis = irreps_to_km(torch.eye(6, dtype=torch.float64))
+    scale = torch.einsum("ab,nbc,cd->nad", basis.T, scale_irreps.double(), basis)
+    residual_cov = torch.cov(residual.T)
+    predicted_cov = scale.mean(dim=0)
+    residual_corr = residual_cov / torch.sqrt(
+        torch.outer(torch.diag(residual_cov), torch.diag(residual_cov))
+    )
+    predicted_corr = predicted_cov / torch.sqrt(
+        torch.outer(torch.diag(predicted_cov), torch.diag(predicted_cov))
+    )
+
+    normal = torch.distributions.Normal(0.0, 1.0)
+    marginal_coverage: dict[str, list[float]] = {}
+    for level in (0.5, 0.9):
+        z = normal.icdf(torch.tensor((1.0 + level) / 2.0))
+        marginal_coverage[f"coverage_{int(level * 100):02d}"] = (
+            (residual.abs() <= z * torch.sqrt(torch.diagonal(scale, dim1=-2, dim2=-1)))
+            .double()
+            .mean(dim=0)
+            .tolist()
+        )
+
+    labels = [r"$c_{11}$", r"$c_{22}$", r"$c_{33}$", r"$c_{23}$", r"$c_{13}$", r"$c_{12}$"]
+    fig, axes = plt.subplots(1, 3, figsize=cm2inch(16.5, 5.4))
+    norm = Normalize(vmin=-1.0, vmax=1.0)
+    for ax, matrix, title in (
+        (axes[0], residual_corr.numpy(), "Empirical residual correlation"),
+        (axes[1], predicted_corr.numpy(), "Mean predicted correlation"),
+    ):
+        image = ax.imshow(matrix, cmap=DIVERGING_CMAP, norm=norm)
+        ax.set_xticks(range(6), labels, rotation=45, ha="right", fontsize=7)
+        ax.set_yticks(range(6), labels, fontsize=7)
+        ax.set_title(title, fontsize=9)
+        for i in range(6):
+            for j in range(6):
+                ax.text(j, i, f"{matrix[i, j]:.2f}", ha="center", va="center", fontsize=6)
+    cbar_ax = fig.add_axes([0.635, 0.20, 0.012, 0.62])
+    cbar = fig.colorbar(image, cax=cbar_ax)
+    cbar.ax.tick_params(labelsize=7)
+
+    x = np.arange(6)
+    width = 0.34
+    axes[2].bar(
+        x - width / 2,
+        marginal_coverage["coverage_50"],
+        width,
+        color=COLORS["midnight_blue"],
+        label="50% interval",
+    )
+    axes[2].bar(
+        x + width / 2,
+        marginal_coverage["coverage_90"],
+        width,
+        color=COLORS["champagne_gold"],
+        label="90% interval",
+    )
+    axes[2].axhline(0.5, color=COLORS["midnight_blue"], linestyle=":", linewidth=1)
+    axes[2].axhline(0.9, color=COLORS["champagne_gold"], linestyle=":", linewidth=1)
+    axes[2].set_xticks(x, labels, rotation=45, ha="right", fontsize=7)
+    axes[2].set_ylim(0, 1.05)
+    axes[2].set_ylabel("Empirical coverage", fontsize=8)
+    axes[2].set_title("Marginal calibration", fontsize=9)
+    axes[2].legend(fontsize=7, loc="lower left")
+    for ax in axes:
+        ax.tick_params(labelsize=7)
+    label_panels(axes, x=-0.10, y=1.02, fontsize=9)
+    fig.subplots_adjust(left=0.06, right=0.96, bottom=0.20, top=0.88, wspace=0.50)
+    save_figure(fig, save_path)
+    plt.close(fig)
+
+    residual_std = torch.sqrt(torch.diag(residual_cov))
+    predicted_std = torch.sqrt(torch.diag(predicted_cov))
+    return {
+        "residual_std": residual_std.tolist(),
+        "predicted_std": predicted_std.tolist(),
+        "predicted_to_residual_std_ratio": (predicted_std / (residual_std + 1e-12)).tolist(),
+        "marginal_coverage": marginal_coverage,
+        "residual_correlation": residual_corr.tolist(),
+        "predicted_correlation": predicted_corr.tolist(),
+    }
 
 
 def plot_calibration(
@@ -512,6 +612,12 @@ def main():
 
     plot_training_curves(history, output_dir / "dielectric_training_curves")
     plot_parity(pred_km, target_km, output_dir / "dielectric_parity")
+    uncertainty_alignment = plot_uncertainty_alignment(
+        preds["mu_irreps"],
+        preds["y_irreps"],
+        preds["scale_irreps"],
+        output_dir / "dielectric_uncertainty_alignment",
+    )
     plot_calibration(
         preds["mu_irreps"],
         preds["y_irreps"],
@@ -553,6 +659,7 @@ def main():
                 "mahalanobis2_mean": float(mahalanobis2.mean().item()),
                 "risk_coverage": risk_coverage,
                 "spectrum": spectrum,
+                "uncertainty_alignment": uncertainty_alignment,
             },
             f,
             indent=2,

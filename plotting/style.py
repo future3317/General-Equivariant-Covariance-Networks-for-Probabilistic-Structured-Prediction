@@ -46,6 +46,11 @@ DENSITY_CMAP = LinearSegmentedColormap.from_list(
     ["#F7F8FB", "#C9D4E6", "#5B79A8", "#002060"],
 )
 
+DIVERGING_CMAP = LinearSegmentedColormap.from_list(
+    "tpami_blue_gold_diverging",
+    [COLORS["champagne_gold"], "#F7F8FB", COLORS["midnight_blue"]],
+)
+
 # Sequential palette for methods / lines
 PALETTE = [
     COLORS["midnight_blue"],
