@@ -25,6 +25,14 @@ from data.paths import dataset_dir
 from data.tensor_conversions import irreps_to_km, irreps_to_matrix_exp_voigt
 from voigt_utils import kelvin_mandel_to_voigt
 from matrix_log_transform import matrix_exponential_transform
+from evaluation import (
+    calibration_error,
+    covariance_spectrum_diagnostics,
+    empirical_coverage,
+    mahalanobis_distance_squared,
+    sharpness,
+    whitened_residual_covariance,
+)
 from scripts._common import add_tensor_product_arguments, tensor_product_kwargs
 
 
@@ -41,17 +49,18 @@ def _forward(
     *,
     target: torch.Tensor,
     use_bf16: bool,
+    return_scale: bool = False,
 ):
     """Run BF16 only through the backbone; keep SPD/NLL in FP32."""
     if not use_bf16:
-        return model(batch, target=target, return_scale=False)
+        return model(batch, target=target, return_scale=return_scale)
     with torch.autocast(device_type=batch.pos.device.type, dtype=torch.bfloat16):
         node_features, graph_batch = model.backbone(batch)
     return model.forward_from_features(
         node_features.float(),
         graph_batch,
         target=target,
-        return_scale=False,
+        return_scale=return_scale,
     )
 
 
@@ -145,6 +154,8 @@ def validate(
     device,
     non_blocking: bool = False,
     use_bf16: bool = False,
+    diagnostics: bool = False,
+    log_variance_bounds: tuple[float, float] | None = None,
 ):
     model.eval()
     total_loss = 0.0
@@ -152,6 +163,9 @@ def validate(
     total_log_abs = 0.0
     num_loss_samples = 0
     num_mae_elements = 0
+    predictions: list[torch.Tensor] = []
+    targets: list[torch.Tensor] = []
+    scales: list[torch.Tensor] = []
 
     for batch in tqdm(dataloader, desc="Validation", leave=False):
         batch = batch.to(device, non_blocking=non_blocking)
@@ -163,6 +177,7 @@ def validate(
             batch,
             target=batch.y_irreps,
             use_bf16=use_bf16,
+            return_scale=diagnostics,
         )
         if not bool(torch.isfinite(result["loss"].detach()).all()):
             raise FloatingPointError("non-finite dielectric validation loss")
@@ -174,11 +189,40 @@ def validate(
         total_log_abs += log_mae(result["mu"], batch.y_km).item() * batch_size
         num_mae_elements += batch_size
 
-    return {
+        if diagnostics:
+            predictions.append(result["mu"].detach().cpu())
+            targets.append(batch.y_irreps.detach().cpu())
+            scales.append(result["scale"].detach().cpu())
+
+    metrics = {
         "loss": total_loss / max(num_loss_samples, 1),
         "phys_mae": total_phys_abs / max(num_mae_elements, 1),
         "log_mae": total_log_abs / max(num_mae_elements, 1),
     }
+    if not diagnostics:
+        return metrics
+
+    if not scales:
+        raise RuntimeError("no dielectric batches were available for diagnostics")
+    prediction = torch.cat(predictions)
+    target = torch.cat(targets)
+    scale = torch.cat(scales)
+    maha2 = mahalanobis_distance_squared(target - prediction, scale)
+    metrics["probabilistic_diagnostics"] = {
+        "coordinate_space": "log_kelvin_mandel",
+        "calibration": calibration_error(prediction, target, scale),
+        "ellipsoid_coverage": empirical_coverage(prediction, target, scale),
+        "sharpness": sharpness(scale),
+        "spectrum": covariance_spectrum_diagnostics(
+            scale, log_variance_bounds=log_variance_bounds
+        ),
+        "mahalanobis2_mean": float(maha2.mean().item()),
+        "mahalanobis2_median": float(maha2.median().item()),
+        "whitened_residual_covariance_trace": float(
+            whitened_residual_covariance(prediction, target, scale).item()
+        ),
+    }
+    return metrics
 
 
 def main():
@@ -207,6 +251,11 @@ def main():
     parser.add_argument("--num_epochs", type=int, default=100)
     parser.add_argument("--patience", type=int, default=15)
     parser.add_argument("--warmup_epochs", type=int, default=3)
+    parser.add_argument(
+        "--evaluate_only",
+        action="store_true",
+        help="Evaluate best_model.pt and write validation/test diagnostics without training.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--backbone_precision", choices=("bf16", "fp32"), default="bf16"
@@ -299,6 +348,59 @@ def main():
     logger.info(f"Model parameters: {num_params:,}")
     logger.info("Compiled lifting depth: %d", compilation.active_plan.depth)
 
+    non_blocking = args.pin_memory and device.type == "cuda"
+    use_bf16 = args.backbone_precision == "bf16" and device.type == "cuda"
+
+    def write_final_evaluations() -> tuple[dict, dict]:
+        bounds = (
+            (args.log_variance_min, args.log_variance_max)
+            if args.covariance_parameterization == "spectral_window"
+            else None
+        )
+        validation_metrics = validate(
+            model,
+            val_loader,
+            device,
+            non_blocking=non_blocking,
+            use_bf16=use_bf16,
+            diagnostics=True,
+            log_variance_bounds=bounds,
+        )
+        test_metrics = validate(
+            model,
+            test_loader,
+            device,
+            non_blocking=non_blocking,
+            use_bf16=use_bf16,
+            diagnostics=True,
+            log_variance_bounds=bounds,
+        )
+        with open(os.path.join(args.save_dir, "validation_metrics.json"), "w") as f:
+            json.dump(validation_metrics, f, indent=2)
+        with open(os.path.join(args.save_dir, "test_metrics.json"), "w") as f:
+            json.dump(test_metrics, f, indent=2)
+        return validation_metrics, test_metrics
+
+    if args.evaluate_only:
+        checkpoint_path = os.path.join(args.save_dir, "best_model.pt")
+        if not os.path.isfile(checkpoint_path):
+            raise FileNotFoundError(f"missing checkpoint: {checkpoint_path}")
+        model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+        validation_metrics, test_metrics = write_final_evaluations()
+        logger.info(
+            "Validation: loss=%.4f, phys_mae=%.4f, log_mae=%.4f",
+            validation_metrics["loss"],
+            validation_metrics["phys_mae"],
+            validation_metrics["log_mae"],
+        )
+        logger.info(
+            "Test: loss=%.4f, phys_mae=%.4f, log_mae=%.4f",
+            test_metrics["loss"],
+            test_metrics["phys_mae"],
+            test_metrics["log_mae"],
+        )
+        return
+
     optimizer = optim.AdamW(
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay
     )
@@ -310,8 +412,6 @@ def main():
     patience_counter = 0
     history = []
 
-    non_blocking = args.pin_memory and device.type == "cuda"
-    use_bf16 = args.backbone_precision == "bf16" and device.type == "cuda"
     for epoch in range(args.num_epochs):
         warmup_mse = 0.1 if epoch < args.warmup_epochs else 0.0
         train_loss = train_epoch(
@@ -358,13 +458,7 @@ def main():
             os.path.join(args.save_dir, "best_model.pt"), map_location=args.device
         )
     )
-    test_metrics = validate(
-        model,
-        test_loader,
-        device,
-        non_blocking=non_blocking,
-        use_bf16=use_bf16,
-    )
+    validation_metrics, test_metrics = write_final_evaluations()
     logger.info(
         f"Test: loss={test_metrics['loss']:.4f}, phys_mae={test_metrics['phys_mae']:.4f}, log_mae={test_metrics['log_mae']:.4f}"
     )
@@ -375,8 +469,6 @@ def main():
         json.dump(compilation.as_dict(), f, indent=2)
     with open(os.path.join(args.save_dir, "history.json"), "w") as f:
         json.dump(history, f, indent=2)
-    with open(os.path.join(args.save_dir, "test_metrics.json"), "w") as f:
-        json.dump(test_metrics, f, indent=2)
 
 
 if __name__ == "__main__":

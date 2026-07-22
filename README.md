@@ -384,6 +384,12 @@ python -m scripts.train_dielectric \
   --tp_backend cueq \
   --cueq_method fused_tp --device cuda
 
+# Re-evaluate an existing dielectric checkpoint.  The JSON output contains
+# proper-likelihood-space calibration/ellipsoid coverage, sharpness, whitened
+# residual diagnostics, and spectral-window bound utilization.
+python -m scripts.train_dielectric \
+  --save_dir /path/to/dielectric_run --evaluate_only --device cuda
+
 # Rank-4 elasticity output; choose auto/full/block/low_rank.
 python -m scripts.train_elasticity \
   --lmax 2 --covariance auto --parameter_budget 192 --rank 8 \

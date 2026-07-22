@@ -205,3 +205,63 @@ def whitened_residual_covariance(
     )
     whitened = torch.matmul(z.unsqueeze(-1), z.unsqueeze(-2))
     return torch.trace(whitened.mean(dim=0))
+
+
+def covariance_spectrum_diagnostics(
+    scale: Tensor,
+    *,
+    log_variance_bounds: tuple[float, float] | None = None,
+    boundary_fraction: float = 0.01,
+) -> dict[str, float]:
+    """Summarize predictive covariance spectra without changing the model.
+
+    When a spectral window is declared, ``lower_boundary_fraction`` and
+    ``upper_boundary_fraction`` measure the fraction of covariance
+    eigenvalues in the outer ``boundary_fraction`` of the *log-variance*
+    interval.  They are saturation diagnostics, not bound violations.
+    """
+    if scale.ndim != 3 or scale.shape[-1] != scale.shape[-2]:
+        raise ValueError("scale must have shape (N, d, d)")
+    if not 0.0 < boundary_fraction < 0.5:
+        raise ValueError("boundary_fraction must lie in (0, 0.5)")
+
+    log_eigenvalues = torch.log(torch.linalg.eigvalsh(scale))
+    condition_numbers = torch.exp(
+        log_eigenvalues[..., -1] - log_eigenvalues[..., 0]
+    )
+    diagnostics = {
+        "log_eigenvalue_min": float(log_eigenvalues.min().item()),
+        "log_eigenvalue_max": float(log_eigenvalues.max().item()),
+        "log_eigenvalue_mean": float(log_eigenvalues.mean().item()),
+        "condition_number_mean": float(condition_numbers.mean().item()),
+        "condition_number_max": float(condition_numbers.max().item()),
+    }
+    if log_variance_bounds is None:
+        return diagnostics
+
+    lower, upper = log_variance_bounds
+    if not lower < upper:
+        raise ValueError("log_variance_bounds must satisfy lower < upper")
+    width = upper - lower
+    normalized = (log_eigenvalues - lower) / width
+    tolerance = 1e-5
+    diagnostics.update(
+        {
+            "declared_log_variance_min": float(lower),
+            "declared_log_variance_max": float(upper),
+            "declared_max_condition_number": float(torch.exp(torch.tensor(width)).item()),
+            "lower_boundary_fraction": float(
+                (normalized <= boundary_fraction).float().mean().item()
+            ),
+            "upper_boundary_fraction": float(
+                (normalized >= 1.0 - boundary_fraction).float().mean().item()
+            ),
+            "bound_violation_fraction": float(
+                ((normalized < -tolerance) | (normalized > 1.0 + tolerance))
+                .float()
+                .mean()
+                .item()
+            ),
+        }
+    )
+    return diagnostics

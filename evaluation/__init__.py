@@ -13,6 +13,7 @@ from evaluation.metrics import (
     log_euclidean_error,
     eigenvalue_error,
     whitened_residual_covariance,
+    covariance_spectrum_diagnostics,
 )
 from evaluation.calibration import (
     mahalanobis_distances,
@@ -56,6 +57,7 @@ __all__ = [
     "log_euclidean_error",
     "eigenvalue_error",
     "whitened_residual_covariance",
+    "covariance_spectrum_diagnostics",
     "mahalanobis_distances",
     "calibration_error",
     "qq_data",

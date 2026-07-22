@@ -14,6 +14,7 @@ from evaluation import (
     log_euclidean_error,
     eigenvalue_error,
     whitened_residual_covariance,
+    covariance_spectrum_diagnostics,
     calibration_error,
     sharpness,
 )
@@ -124,3 +125,15 @@ def test_sharpness():
     sh = sharpness(S)
     assert "mean_logdet" in sh
     assert "mean_trace" in sh
+
+
+def test_covariance_spectrum_diagnostics_reports_window_saturation():
+    scale = torch.diag_embed(
+        torch.tensor([[torch.exp(torch.tensor(-3.0)), 1.0, torch.exp(torch.tensor(2.0))]])
+    )
+    diagnostics = covariance_spectrum_diagnostics(
+        scale, log_variance_bounds=(-3.0, 2.0)
+    )
+    assert diagnostics["bound_violation_fraction"] == 0.0
+    assert diagnostics["lower_boundary_fraction"] == pytest.approx(1.0 / 3.0)
+    assert diagnostics["upper_boundary_fraction"] == pytest.approx(1.0 / 3.0)
