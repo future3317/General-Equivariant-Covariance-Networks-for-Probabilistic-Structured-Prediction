@@ -20,15 +20,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from data.dielectric_dataset import get_dielectric_irreps_loaders
 from data.tensor_conversions import irreps_to_km
-from distributions import GaussianNLL
+from equivcompiler import FeatureSpec, FullCovariance, SpectralWindowCovariance, plan_readout
 from evaluation.calibration import calibration_error, qq_data
 from evaluation.metrics import empirical_coverage
-from models import (
-    EquivariantBackbone,
-    EquivariantMeanHead,
-    O3EquivariantSymmetricOperatorHead,
-    StructuredProbabilisticPredictor,
-)
+from models import EquivariantBackbone
 from plotting import (
     COLORS,
     PALETTE,
@@ -37,8 +32,7 @@ from plotting import (
     save_figure,
     setup_tpami_style,
 )
-from representations import O3IrrepsSpec
-from spd_maps import MatrixExponentialMap
+from scripts._common import tensor_product_kwargs
 
 
 def load_model(checkpoint_dir: Path, device: str):
@@ -46,27 +40,31 @@ def load_model(checkpoint_dir: Path, device: str):
     with open(checkpoint_dir / "args.json") as f:
         args = argparse.Namespace(**json.load(f))
 
-    output_spec = O3IrrepsSpec("0e + 2e")
     backbone = EquivariantBackbone(
         hidden_dim=args.hidden_dim,
         lmax=args.lmax,
         num_layers=args.num_layers,
         atom_feature_dim=49,
         num_basis=args.num_basis,
+        atom_features=args.atom_features,
+        **tensor_product_kwargs(args),
     )
-    mean_head = EquivariantMeanHead(backbone.irreps_out, output_spec.irreps, pool=True)
-    cov_head = O3EquivariantSymmetricOperatorHead(
-        backbone.irreps_out, output_spec, pool=True
+    parameterization = args.covariance_parameterization
+    covariance = (
+        FullCovariance()
+        if parameterization == "matrix_exp"
+        else SpectralWindowCovariance(
+            args.log_variance_min,
+            args.log_variance_max,
+        )
     )
-
-    model = StructuredProbabilisticPredictor(
-        backbone=backbone,
-        output_spec=output_spec,
-        mean_head=mean_head,
-        covariance_head=cov_head,
-        spd_map=MatrixExponentialMap(),
-        distribution=GaussianNLL(),
-    ).to(device)
+    model = plan_readout(
+        FeatureSpec.from_backbone(backbone),
+        output="0e + 2e",
+        covariance=covariance,
+        distribution="gaussian",
+        output_scope="global",
+    ).bind(backbone).to(device)
 
     state = torch.load(checkpoint_dir / "best_model.pt", map_location=device)
     model.load_state_dict(state)

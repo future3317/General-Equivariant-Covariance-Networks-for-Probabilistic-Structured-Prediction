@@ -52,7 +52,7 @@ class FamilyRelation(str, Enum):
     UNKNOWN = "unknown"
 
 
-_POSITIVE_SPECTRAL_MAPS = {"matrix_exponential"}
+_POSITIVE_SPECTRAL_MAPS = {"matrix_exponential", "spectral_window"}
 _VERIFIED_INTERTWINERS = {"homogeneous_graph_coboundary"}
 
 
@@ -168,8 +168,10 @@ class OperatorIR:
         return cls.node("parameter", **attributes)
 
     @classmethod
-    def spectral_positive(cls, operator: "OperatorIR", *, map: str) -> "OperatorIR":
-        return cls.node("spectral_positive", operator, map=map)
+    def spectral_positive(
+        cls, operator: "OperatorIR", *, map: str, **attributes: Any
+    ) -> "OperatorIR":
+        return cls.node("spectral_positive", operator, map=map, **attributes)
 
     @classmethod
     def equivariant_factor(
@@ -545,6 +547,13 @@ def _verify_node(
             errors.append("spectral_positive requires one symmetric_operator input")
         if spectral_map not in _POSITIVE_SPECTRAL_MAPS:
             errors.append(f"unregistered positive spectral map: {spectral_map!r}")
+        if spectral_map == "spectral_window":
+            lower = attributes.get("log_variance_min")
+            upper = attributes.get("log_variance_max")
+            if not isinstance(lower, (int, float)) or not isinstance(upper, (int, float)):
+                errors.append("spectral_window requires numeric log-variance bounds")
+            elif not float(lower) < float(upper):
+                errors.append("spectral_window requires log_variance_min < log_variance_max")
         if children:
             dimension = children[0].certificate.result_dimension
             result_irreps = children[0].irreps

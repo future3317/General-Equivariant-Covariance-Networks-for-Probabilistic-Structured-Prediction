@@ -17,6 +17,13 @@ same compilation result selects an execution basis, creates the mean/covariance
 head, covariance basis, SPD parameterization, and proper Gaussian or Student-t
 objective.
 
+For heteroscedastic full covariance, `SpectralWindowCovariance(a, b)` compiles
+`Q diag(exp(a + (b-a) sigmoid(lambda))) Qᵀ`. This map is orthogonally
+conjugation-equivariant, strictly SPD, and bounds every covariance eigenvalue
+in `[exp(a), exp(b)]` on the same path used for training, evaluation, and
+inference. Gaussian NLL therefore remains the proper log score for this
+explicit restricted distribution family; it is not an inference-only clamp.
+
 ## Scope and current status
 
 The compiler contract is group-agnostic for finite-dimensional orthogonal output

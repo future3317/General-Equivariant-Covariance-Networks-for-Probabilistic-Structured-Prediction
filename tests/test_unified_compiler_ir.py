@@ -22,6 +22,7 @@ from equivcompiler import (
     execution_signature_for_plan,
     RadialLaw,
     SpecificExecutor,
+    SpectralWindowCovariance,
     TruncatedMultiplicityRank,
     plan_readout,
 )
@@ -82,6 +83,28 @@ def test_all_operator_families_share_one_typed_ir():
     assert graph_plan.assembly.kind == "add"
     assert graph_plan.assembly.inputs[1].kind == "pullback"
     assert all(plan.compile(output).parameter_expression.as_dict() for plan in families)
+
+
+def test_spectral_window_is_compiled_as_a_bounded_full_covariance_family():
+    plan = plan_readout(
+        SEED,
+        output="ij=ji",
+        covariance=SpectralWindowCovariance(-3.0, 2.0),
+    )
+    compilation = plan.compilation
+    assert compilation.operator_family.relation_to_full == FamilyRelation.STRICT_SUBSET
+    assert compilation.operator_family.assembly.attribute_dict() == {
+        "log_variance_max": 2.0,
+        "log_variance_min": -3.0,
+        "map": "spectral_window",
+    }
+    spd_map = compilation.build_spd_map()
+    assert spd_map.optimization_name == "spectral_window_eigendecomposition_oracle"
+    parameters = torch.randn(3, compilation.covariance_parameter_count)
+    scale = spd_map(parameters)
+    log_spectrum = torch.log(torch.linalg.eigvalsh(scale))
+    assert log_spectrum.min() >= -3.0 - 2e-6
+    assert log_spectrum.max() <= 2.0 + 2e-6
 
 
 def test_degenerate_structured_families_report_exact_full_coverage():

@@ -138,11 +138,17 @@ class RecursiveOperatorMap(SPDMap):
             ) + float(attributes.get("minimum", 1e-4))
             return lower @ lower.transpose(-1, -2)
         if node.kind == "spectral_positive":
-            if attributes["map"] != "matrix_exponential":
-                raise ValueError(
-                    "multiplicity_cholesky is represented by cholesky_positive"
-                )
-            return torch.linalg.matrix_exp(symmetrize(children[0]))
+            generator = symmetrize(children[0])
+            if attributes["map"] == "matrix_exponential":
+                return torch.linalg.matrix_exp(generator)
+            if attributes["map"] == "spectral_window":
+                from spd_maps import SpectralWindowMap
+
+                return SpectralWindowMap(
+                    float(attributes["log_variance_min"]),
+                    float(attributes["log_variance_max"]),
+                )(generator)
+            raise ValueError(f"no spectral runtime for {attributes['map']!r}")
         if node.kind == "gram":
             return children[0] @ children[0].transpose(-1, -2)
         if node.kind == "kronecker_identity":
@@ -388,6 +394,7 @@ def _registered_optimization_templates(
         GraphPrecision,
         IsotypicBlockCovariance,
         LowRankCovariance,
+        SpectralWindowCovariance,
     )
     from representations.o3_irreps import O3IrrepsSpec
 
@@ -399,6 +406,22 @@ def _registered_optimization_templates(
             ("operator: Sym^2(V) coefficients -> dense symmetric generator",),
         ),
     ]
+    assembly_attributes = family.assembly.attribute_dict()
+    if (
+        family.kind == "spectral_window"
+        and family.assembly.kind == "spectral_positive"
+        and assembly_attributes.get("map") == "spectral_window"
+    ):
+        templates.append(
+            _OptimizationTemplate(
+                SpectralWindowCovariance(
+                    float(assembly_attributes["log_variance_min"]),
+                    float(assembly_attributes["log_variance_max"]),
+                ).compile(output),
+                "spectral_window_eigendecomposition_oracle",
+                ("operator: Sym^2(V) coefficients -> dense symmetric generator",),
+            )
+        )
     try:
         block = IsotypicBlockCovariance().compile(output)
     except ValueError:
@@ -479,6 +502,7 @@ def _try_optimized_map(compilation: "O3Compilation") -> OptimizedProgramMap | No
         IsotypicBlockMap,
         LowRankPlusIsotropicMap,
         MatrixExponentialMap,
+        SpectralWindowMap,
     )
 
     family = compilation.operator_family
@@ -498,6 +522,26 @@ def _try_optimized_map(compilation: "O3Compilation") -> OptimizedProgramMap | No
         return OptimizedProgramMap(
             compilation,
             MatrixExponentialMap(),
+            full_transform,
+            certificate,
+        )
+
+    if certificate.optimization_name == "spectral_window_eigendecomposition_oracle":
+        basis = O3SymmetricOperatorBasis(compilation.output_spec.irreps).basis
+        attributes = family.assembly.attribute_dict()
+
+        def full_transform(params: torch.Tensor) -> torch.Tensor:
+            coefficients = params[..., slices["operator"]]
+            return symmetrize(
+                torch.einsum("...q,qij->...ij", coefficients, basis.to(params))
+            )
+
+        return OptimizedProgramMap(
+            compilation,
+            SpectralWindowMap(
+                float(attributes["log_variance_min"]),
+                float(attributes["log_variance_max"]),
+            ),
             full_transform,
             certificate,
         )
@@ -609,10 +653,10 @@ class PrimitiveLoweringRegistry:
 
 def _registered_runtime_node(node: OperatorIR) -> None:
     attributes = node.attribute_dict()
-    if (
-        node.kind == "spectral_positive"
-        and attributes.get("map") != "matrix_exponential"
-    ):
+    if node.kind == "spectral_positive" and attributes.get("map") not in {
+        "matrix_exponential",
+        "spectral_window",
+    }:
         raise ValueError(f"no spectral runtime for {attributes.get('map')!r}")
     if (
         node.kind == "pullback"

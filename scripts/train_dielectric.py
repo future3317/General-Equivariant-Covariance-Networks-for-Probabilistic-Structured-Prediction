@@ -13,7 +13,12 @@ import torch
 import torch.optim as optim
 from tqdm import tqdm
 
-from equivcompiler import FeatureSpec, FullCovariance, plan_readout
+from equivcompiler import (
+    FeatureSpec,
+    FullCovariance,
+    SpectralWindowCovariance,
+    plan_readout,
+)
 from models import EquivariantBackbone
 from data.dielectric_dataset import get_dielectric_irreps_loaders
 from data.paths import dataset_dir
@@ -191,6 +196,14 @@ def main():
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=1e-5)
+    parser.add_argument(
+        "--covariance_parameterization",
+        choices=("matrix_exp", "spectral_window"),
+        default="spectral_window",
+        help="SPD realization used identically for training, validation, and inference.",
+    )
+    parser.add_argument("--log_variance_min", type=float, default=-4.0)
+    parser.add_argument("--log_variance_max", type=float, default=4.0)
     parser.add_argument("--num_epochs", type=int, default=100)
     parser.add_argument("--patience", type=int, default=15)
     parser.add_argument("--warmup_epochs", type=int, default=3)
@@ -212,6 +225,10 @@ def main():
         "--device", default="cuda" if torch.cuda.is_available() else "cpu"
     )
     args = parser.parse_args()
+    if args.covariance_parameterization == "spectral_window" and not (
+        args.log_variance_min < args.log_variance_max
+    ):
+        parser.error("--log_variance_min must be smaller than --log_variance_max")
     args.data_dir = str(dataset_dir(args.data_dir, "mp_dielectric"))
     if (
         args.backbone_precision == "bf16"
@@ -258,10 +275,18 @@ def main():
         atom_features=args.atom_features,
         **tensor_product_kwargs(args),
     )
+    covariance = (
+        FullCovariance()
+        if args.covariance_parameterization == "matrix_exp"
+        else SpectralWindowCovariance(
+            args.log_variance_min,
+            args.log_variance_max,
+        )
+    )
     plan = plan_readout(
         FeatureSpec.from_backbone(backbone),
         output="0e + 2e",
-        covariance=FullCovariance(),
+        covariance=covariance,
         distribution="gaussian",
         output_scope="global",
     )

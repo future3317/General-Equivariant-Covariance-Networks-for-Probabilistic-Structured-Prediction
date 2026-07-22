@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+import math
 from typing import Any, Literal
 
 from representations import EquivariantOutputGraph, O3IrrepsSpec, irrep_multiplicities
@@ -63,6 +64,60 @@ class FullCovariance(OperatorFamilySpec):
 
     def as_dict(self) -> dict[str, Any]:
         return {"kind": "full_covariance"}
+
+
+@dataclass(frozen=True)
+class SpectralWindowCovariance(OperatorFamilySpec):
+    """Full covariance with a compiler-certified log-variance interval.
+
+    This family is a strict subset of unrestricted full covariance.  Its
+    spectrum is bounded during every execution path, rather than clipped only
+    for evaluation, so Gaussian NLL remains the proper log score for the
+    declared restricted distribution family.
+    """
+
+    log_variance_min: float = -4.0
+    log_variance_max: float = 4.0
+
+    def __post_init__(self) -> None:
+        if not self.log_variance_min < self.log_variance_max:
+            raise ValueError("log_variance_min must be smaller than log_variance_max")
+
+    def compile(self, output: O3IrrepsSpec) -> OperatorFamilyPlan:
+        base = IrrepsExpr(output.irreps, "output")
+        parameter = SymmetricSquareExpr(base)
+        symmetric = OperatorIR.symmetric_operator(
+            parameter=OperatorIR.parameter("operator"),
+            coordinate_space="output_representation",
+            output_irreps=str(output.irreps),
+        )
+        return OperatorFamilyPlan(
+            kind="spectral_window",
+            output_irreps=output.irreps,
+            parameter_bindings=(
+                ParameterBinding("operator", parameter, "covariance_projection"),
+            ),
+            parameter_count=output.dim * (output.dim + 1) // 2,
+            domain="scatter",
+            assembly=OperatorIR.spectral_positive(
+                symmetric,
+                map="spectral_window",
+                log_variance_min=float(self.log_variance_min),
+                log_variance_max=float(self.log_variance_max),
+            ),
+            relation_to_full=FamilyRelation.STRICT_SUBSET,
+            restriction="uniformly_conditioned_log_variance_window",
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "kind": "spectral_window_covariance",
+            "log_variance_min": self.log_variance_min,
+            "log_variance_max": self.log_variance_max,
+            "maximum_condition_number": float(
+                math.exp(self.log_variance_max - self.log_variance_min)
+            ),
+        }
 
 
 @dataclass(frozen=True)

@@ -6,6 +6,7 @@ import torch
 from spd_maps import (
     MatrixExponentialMap,
     SpectralSoftplusMap,
+    SpectralWindowMap,
     SquarePlusIdentityMap,
     PrecisionExponentialMap,
     LowRankPlusIsotropicMap,
@@ -93,3 +94,20 @@ def test_no_anisotropic_jitter_in_package():
             f"anisotropic jitter found in {pyfile}"
         )
         assert "safe_eigh" not in text, f"safe_eigh found in {pyfile}"
+
+
+def test_spectral_window_enforces_declared_spectrum_and_is_equivariant():
+    torch.manual_seed(4)
+    lower, upper = -3.0, 2.0
+    spd_map = SpectralWindowMap(lower, upper)
+    A, _ = _symmetric_matrix(3, 6)
+    covariance = spd_map(A)
+    log_eigenvalues = torch.log(torch.linalg.eigvalsh(covariance))
+    assert log_eigenvalues.min().item() >= lower - 2e-6
+    assert log_eigenvalues.max().item() <= upper + 2e-6
+    assert (log_eigenvalues[..., -1] - log_eigenvalues[..., 0]).max().item() <= upper - lower + 2e-6
+
+    orthogonal, _ = torch.linalg.qr(torch.randn(6, 6))
+    transformed = orthogonal @ A @ orthogonal.T
+    expected = orthogonal @ covariance @ orthogonal.T
+    torch.testing.assert_close(spd_map(transformed), expected, atol=2e-5, rtol=2e-5)
