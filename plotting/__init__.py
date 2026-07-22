@@ -2,6 +2,7 @@
 
 from plotting.style import (
     COLORS,
+    DENSITY_CMAP,
     PALETTE,
     cm2inch,
     get_color,
@@ -12,6 +13,7 @@ from plotting.style import (
 
 __all__ = [
     "COLORS",
+    "DENSITY_CMAP",
     "PALETTE",
     "cm2inch",
     "get_color",

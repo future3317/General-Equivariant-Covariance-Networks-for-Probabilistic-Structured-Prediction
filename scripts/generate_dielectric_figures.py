@@ -14,6 +14,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from scipy.stats import beta as beta_dist
 from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -26,7 +27,7 @@ from evaluation.metrics import empirical_coverage, mahalanobis_distance_squared
 from models import EquivariantBackbone
 from plotting import (
     COLORS,
-    PALETTE,
+    DENSITY_CMAP,
     cm2inch,
     label_panels,
     save_figure,
@@ -118,15 +119,32 @@ def plot_training_curves(history: list[dict], save_path: Path) -> None:
     fig, axes = plt.subplots(1, 2, figsize=cm2inch(16.5, 6.8))
     ax_loss, ax_mae = axes
 
-    ax_loss.plot(epochs, train_loss, label="Train loss", color=PALETTE[0])
-    ax_loss.plot(epochs, val_loss, label="Val loss", color=PALETTE[1])
+    ax_loss.plot(epochs, train_loss, label="Train loss", color=COLORS["midnight_blue"])
+    ax_loss.plot(
+        epochs,
+        val_loss,
+        label="Validation loss",
+        color=COLORS["champagne_gold"],
+        linestyle="--",
+    )
     ax_loss.set_xlabel("Epoch", fontsize=9)
     ax_loss.set_ylabel("Loss", fontsize=9)
     ax_loss.set_title("Training and Validation Loss", fontsize=10)
     ax_loss.legend(fontsize=7)
 
-    ax_mae.plot(epochs, val_phys_mae, label="Physical MAE", color=PALETTE[2])
-    ax_mae.plot(epochs, val_log_mae, label="Log-KM MAE", color=PALETTE[3])
+    ax_mae.plot(
+        epochs,
+        val_phys_mae,
+        label="Physical MAE",
+        color=COLORS["midnight_blue"],
+    )
+    ax_mae.plot(
+        epochs,
+        val_log_mae,
+        label="Log-KM MAE",
+        color=COLORS["champagne_gold"],
+        linestyle="--",
+    )
     ax_mae.set_xlabel("Epoch", fontsize=9)
     ax_mae.set_ylabel("MAE", fontsize=9)
     ax_mae.set_title("Validation MAE", fontsize=10)
@@ -141,7 +159,7 @@ def plot_training_curves(history: list[dict], save_path: Path) -> None:
 
 
 def plot_parity(pred_km: np.ndarray, target_km: np.ndarray, save_path: Path) -> None:
-    """Parity plot per Kelvin-Mandel component."""
+    """Density-aware prediction--target plots in log-KM coordinates."""
     setup_tpami_style()
 
     d = pred_km.shape[-1]
@@ -150,28 +168,72 @@ def plot_parity(pred_km: np.ndarray, target_km: np.ndarray, save_path: Path) -> 
     fig, axes = plt.subplots(n_rows, n_cols, figsize=cm2inch(16.5, 10.0))
     axes = np.atleast_1d(axes).flatten()
 
-    lims = [(target_km[:, i].min(), target_km[:, i].max()) for i in range(d)]
-
+    first_hexbin = None
     for i in range(d):
         ax = axes[i]
-        ax.scatter(target_km[:, i], pred_km[:, i], s=6, alpha=0.35, color=PALETTE[0])
-        lo, hi = lims[i]
-        ax.plot([lo, hi], [lo, hi], "--", color=COLORS["dark_gray"], linewidth=1.2)
-        if i >= n_cols:
-            ax.set_xlabel("Target", fontsize=8)
-        if i % n_cols == 0:
-            ax.set_ylabel("Prediction", fontsize=8)
-        r2 = 1 - np.sum((target_km[:, i] - pred_km[:, i]) ** 2) / (
+        values = np.concatenate((target_km[:, i], pred_km[:, i]))
+        values = values[np.isfinite(values)]
+        lo, hi = values.min(), values.max()
+        pad = max(1e-6, 0.02 * (hi - lo))
+        lo, hi = lo - pad, hi + pad
+        hb = ax.hexbin(
+            target_km[:, i],
+            pred_km[:, i],
+            gridsize=38,
+            mincnt=1,
+            bins="log",
+            cmap=DENSITY_CMAP,
+            linewidths=0,
+        )
+        if first_hexbin is None:
+            first_hexbin = hb
+        ax.plot(
+            [lo, hi],
+            [lo, hi],
+            "--",
+            color=COLORS["champagne_gold"],
+            linewidth=1.25,
+            label="Identity" if i == 0 else None,
+        )
+        residual = pred_km[:, i] - target_km[:, i]
+        r2 = 1 - np.sum(residual**2) / (
             np.sum((target_km[:, i] - target_km[:, i].mean()) ** 2) + 1e-12
         )
-        ax.set_title(f"KM component {i + 1}: $R^2={r2:.3f}$", fontsize=9)
+        mae = np.mean(np.abs(residual))
+        ax.text(
+            0.04,
+            0.96,
+            f"MAE {mae:.3f}\n$R^2$ {r2:.3f}",
+            transform=ax.transAxes,
+            va="top",
+            fontsize=7,
+            color=COLORS["dark_gray"],
+            bbox=dict(boxstyle="round,pad=0.22", facecolor="white", alpha=0.82, edgecolor="none"),
+        )
+        ax.set_xlim(lo, hi)
+        ax.set_ylim(lo, hi)
+        ax.set_aspect("equal", adjustable="box")
+        if i >= (n_rows - 1) * n_cols:
+            ax.set_xlabel("Target log-KM", fontsize=8)
+        if i % n_cols == 0:
+            ax.set_ylabel("Prediction log-KM", fontsize=8)
+        ax.set_title(f"Component {i + 1}", fontsize=9)
         ax.tick_params(labelsize=7)
+
+    if first_hexbin is not None:
+        cbar_ax = fig.add_axes([0.945, 0.16, 0.012, 0.68])
+        cbar = fig.colorbar(
+            first_hexbin,
+            cax=cbar_ax,
+        )
+        cbar.set_label("log$_{10}$(count)", fontsize=8)
+        cbar.ax.tick_params(labelsize=7)
 
     for j in range(d, len(axes)):
         axes[j].axis("off")
 
     label_panels(axes[:d], x=-0.08, y=1.01, fontsize=9)
-    fig.tight_layout()
+    fig.subplots_adjust(left=0.07, right=0.92, bottom=0.08, top=0.94, wspace=0.34, hspace=0.36)
     save_figure(fig, save_path)
     plt.close(fig)
 
@@ -188,29 +250,54 @@ def plot_calibration(
     # Left: confidence level vs empirical coverage.
     levels = np.linspace(0.1, 0.95, 10)
     coverages = empirical_coverage(mu, y, scale, levels=levels.tolist())
-    observed = [coverages[f"coverage_{int(level * 100):02d}"] for level in levels]
+    observed = np.asarray(
+        [coverages[f"coverage_{int(level * 100):02d}"] for level in levels], dtype=float
+    )
+    n_samples = int(mu.shape[0])
+    # A confidence band around the ideal binomial coverage makes sampling
+    # variability explicit without implying an additional learned quantity.
+    lower_ci, upper_ci = [], []
+    for level, empirical in zip(levels, observed):
+        k = int(round(empirical * n_samples))
+        lower_ci.append(
+            0.0
+            if k == 0
+            else float(beta_dist.ppf(0.025, k, n_samples - k + 1))
+        )
+        upper_ci.append(
+            1.0
+            if k == n_samples
+            else float(beta_dist.ppf(0.975, k + 1, n_samples - k))
+        )
 
     ax_cov.plot(
         levels,
         levels,
         "--",
-        color=COLORS["dark_gray"],
+        color=COLORS["champagne_gold"],
         linewidth=1.2,
         label="Perfect calibration",
+    )
+    ax_cov.fill_between(
+        levels,
+        lower_ci,
+        upper_ci,
+        color=COLORS["champagne_light"],
+        alpha=0.38,
+        label="95% binomial interval",
     )
     ax_cov.plot(
         levels,
         observed,
         "o-",
-        color=PALETTE[0],
+        color=COLORS["midnight_blue"],
         linewidth=2.0,
         markersize=5,
         label="Model",
     )
-    ax_cov.fill_between(levels, levels, observed, alpha=0.15, color=PALETTE[0])
     ax_cov.set_xlabel("Confidence level", fontsize=9)
     ax_cov.set_ylabel("Empirical coverage", fontsize=9)
-    ax_cov.set_title("Confidence Ellipsoid Calibration", fontsize=10)
+    ax_cov.set_title("Log-KM Ellipsoid Calibration", fontsize=10)
     ax_cov.legend(loc="lower right", fontsize=7)
     ax_cov.set_xlim(0.0, 1.0)
     ax_cov.set_ylim(0.0, 1.0)
@@ -221,7 +308,7 @@ def plot_calibration(
         theoretical,
         empirical,
         "o",
-        color=PALETTE[0],
+        color=COLORS["midnight_blue"],
         markersize=4,
         alpha=0.7,
         label="Empirical",
@@ -231,7 +318,7 @@ def plot_calibration(
         [0, max_val],
         [0, max_val],
         "--",
-        color=COLORS["dark_gray"],
+        color=COLORS["champagne_gold"],
         linewidth=1.2,
         label="Reference",
     )
@@ -270,8 +357,15 @@ def plot_risk_coverage(
         )
 
     fig, ax = plt.subplots(figsize=cm2inch(10, 7))
-    for (label, risks), color in zip(risks_by_score.items(), PALETTE):
-        ax.plot(fractions * 100, risks, "-", color=color, linewidth=2.3, label=label)
+    for label, risks in risks_by_score.items():
+        ax.plot(
+            fractions * 100,
+            risks,
+            "-",
+            color=(COLORS["midnight_blue"] if label.startswith("Trace") else COLORS["champagne_gold"]),
+            linewidth=2.3,
+            label=label,
+        )
     ax.axhline(
         mae_per_sample.mean().item(),
         color=COLORS["dark_gray"],
@@ -313,14 +407,19 @@ def plot_spectral_diagnostics(
         log_eigenvalues,
         bins=36,
         density=True,
-        color=PALETTE[0],
+        color=COLORS["midnight_blue"],
         edgecolor="white",
         alpha=0.85,
     )
     if log_variance_bounds is not None:
         lower, upper = log_variance_bounds
-        ax_spectrum.axvline(lower, color=COLORS["tertiary"], linestyle="--", label="Window")
-        ax_spectrum.axvline(upper, color=COLORS["tertiary"], linestyle="--")
+        ax_spectrum.axvline(
+            lower,
+            color=COLORS["champagne_gold"],
+            linestyle="--",
+            label="Spectral window",
+        )
+        ax_spectrum.axvline(upper, color=COLORS["champagne_gold"], linestyle="--")
         ax_spectrum.set_xlim(lower - 0.35, upper + 0.35)
     ax_spectrum.set_xlabel(r"$\log$ covariance eigenvalue", fontsize=9)
     ax_spectrum.set_ylabel("Density", fontsize=9)
@@ -329,12 +428,18 @@ def plot_spectral_diagnostics(
 
     sorted_condition = np.sort(condition_numbers)
     quantiles = np.linspace(0.0, 1.0, len(sorted_condition), endpoint=True)
-    ax_condition.plot(sorted_condition, quantiles, color=PALETTE[1], linewidth=2.3)
+    ax_condition.plot(
+        sorted_condition,
+        quantiles,
+        color=COLORS["midnight_blue"],
+        linewidth=2.3,
+        label="Empirical CDF",
+    )
     if log_variance_bounds is not None:
         upper_condition = np.exp(log_variance_bounds[1] - log_variance_bounds[0])
         ax_condition.axvline(
             upper_condition,
-            color=COLORS["tertiary"],
+            color=COLORS["champagne_gold"],
             linestyle="--",
             linewidth=1.2,
             label="Theoretical maximum",

@@ -12,32 +12,47 @@ from typing import Sequence
 
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
+from matplotlib.colors import LinearSegmentedColormap
 
 # ---------------------------------------------------------------------------
-# Color palette (soft, color-blind friendly, consistent with ICML figures)
+# Color palette.  The paper figures use the same restrained midnight-blue /
+# champagne-gold language as the ICML predecessor.  The named entries are
+# semantic so individual figure scripts do not need to carry local palettes.
 # ---------------------------------------------------------------------------
 COLORS = {
-    "primary": "#E07A5F",  # muted coral / salmon
-    "secondary": "#81B29A",  # sage green
-    "tertiary": "#3D405B",  # dark slate
-    "accent": "#F2CC8F",  # warm yellow
-    "teal": "#5FBDBD",  # soft teal
-    "purple": "#9D8DF1",  # light purple
-    "olive": "#A3A847",  # olive green
-    "gray": "#A8A8A8",  # neutral gray
-    "light_gray": "#D9D9D9",  # light gray
-    "dark_gray": "#4A4A4A",  # dark gray
+    "midnight_blue": "#002060",
+    "champagne_gold": "#D4AF37",
+    "champagne_light": "#F5D0A9",
+    "navy_light": "#5B79A8",
+    "dark_gray": "#3F4650",
+    "gray": "#8C939D",
+    "light_gray": "#D9DEE7",
 }
+
+# Backwards-compatible semantic aliases used by the older figure generators.
+# They intentionally resolve to the same two-color system rather than to a
+# second, unrelated palette.
+COLORS.update(
+    {
+        "primary": COLORS["midnight_blue"],
+        "secondary": COLORS["champagne_gold"],
+        "tertiary": COLORS["navy_light"],
+        "accent": COLORS["champagne_light"],
+    }
+)
+
+DENSITY_CMAP = LinearSegmentedColormap.from_list(
+    "tpami_midnight_density",
+    ["#F7F8FB", "#C9D4E6", "#5B79A8", "#002060"],
+)
 
 # Sequential palette for methods / lines
 PALETTE = [
-    COLORS["primary"],
-    COLORS["secondary"],
-    COLORS["teal"],
-    COLORS["olive"],
-    COLORS["purple"],
-    COLORS["accent"],
-    COLORS["tertiary"],
+    COLORS["midnight_blue"],
+    COLORS["champagne_gold"],
+    COLORS["navy_light"],
+    COLORS["champagne_light"],
+    COLORS["dark_gray"],
     COLORS["gray"],
 ]
 
