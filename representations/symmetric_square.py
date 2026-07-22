@@ -28,17 +28,17 @@ def symmetric_square_irreps(output_irreps: o3.Irreps) -> o3.Irreps:
 
     counts: dict[tuple[int, int], int] = {}
 
-    def add(l: int, parity: int, multiplicity: int) -> None:
+    def add(angular_momentum: int, parity: int, multiplicity: int) -> None:
         if multiplicity:
-            key = (l, parity)
+            key = (angular_momentum, parity)
             counts[key] = counts.get(key, 0) + multiplicity
 
     # Self-products: the swap symmetry of the L channel is (-1)^(2l-L).
-    for multiplicity, l, parity in groups:
+    for multiplicity, angular_momentum, parity in groups:
         symmetric_copies = multiplicity * (multiplicity + 1) // 2
         antisymmetric_copies = multiplicity * (multiplicity - 1) // 2
-        for output_l in range(0, 2 * l + 1):
-            if (2 * l - output_l) % 2 == 0:
+        for output_l in range(0, 2 * angular_momentum + 1):
+            if (2 * angular_momentum - output_l) % 2 == 0:
                 add(output_l, 1, symmetric_copies)
             else:
                 add(output_l, 1, antisymmetric_copies)
@@ -51,7 +51,12 @@ def symmetric_square_irreps(output_irreps: o3.Irreps) -> o3.Irreps:
                 add(output_l, left_parity * right_parity, left_mul * right_mul)
 
     ordered = sorted(counts.items(), key=lambda item: (item[0][0], item[0][1]))
-    return o3.Irreps([(multiplicity, (l, parity)) for (l, parity), multiplicity in ordered])
+    return o3.Irreps(
+        [
+            (multiplicity, (angular_momentum, parity))
+            for (angular_momentum, parity), multiplicity in ordered
+        ]
+    )
 
 
 class O3SymmetricOperatorBasis(torch.nn.Module):
