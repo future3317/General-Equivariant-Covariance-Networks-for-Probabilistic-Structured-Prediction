@@ -20,9 +20,13 @@ from scripts.generate_dielectric_figures import collect_predictions, load_model
 
 
 def _covariance_to_km(scale_irreps: torch.Tensor) -> torch.Tensor:
-    """Change a covariance from e3nn ``0e+2e`` coordinates to KM coordinates."""
+    """Change a row-vector covariance from e3nn coordinates to KM coordinates.
+
+    ``irreps_to_km`` applies the linear map on the last dimension by right
+    multiplication, so a covariance transforms as ``L.T @ S @ L``.
+    """
     basis = irreps_to_km(torch.eye(6, dtype=scale_irreps.dtype, device=scale_irreps.device))
-    return torch.einsum("ab,nbc,dc->nad", basis, scale_irreps, basis)
+    return torch.einsum("ab,nbc,cd->nad", basis.T, scale_irreps, basis)
 
 
 @torch.inference_mode()
@@ -47,7 +51,6 @@ def audit(checkpoint_dir: Path, device: str) -> dict:
     scale_irreps = predictions["scale_irreps"].double()
     basis = irreps_to_km(torch.eye(6, dtype=torch.float64))
     scale = _covariance_to_km(scale_irreps)
-    scale_transposed = torch.einsum("ab,nbc,cd->nad", basis.T, scale_irreps, basis)
     residual = mu - target
 
     residual_cov = torch.cov(residual.T)
@@ -65,10 +68,6 @@ def audit(checkpoint_dir: Path, device: str) -> dict:
     maha2_irreps = (
         residual_irreps
         * torch.linalg.solve(scale_irreps, residual_irreps.unsqueeze(-1)).squeeze(-1)
-    ).sum(dim=-1)
-    maha2_transposed = (
-        residual
-        * torch.linalg.solve(scale_transposed, residual.unsqueeze(-1)).squeeze(-1)
     ).sum(dim=-1)
 
     components = []
@@ -100,7 +99,6 @@ def audit(checkpoint_dir: Path, device: str) -> dict:
             "target_max_error": float(torch.max(torch.abs(target - irreps_to_km(target_irreps)))),
             "mahalanobis2_irreps_mean": float(maha2_irreps.mean()),
             "mahalanobis2_km_mean": float(maha2.mean()),
-            "mahalanobis2_transposed_km_mean": float(maha2_transposed.mean()),
             "scale_symmetry_error_irreps": float(torch.max(torch.abs(scale_irreps - scale_irreps.transpose(-1, -2)))),
         },
         "components": components,
