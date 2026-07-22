@@ -6,6 +6,7 @@ import argparse
 import os
 import json
 import logging
+import random
 from datetime import datetime
 
 import torch
@@ -20,6 +21,33 @@ from data.tensor_conversions import irreps_to_km, irreps_to_matrix_exp_voigt
 from voigt_utils import kelvin_mandel_to_voigt
 from matrix_log_transform import matrix_exponential_transform
 from scripts._common import add_tensor_product_arguments, tensor_product_kwargs
+
+
+def _set_seed(seed: int) -> None:
+    random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def _forward(
+    model,
+    batch,
+    *,
+    target: torch.Tensor,
+    use_bf16: bool,
+):
+    """Run BF16 only through the backbone; keep SPD/NLL in FP32."""
+    if not use_bf16:
+        return model(batch, target=target, return_scale=False)
+    with torch.autocast(device_type=batch.pos.device.type, dtype=torch.bfloat16):
+        node_features, graph_batch = model.backbone(batch)
+    return model.forward_from_features(
+        node_features.float(),
+        graph_batch,
+        target=target,
+        return_scale=False,
+    )
 
 
 def setup_logger(save_dir: str, experiment_name: str | None = None):
@@ -65,6 +93,7 @@ def train_epoch(
     device,
     warmup_mse_weight: float = 0.0,
     non_blocking: bool = False,
+    use_bf16: bool = False,
 ):
     model.train()
     total_loss = torch.tensor(0.0, device=device)
@@ -77,15 +106,24 @@ def train_epoch(
 
         optimizer.zero_grad(set_to_none=True)
 
-        result = model(batch, target=batch.y_irreps, return_scale=False)
+        result = _forward(
+            model,
+            batch,
+            target=batch.y_irreps,
+            use_bf16=use_bf16,
+        )
         loss = result["loss"]
 
         if warmup_mse_weight > 0.0:
             mse = torch.nn.functional.mse_loss(result["mu"], batch.y_irreps)
             loss = loss + warmup_mse_weight * mse
 
+        if not bool(torch.isfinite(loss.detach()).all()):
+            raise FloatingPointError("non-finite dielectric training loss")
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        torch.nn.utils.clip_grad_norm_(
+            model.parameters(), max_norm=1.0, error_if_nonfinite=True
+        )
         optimizer.step()
 
         batch_size = batch.y_irreps.shape[0]
@@ -96,7 +134,13 @@ def train_epoch(
 
 
 @torch.inference_mode()
-def validate(model, dataloader, device, non_blocking: bool = False):
+def validate(
+    model,
+    dataloader,
+    device,
+    non_blocking: bool = False,
+    use_bf16: bool = False,
+):
     model.eval()
     total_loss = 0.0
     total_phys_abs = 0.0
@@ -109,7 +153,14 @@ def validate(model, dataloader, device, non_blocking: bool = False):
         if batch.edge_index is None or batch.edge_index.numel() == 0:
             continue
 
-        result = model(batch, target=batch.y_irreps, return_scale=False)
+        result = _forward(
+            model,
+            batch,
+            target=batch.y_irreps,
+            use_bf16=use_bf16,
+        )
+        if not bool(torch.isfinite(result["loss"].detach()).all()):
+            raise FloatingPointError("non-finite dielectric validation loss")
         batch_size = batch.y_irreps.shape[0]
         total_loss += result["loss"].item() * batch_size
         num_loss_samples += batch_size
@@ -143,6 +194,11 @@ def main():
     parser.add_argument("--num_epochs", type=int, default=100)
     parser.add_argument("--patience", type=int, default=15)
     parser.add_argument("--warmup_epochs", type=int, default=3)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--backbone_precision", choices=("bf16", "fp32"), default="bf16"
+    )
+    parser.add_argument("--allow_tf32", action="store_true")
     parser.add_argument("--train_subset", type=int, default=None)
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--persistent_workers", action="store_true")
@@ -157,6 +213,12 @@ def main():
     )
     args = parser.parse_args()
     args.data_dir = str(dataset_dir(args.data_dir, "mp_dielectric"))
+    _set_seed(args.seed)
+    device = torch.device(args.device)
+    if device.type == "cuda":
+        torch.backends.cuda.matmul.allow_tf32 = args.allow_tf32
+        torch.backends.cudnn.allow_tf32 = args.allow_tf32
+        torch.backends.cudnn.benchmark = True
 
     logger, experiment_name = setup_logger(args.save_dir)
     logger.info("=" * 60)
@@ -195,7 +257,7 @@ def main():
         output_scope="global",
     )
     compilation = plan.compilation
-    model = plan.bind(backbone).to(args.device)
+    model = plan.bind(backbone).to(device)
     if args.compile_tp:
         model.backbone.compile_tensor_products(dynamic=True)
 
@@ -214,19 +276,25 @@ def main():
     patience_counter = 0
     history = []
 
-    non_blocking = args.pin_memory and args.device.startswith("cuda")
+    non_blocking = args.pin_memory and device.type == "cuda"
+    use_bf16 = args.backbone_precision == "bf16" and device.type == "cuda"
     for epoch in range(args.num_epochs):
         warmup_mse = 0.1 if epoch < args.warmup_epochs else 0.0
         train_loss = train_epoch(
             model,
             train_loader,
             optimizer,
-            args.device,
+            device,
             warmup_mse,
             non_blocking=non_blocking,
+            use_bf16=use_bf16,
         )
         val_metrics = validate(
-            model, val_loader, args.device, non_blocking=non_blocking
+            model,
+            val_loader,
+            device,
+            non_blocking=non_blocking,
+            use_bf16=use_bf16,
         )
         scheduler.step(val_metrics["loss"])
 
@@ -256,7 +324,13 @@ def main():
             os.path.join(args.save_dir, "best_model.pt"), map_location=args.device
         )
     )
-    test_metrics = validate(model, test_loader, args.device, non_blocking=non_blocking)
+    test_metrics = validate(
+        model,
+        test_loader,
+        device,
+        non_blocking=non_blocking,
+        use_bf16=use_bf16,
+    )
     logger.info(
         f"Test: loss={test_metrics['loss']:.4f}, phys_mae={test_metrics['phys_mae']:.4f}, log_mae={test_metrics['log_mae']:.4f}"
     )
