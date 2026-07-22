@@ -47,6 +47,8 @@ from models import (
 )
 from representations import O3IrrepsSpec
 from scripts._common import add_tensor_product_arguments, tensor_product_kwargs
+from data.representation_metrics import infer_representation_block_metric
+from spd_maps import RepresentationMetricMap
 
 
 MODEL_KINDS = (
@@ -700,6 +702,10 @@ def _parse_args() -> argparse.Namespace:
         help="pooled frozen-backbone cache; valid only for phase=frozen_head",
     )
     parser.add_argument("--student_t_dof", type=float, default=5.0)
+    parser.add_argument(
+        "--representation_metric", choices=("none", "block_auto"), default="none",
+        help="training-set RMS metric repeated over each O(3) isotypic block",
+    )
     parser.add_argument("--hidden_dim", type=int, default=64)
     parser.add_argument("--lmax", type=int, default=2)
     parser.add_argument("--num_layers", type=int, default=2)
@@ -787,6 +793,19 @@ def main() -> None:
         top_loader = get_itop_split_loader(
             view="top", split="test", **loader_kwargs
         )
+
+    if args.representation_metric == "block_auto":
+        if model.spd_map is None:
+            raise ValueError("representation_metric requires a probabilistic model")
+        base_dataset = train_loader.dataset.dataset
+        target_values = torch.as_tensor(base_dataset.joints, dtype=torch.float32).reshape(-1, 45)
+        metric, metric_stats = infer_representation_block_metric(
+            target_values, ITOP_OUTPUT_GRAPH.output_irreps
+        )
+        args.metric = metric.tolist()
+        args.metric_stats = metric_stats
+        model.spd_map = RepresentationMetricMap(model.spd_map, metric).to(device)
+        logger.info("Representation metric: %s", metric_stats)
 
     compilation = plan.compilation.as_dict() if plan is not None else None
     logger.info("args=%s", json.dumps(vars(args), sort_keys=True))
