@@ -53,6 +53,11 @@ def fit_temperature(
     """Fit a positive scalar ``T`` on validation NLL with ``S' = T S``."""
     if not (0.0 < min_temperature < max_temperature):
         raise ValueError("invalid temperature bounds")
+    # Prediction collection commonly runs under ``inference_mode``.  Clone
+    # here so LBFGS can legally save tensors for its backward pass.
+    pred = pred.detach().clone()
+    target = target.detach().clone()
+    scale = scale.detach().clone()
     # Optimize in log space; the clamp makes the fitted value deterministic and
     # prevents pathological extrapolation on tiny validation sets.
     log_t = torch.zeros((), dtype=scale.dtype, device=scale.device, requires_grad=True)
@@ -79,4 +84,3 @@ def apply_temperature(scale: Tensor, temperature: float) -> Tensor:
     if temperature <= 0:
         raise ValueError("temperature must be positive")
     return scale * float(temperature)
-

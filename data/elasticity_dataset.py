@@ -175,7 +175,7 @@ class ElasticityIrrepsDataset(Dataset):
             edge_weights = torch.exp(-((edge_distances / self.max_radius) ** 2))
 
         return Data(
-            node_features=torch.tensor(atom_features, dtype=torch.float32),
+            node_features=atom_features.clone().detach().to(dtype=torch.float32),
             edge_index=edge_index,
             edge_sh=edge_sh,
             edge_rbf=edge_rbf,
