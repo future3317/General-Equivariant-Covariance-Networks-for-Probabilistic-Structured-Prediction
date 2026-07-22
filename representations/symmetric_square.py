@@ -15,8 +15,43 @@ def symmetric_square_irreps(output_irreps: o3.Irreps) -> o3.Irreps:
     Returns:
         Irreps of the symmetric-square space.
     """
-    rtp = o3.ReducedTensorProducts("ij=ji", i=output_irreps)
-    return rtp.irreps_out
+    # Compute the irrep *types* analytically.  Constructing an e3nn
+    # ReducedTensorProducts object for a high-multiplicity representation
+    # (e.g. ITOP's ``15x1o``) materializes a 45x45 change-of-basis tensor and
+    # can take minutes.  The compiler only needs the decomposition here; the
+    # concrete basis is still materialized lazily by O3SymmetricOperatorBasis
+    # for families that actually assemble a dense operator.
+    irreps = o3.Irreps(output_irreps)
+    groups: list[tuple[int, int, int]] = []
+    for multiplicity, irrep in irreps:
+        groups.append((int(multiplicity), int(irrep.l), int(irrep.p)))
+
+    counts: dict[tuple[int, int], int] = {}
+
+    def add(l: int, parity: int, multiplicity: int) -> None:
+        if multiplicity:
+            key = (l, parity)
+            counts[key] = counts.get(key, 0) + multiplicity
+
+    # Self-products: the swap symmetry of the L channel is (-1)^(2l-L).
+    for multiplicity, l, parity in groups:
+        symmetric_copies = multiplicity * (multiplicity + 1) // 2
+        antisymmetric_copies = multiplicity * (multiplicity - 1) // 2
+        for output_l in range(0, 2 * l + 1):
+            if (2 * l - output_l) % 2 == 0:
+                add(output_l, 1, symmetric_copies)
+            else:
+                add(output_l, 1, antisymmetric_copies)
+
+    # Cross-products have no exchange constraint and occur once per pair of
+    # multiplicity channels.
+    for index, (left_mul, left_l, left_parity) in enumerate(groups):
+        for right_mul, right_l, right_parity in groups[index + 1 :]:
+            for output_l in range(abs(left_l - right_l), left_l + right_l + 1):
+                add(output_l, left_parity * right_parity, left_mul * right_mul)
+
+    ordered = sorted(counts.items(), key=lambda item: (item[0][0], item[0][1]))
+    return o3.Irreps([(multiplicity, (l, parity)) for (l, parity), multiplicity in ordered])
 
 
 class O3SymmetricOperatorBasis(torch.nn.Module):
