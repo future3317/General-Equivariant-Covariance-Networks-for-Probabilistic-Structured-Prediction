@@ -151,6 +151,7 @@ def main():
     parser.add_argument("--patience", type=int, default=15)
     parser.add_argument("--warmup_epochs", type=int, default=3)
     parser.add_argument("--train_subset", type=int, default=None)
+    parser.add_argument("--eval_subset", type=int, default=None)
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--persistent_workers", action="store_true")
     parser.add_argument("--pin_memory", action="store_true")
@@ -177,6 +178,7 @@ def main():
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         train_subset=args.train_subset,
+        eval_subset=args.eval_subset,
         persistent_workers=args.persistent_workers,
         pin_memory=args.pin_memory,
         prefetch_factor=args.prefetch_factor,

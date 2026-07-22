@@ -189,6 +189,7 @@ def get_elasticity_irreps_loaders(
     batch_size: int = 16,
     num_workers: int = 0,
     train_subset: int | None = None,
+    eval_subset: int | None = None,
     max_radius: float = 5.0,
     persistent_workers: bool = False,
     pin_memory: bool = False,
@@ -223,6 +224,12 @@ def get_elasticity_irreps_loaders(
         lmax=lmax,
         num_basis=num_basis,
     )
+
+    if eval_subset is not None:
+        if eval_subset <= 0:
+            raise ValueError("eval_subset must be positive")
+        val_dataset = torch.utils.data.Subset(val_dataset, range(min(eval_subset, len(val_dataset))))
+        test_dataset = torch.utils.data.Subset(test_dataset, range(min(eval_subset, len(test_dataset))))
 
     if train_subset is not None and train_subset < len(train_dataset):
         import random
