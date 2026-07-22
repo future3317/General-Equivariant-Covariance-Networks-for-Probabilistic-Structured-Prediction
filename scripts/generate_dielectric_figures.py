@@ -115,24 +115,26 @@ def plot_training_curves(history: list[dict], save_path: Path) -> None:
     val_phys_mae = [h["phys_mae"] for h in history]
     val_log_mae = [h["log_mae"] for h in history]
 
-    fig, axes = plt.subplots(1, 2, figsize=cm2inch(16, 6))
+    fig, axes = plt.subplots(1, 2, figsize=cm2inch(16.5, 6.8))
     ax_loss, ax_mae = axes
 
     ax_loss.plot(epochs, train_loss, label="Train loss", color=PALETTE[0])
     ax_loss.plot(epochs, val_loss, label="Val loss", color=PALETTE[1])
-    ax_loss.set_xlabel("Epoch")
-    ax_loss.set_ylabel("Loss")
-    ax_loss.set_title("Training and Validation Loss")
-    ax_loss.legend()
+    ax_loss.set_xlabel("Epoch", fontsize=9)
+    ax_loss.set_ylabel("Loss", fontsize=9)
+    ax_loss.set_title("Training and Validation Loss", fontsize=10)
+    ax_loss.legend(fontsize=7)
 
     ax_mae.plot(epochs, val_phys_mae, label="Physical MAE", color=PALETTE[2])
     ax_mae.plot(epochs, val_log_mae, label="Log-KM MAE", color=PALETTE[3])
-    ax_mae.set_xlabel("Epoch")
-    ax_mae.set_ylabel("MAE")
-    ax_mae.set_title("Validation MAE")
-    ax_mae.legend()
+    ax_mae.set_xlabel("Epoch", fontsize=9)
+    ax_mae.set_ylabel("MAE", fontsize=9)
+    ax_mae.set_title("Validation MAE", fontsize=10)
+    ax_mae.legend(fontsize=7)
 
-    label_panels(axes, x=-0.18, y=1.04)
+    for ax in axes:
+        ax.tick_params(labelsize=8)
+    label_panels(axes, x=-0.10, y=1.02, fontsize=9)
     fig.tight_layout()
     save_figure(fig, save_path)
     plt.close(fig)
@@ -145,27 +147,30 @@ def plot_parity(pred_km: np.ndarray, target_km: np.ndarray, save_path: Path) -> 
     d = pred_km.shape[-1]
     n_cols = 3
     n_rows = int(np.ceil(d / n_cols))
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=cm2inch(14, 3.2 * n_rows))
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=cm2inch(16.5, 10.0))
     axes = np.atleast_1d(axes).flatten()
 
     lims = [(target_km[:, i].min(), target_km[:, i].max()) for i in range(d)]
 
     for i in range(d):
         ax = axes[i]
-        ax.scatter(target_km[:, i], pred_km[:, i], s=8, alpha=0.4, color=PALETTE[0])
+        ax.scatter(target_km[:, i], pred_km[:, i], s=6, alpha=0.35, color=PALETTE[0])
         lo, hi = lims[i]
         ax.plot([lo, hi], [lo, hi], "--", color=COLORS["dark_gray"], linewidth=1.2)
-        ax.set_xlabel(f"Target component {i + 1}")
-        ax.set_ylabel(f"Predicted component {i + 1}")
+        if i >= n_cols:
+            ax.set_xlabel("Target", fontsize=8)
+        if i % n_cols == 0:
+            ax.set_ylabel("Prediction", fontsize=8)
         r2 = 1 - np.sum((target_km[:, i] - pred_km[:, i]) ** 2) / (
             np.sum((target_km[:, i] - target_km[:, i].mean()) ** 2) + 1e-12
         )
-        ax.set_title(f"$R^2$ = {r2:.3f}")
+        ax.set_title(f"KM component {i + 1}: $R^2={r2:.3f}$", fontsize=9)
+        ax.tick_params(labelsize=7)
 
     for j in range(d, len(axes)):
         axes[j].axis("off")
 
-    fig.suptitle("Dielectric Tensor Parity Plot (log-Kelvin-Mandel)", y=1.02)
+    label_panels(axes[:d], x=-0.08, y=1.01, fontsize=9)
     fig.tight_layout()
     save_figure(fig, save_path)
     plt.close(fig)
@@ -177,7 +182,7 @@ def plot_calibration(
     """Coverage calibration and Q-Q plot for Mahalanobis distances."""
     setup_tpami_style()
 
-    fig, axes = plt.subplots(1, 2, figsize=cm2inch(16, 6))
+    fig, axes = plt.subplots(1, 2, figsize=cm2inch(16.5, 6.8))
     ax_cov, ax_qq = axes
 
     # Left: confidence level vs empirical coverage.
@@ -203,10 +208,10 @@ def plot_calibration(
         label="Model",
     )
     ax_cov.fill_between(levels, levels, observed, alpha=0.15, color=PALETTE[0])
-    ax_cov.set_xlabel("Confidence level")
-    ax_cov.set_ylabel("Empirical coverage")
-    ax_cov.set_title("Confidence Ellipsoid Calibration")
-    ax_cov.legend(loc="lower right")
+    ax_cov.set_xlabel("Confidence level", fontsize=9)
+    ax_cov.set_ylabel("Empirical coverage", fontsize=9)
+    ax_cov.set_title("Confidence Ellipsoid Calibration", fontsize=10)
+    ax_cov.legend(loc="lower right", fontsize=7)
     ax_cov.set_xlim(0.0, 1.0)
     ax_cov.set_ylim(0.0, 1.0)
 
@@ -230,12 +235,14 @@ def plot_calibration(
         linewidth=1.2,
         label="Reference",
     )
-    ax_qq.set_xlabel(r"Theoretical $\chi^2$ quantile")
-    ax_qq.set_ylabel(r"Empirical Mahalanobis$^2$ quantile")
-    ax_qq.set_title("Q-Q Calibration")
-    ax_qq.legend()
+    ax_qq.set_xlabel(r"Theoretical $\chi^2$ quantile", fontsize=9)
+    ax_qq.set_ylabel(r"Empirical Mahalanobis$^2$ quantile", fontsize=9)
+    ax_qq.set_title("Q-Q Calibration", fontsize=10)
+    ax_qq.legend(fontsize=7)
 
-    label_panels(axes, x=-0.18, y=1.04)
+    for ax in axes:
+        ax.tick_params(labelsize=8)
+    label_panels(axes, x=-0.10, y=1.02, fontsize=9)
     fig.tight_layout()
     save_figure(fig, save_path)
     plt.close(fig)
@@ -272,10 +279,11 @@ def plot_risk_coverage(
         linewidth=1.2,
         label="Full-set MAE",
     )
-    ax.set_xlabel("Coverage (%)")
-    ax.set_ylabel("Log-KM MAE")
-    ax.set_title("Uncertainty-Risk Ranking")
-    ax.legend()
+    ax.set_xlabel("Coverage (%)", fontsize=9)
+    ax.set_ylabel("Log-KM MAE", fontsize=9)
+    ax.set_title("Uncertainty-Risk Ranking", fontsize=10)
+    ax.tick_params(labelsize=8)
+    ax.legend(fontsize=7)
     ax.set_xlim(10, 100)
 
     fig.tight_layout()
@@ -299,7 +307,7 @@ def plot_spectral_diagnostics(
         np.ptp(log_eigenvalues.reshape(-1, scale.shape[-1]), axis=1)
     )
 
-    fig, axes = plt.subplots(1, 2, figsize=cm2inch(16, 6))
+    fig, axes = plt.subplots(1, 2, figsize=cm2inch(16.5, 6.8))
     ax_spectrum, ax_condition = axes
     ax_spectrum.hist(
         log_eigenvalues,
@@ -314,10 +322,10 @@ def plot_spectral_diagnostics(
         ax_spectrum.axvline(lower, color=COLORS["tertiary"], linestyle="--", label="Window")
         ax_spectrum.axvline(upper, color=COLORS["tertiary"], linestyle="--")
         ax_spectrum.set_xlim(lower - 0.35, upper + 0.35)
-    ax_spectrum.set_xlabel(r"$\log$ covariance eigenvalue")
-    ax_spectrum.set_ylabel("Density")
-    ax_spectrum.set_title("Spectral-Window Utilization")
-    ax_spectrum.legend(loc="upper center")
+    ax_spectrum.set_xlabel(r"$\log$ covariance eigenvalue", fontsize=9)
+    ax_spectrum.set_ylabel("Density", fontsize=9)
+    ax_spectrum.set_title("Spectral-Window Utilization", fontsize=10)
+    ax_spectrum.legend(loc="upper center", fontsize=7)
 
     sorted_condition = np.sort(condition_numbers)
     quantiles = np.linspace(0.0, 1.0, len(sorted_condition), endpoint=True)
@@ -332,11 +340,13 @@ def plot_spectral_diagnostics(
             label="Theoretical maximum",
         )
     ax_condition.set_xscale("log")
-    ax_condition.set_xlabel("Condition number")
-    ax_condition.set_ylabel("Empirical CDF")
-    ax_condition.set_title("Conditioning of Predicted Covariances")
-    ax_condition.legend(loc="lower right")
-    label_panels(axes, x=-0.18, y=1.04)
+    ax_condition.set_xlabel("Condition number", fontsize=9)
+    ax_condition.set_ylabel("Empirical CDF", fontsize=9)
+    ax_condition.set_title("Conditioning of Predicted Covariances", fontsize=10)
+    ax_condition.legend(loc="lower right", fontsize=7)
+    for ax in axes:
+        ax.tick_params(labelsize=8)
+    label_panels(axes, x=-0.10, y=1.02, fontsize=9)
     fig.tight_layout()
     save_figure(fig, save_path)
     plt.close(fig)
