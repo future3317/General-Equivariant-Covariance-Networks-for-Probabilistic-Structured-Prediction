@@ -65,6 +65,8 @@ def empirical_coverage(
     target: Tensor,
     scale: Tensor,
     levels: list[float] | None = None,
+    reference: str = "gaussian",
+    student_t_dof: float = 5.0,
 ) -> dict[str, float]:
     """Empirical coverage of confidence ellipsoids at specified levels.
 
@@ -80,7 +82,12 @@ def empirical_coverage(
     if levels is None:
         levels = [0.5, 0.8, 0.9, 0.95]
 
-    from scipy.stats import chi2
+    from scipy.stats import chi2, f
+
+    if reference not in {"gaussian", "student_t"}:
+        raise ValueError(f"unknown calibration reference: {reference}")
+    if reference == "student_t" and student_t_dof <= 0:
+        raise ValueError("student_t_dof must be positive")
 
     d = pred.shape[-1]
     residual = target - pred
@@ -88,7 +95,11 @@ def empirical_coverage(
 
     result = {}
     for level in levels:
-        threshold = chi2.ppf(level, df=float(d))
+        threshold = (
+            chi2.ppf(level, df=float(d))
+            if reference == "gaussian"
+            else float(d) * f.ppf(level, dfn=float(d), dfd=float(student_t_dof))
+        )
         result[f"coverage_{int(level * 100):02d}"] = (
             (maha2 < threshold).float().mean().item()
         )

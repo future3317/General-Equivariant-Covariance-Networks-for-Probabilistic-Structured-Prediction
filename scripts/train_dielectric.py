@@ -21,6 +21,7 @@ from equivcompiler import (
 )
 from models import EquivariantBackbone
 from data.dielectric_dataset import get_dielectric_irreps_loaders
+from data.representation_metrics import infer_rank2_block_metric
 from data.paths import dataset_dir
 from data.tensor_conversions import irreps_to_km, irreps_to_matrix_exp_voigt
 from voigt_utils import kelvin_mandel_to_voigt
@@ -34,6 +35,7 @@ from evaluation import (
     whitened_residual_covariance,
 )
 from scripts._common import add_tensor_product_arguments, tensor_product_kwargs
+from spd_maps import RepresentationMetricMap
 
 
 def _set_seed(seed: int) -> None:
@@ -156,6 +158,8 @@ def validate(
     use_bf16: bool = False,
     diagnostics: bool = False,
     log_variance_bounds: tuple[float, float] | None = None,
+    distribution: str = "gaussian",
+    student_t_dof: float = 5.0,
 ):
     model.eval()
     total_loss = 0.0
@@ -219,8 +223,20 @@ def validate(
     metrics["probabilistic_diagnostics"] = {
         "coordinate_space": "log_kelvin_mandel",
         "scale_materialization_dtype": "float64",
-        "calibration": calibration_error(prediction, target, scale),
-        "ellipsoid_coverage": empirical_coverage(prediction, target, scale),
+        "calibration": calibration_error(
+            prediction,
+            target,
+            scale,
+            reference=distribution,
+            student_t_dof=student_t_dof,
+        ),
+        "ellipsoid_coverage": empirical_coverage(
+            prediction,
+            target,
+            scale,
+            reference=distribution,
+            student_t_dof=student_t_dof,
+        ),
         "sharpness": sharpness(scale),
         "spectrum": covariance_spectrum_diagnostics(
             scale, log_variance_bounds=log_variance_bounds
@@ -260,6 +276,21 @@ def main():
     parser.add_argument("--num_epochs", type=int, default=100)
     parser.add_argument("--patience", type=int, default=15)
     parser.add_argument("--warmup_epochs", type=int, default=3)
+    parser.add_argument(
+        "--distribution",
+        choices=("gaussian", "student_t"),
+        default="gaussian",
+        help="proper probabilistic objective",
+    )
+    parser.add_argument("--student_t_dof", type=float, default=5.0)
+    parser.add_argument(
+        "--representation_metric",
+        choices=("none", "block_auto"),
+        default="none",
+        help="equivariant 0e/2e target metric for multi-scale outputs",
+    )
+    parser.add_argument("--rotation_augmentation", action="store_true")
+    parser.add_argument("--rotation_probability", type=float, default=1.0)
     parser.add_argument(
         "--evaluate_only",
         action="store_true",
@@ -322,6 +353,8 @@ def main():
         lmax=args.lmax,
         storage=args.dataset_storage,
         shard_cache_size=args.shard_cache_size,
+        rotation_augmentation=args.rotation_augmentation,
+        rotation_probability=args.rotation_probability,
     )
 
     backbone = EquivariantBackbone(
@@ -345,11 +378,19 @@ def main():
         FeatureSpec.from_backbone(backbone),
         output="0e + 2e",
         covariance=covariance,
-        distribution="gaussian",
+        distribution=args.distribution,
+        student_t_dof=args.student_t_dof,
         output_scope="global",
     )
     compilation = plan.compilation
     model = plan.bind(backbone).to(device)
+    if args.representation_metric == "block_auto":
+        metric, metric_stats = infer_rank2_block_metric(train_loader.dataset)
+        args.metric_scalar = metric_stats["metric_scalar"]
+        args.metric_l2 = metric_stats["metric_l2"]
+        args.metric_stats = metric_stats
+        model.spd_map = RepresentationMetricMap(model.spd_map, metric).to(device)
+        logger.info("Representation metric: %s", metric_stats)
     if args.compile_tp:
         model.backbone.compile_tensor_products(dynamic=True)
 
@@ -374,6 +415,8 @@ def main():
             use_bf16=use_bf16,
             diagnostics=True,
             log_variance_bounds=bounds,
+            distribution=args.distribution,
+            student_t_dof=args.student_t_dof,
         )
         test_metrics = validate(
             model,
@@ -383,6 +426,8 @@ def main():
             use_bf16=use_bf16,
             diagnostics=True,
             log_variance_bounds=bounds,
+            distribution=args.distribution,
+            student_t_dof=args.student_t_dof,
         )
         with open(os.path.join(args.save_dir, "validation_metrics.json"), "w") as f:
             json.dump(validation_metrics, f, indent=2)

@@ -33,6 +33,8 @@ def calibration_error(
     target: torch.Tensor,
     scale: torch.Tensor,
     confidence_levels: list[float] | None = None,
+    reference: str = "gaussian",
+    student_t_dof: float = 5.0,
 ) -> dict[str, float]:
     """Compute expected calibration error over confidence levels.
 
@@ -50,12 +52,21 @@ def calibration_error(
     if confidence_levels is None:
         confidence_levels = [0.1 * i for i in range(1, 10)]
 
+    if reference not in {"gaussian", "student_t"}:
+        raise ValueError(f"unknown calibration reference: {reference}")
+    if reference == "student_t" and student_t_dof <= 0:
+        raise ValueError("student_t_dof must be positive")
     d = pred.shape[-1]
     maha2 = mahalanobis_distances(pred, target, scale)
+    from scipy.stats import f
 
     observed = []
     for level in confidence_levels:
-        threshold = chi2.ppf(level, df=float(d))
+        threshold = (
+            chi2.ppf(level, df=float(d))
+            if reference == "gaussian"
+            else float(d) * f.ppf(level, dfn=float(d), dfd=float(student_t_dof))
+        )
         observed.append(float(np.mean(maha2 < threshold)))
 
     observed = np.array(observed)
@@ -77,6 +88,8 @@ def qq_data(
     target: torch.Tensor,
     scale: torch.Tensor,
     num_quantiles: int = 100,
+    reference: str = "gaussian",
+    student_t_dof: float = 5.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return theoretical and empirical quantiles for a Q-Q calibration plot.
 
@@ -89,13 +102,24 @@ def qq_data(
     Returns:
         ``(theoretical_quantiles, empirical_quantiles)``.
     """
+    if reference not in {"gaussian", "student_t"}:
+        raise ValueError(f"unknown calibration reference: {reference}")
+    if reference == "student_t" and student_t_dof <= 0:
+        raise ValueError("student_t_dof must be positive")
     d = pred.shape[-1]
     maha2 = mahalanobis_distances(pred, target, scale)
     empirical = np.sort(maha2)
 
     n = len(empirical)
     probabilities = np.linspace(0.5 / n, 1 - 0.5 / n, min(num_quantiles, n))
-    theoretical = chi2.ppf(probabilities, df=float(d))
+    if reference == "gaussian":
+        theoretical = chi2.ppf(probabilities, df=float(d))
+    else:
+        from scipy.stats import f
+
+        theoretical = float(d) * f.ppf(
+            probabilities, dfn=float(d), dfd=float(student_t_dof)
+        )
     empirical_quantiles = np.quantile(empirical, probabilities)
 
     return theoretical, empirical_quantiles

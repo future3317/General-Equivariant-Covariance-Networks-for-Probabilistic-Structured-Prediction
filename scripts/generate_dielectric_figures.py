@@ -26,6 +26,7 @@ from equivcompiler import FeatureSpec, FullCovariance, SpectralWindowCovariance,
 from evaluation.calibration import calibration_error, qq_data
 from evaluation.metrics import empirical_coverage, mahalanobis_distance_squared
 from models import EquivariantBackbone
+from spd_maps import RepresentationMetricMap
 from plotting import (
     COLORS,
     DENSITY_CMAP,
@@ -65,9 +66,17 @@ def load_model(checkpoint_dir: Path, device: str):
         FeatureSpec.from_backbone(backbone),
         output="0e + 2e",
         covariance=covariance,
-        distribution="gaussian",
+        distribution=getattr(args, "distribution", "gaussian"),
+        student_t_dof=getattr(args, "student_t_dof", 5.0),
         output_scope="global",
     ).bind(backbone).to(device)
+    if getattr(args, "representation_metric", "none") == "block_auto":
+        metric = torch.tensor(
+            [float(args.metric_scalar)] + [float(args.metric_l2)] * 5,
+            dtype=torch.float32,
+            device=device,
+        )
+        model.spd_map = RepresentationMetricMap(model.spd_map, metric).to(device)
 
     state = torch.load(checkpoint_dir / "best_model.pt", map_location=device)
     model.load_state_dict(state)
@@ -245,6 +254,9 @@ def plot_uncertainty_alignment(
     y_irreps: torch.Tensor,
     scale_irreps: torch.Tensor,
     save_path: Path,
+    *,
+    distribution: str = "gaussian",
+    student_t_dof: float = 5.0,
 ) -> dict[str, object]:
     """Diagnose whether predicted uncertainty matches residual structure.
 
@@ -259,7 +271,14 @@ def plot_uncertainty_alignment(
     basis = irreps_to_km(torch.eye(6, dtype=torch.float64))
     scale = torch.einsum("ab,nbc,cd->nad", basis.T, scale_irreps.double(), basis)
     residual_cov = torch.cov(residual.T)
-    predicted_cov = scale.mean(dim=0)
+    if distribution == "student_t":
+        if student_t_dof <= 2:
+            raise ValueError("student_t_dof must exceed 2 for covariance diagnostics")
+        predicted_cov = scale.mean(dim=0) * (student_t_dof / (student_t_dof - 2.0))
+    elif distribution == "gaussian":
+        predicted_cov = scale.mean(dim=0)
+    else:
+        raise ValueError(f"unknown distribution: {distribution}")
     residual_corr = residual_cov / torch.sqrt(
         torch.outer(torch.diag(residual_cov), torch.diag(residual_cov))
     )
@@ -268,9 +287,12 @@ def plot_uncertainty_alignment(
     )
 
     normal = torch.distributions.Normal(0.0, 1.0)
+    student = torch.distributions.StudentT(float(student_t_dof))
     marginal_coverage: dict[str, list[float]] = {}
     for level in (0.5, 0.9):
-        z = normal.icdf(torch.tensor((1.0 + level) / 2.0))
+        z = (normal.icdf(torch.tensor((1.0 + level) / 2.0))
+             if distribution == "gaussian"
+             else student.icdf(torch.tensor((1.0 + level) / 2.0)))
         marginal_coverage[f"coverage_{int(level * 100):02d}"] = (
             (residual.abs() <= z * torch.sqrt(torch.diagonal(scale, dim1=-2, dim2=-1)))
             .double()
@@ -317,7 +339,9 @@ def plot_uncertainty_alignment(
     axes[2].set_xticks(x, labels, rotation=45, ha="right", fontsize=7)
     axes[2].set_ylim(0, 1.05)
     axes[2].set_ylabel("Empirical coverage", fontsize=8)
-    axes[2].set_title("(c) Marginal calibration", loc="left", fontsize=9, fontweight="bold")
+    axes[2].set_title(
+        f"(c) Marginal calibration ({distribution})", loc="left", fontsize=9, fontweight="bold"
+    )
     axes[2].legend(fontsize=7, loc="lower left")
     for ax in axes:
         ax.tick_params(labelsize=7)
@@ -338,7 +362,13 @@ def plot_uncertainty_alignment(
 
 
 def plot_calibration(
-    mu: torch.Tensor, y: torch.Tensor, scale: torch.Tensor, save_path: Path
+    mu: torch.Tensor,
+    y: torch.Tensor,
+    scale: torch.Tensor,
+    save_path: Path,
+    *,
+    distribution: str = "gaussian",
+    student_t_dof: float = 5.0,
 ) -> None:
     """Coverage calibration and Q-Q plot for Mahalanobis distances."""
     setup_tpami_style()
@@ -348,7 +378,10 @@ def plot_calibration(
 
     # Left: confidence level vs empirical coverage.
     levels = np.linspace(0.1, 0.95, 10)
-    coverages = empirical_coverage(mu, y, scale, levels=levels.tolist())
+    coverages = empirical_coverage(
+        mu, y, scale, levels=levels.tolist(), reference=distribution,
+        student_t_dof=student_t_dof,
+    )
     observed = np.asarray(
         [coverages[f"coverage_{int(level * 100):02d}"] for level in levels], dtype=float
     )
@@ -402,7 +435,10 @@ def plot_calibration(
     ax_cov.set_ylim(0.0, 1.0)
 
     # Right: Q-Q plot.
-    theoretical, empirical = qq_data(mu, y, scale, num_quantiles=100)
+    theoretical, empirical = qq_data(
+        mu, y, scale, num_quantiles=100, reference=distribution,
+        student_t_dof=student_t_dof,
+    )
     ax_qq.plot(
         theoretical,
         empirical,
@@ -421,9 +457,11 @@ def plot_calibration(
         linewidth=1.2,
         label="Reference",
     )
-    ax_qq.set_xlabel(r"Theoretical $\chi^2$ quantile", fontsize=9)
+    qq_label = (r"Theoretical $\chi^2$ quantile" if distribution == "gaussian"
+                else rf"Theoretical $dF_{{d,\nu}}$ quantile ($\nu={student_t_dof:g}$)")
+    ax_qq.set_xlabel(qq_label, fontsize=9)
     ax_qq.set_ylabel(r"Empirical Mahalanobis$^2$ quantile", fontsize=9)
-    ax_qq.set_title("Q-Q Calibration", fontsize=10)
+    ax_qq.set_title(f"Q-Q Calibration ({distribution})", fontsize=10)
     ax_qq.legend(fontsize=7)
 
     for ax in axes:
@@ -616,12 +654,16 @@ def main():
         preds["y_irreps"],
         preds["scale_irreps"],
         output_dir / "dielectric_uncertainty_alignment",
+        distribution=getattr(train_args, "distribution", "gaussian"),
+        student_t_dof=getattr(train_args, "student_t_dof", 5.0),
     )
     plot_calibration(
         preds["mu_irreps"],
         preds["y_irreps"],
         preds["scale_irreps"],
         output_dir / "dielectric_calibration",
+        distribution=getattr(train_args, "distribution", "gaussian"),
+        student_t_dof=getattr(train_args, "student_t_dof", 5.0),
     )
     risk_coverage = plot_risk_coverage(
         preds["mu_irreps"],
@@ -640,10 +682,14 @@ def main():
 
     # Print test calibration metrics.
     cal_err = calibration_error(
-        preds["mu_irreps"], preds["y_irreps"], preds["scale_irreps"]
+        preds["mu_irreps"], preds["y_irreps"], preds["scale_irreps"],
+        reference=getattr(train_args, "distribution", "gaussian"),
+        student_t_dof=getattr(train_args, "student_t_dof", 5.0),
     )
     coverage = empirical_coverage(
-        preds["mu_irreps"], preds["y_irreps"], preds["scale_irreps"]
+        preds["mu_irreps"], preds["y_irreps"], preds["scale_irreps"],
+        reference=getattr(train_args, "distribution", "gaussian"),
+        student_t_dof=getattr(train_args, "student_t_dof", 5.0),
     )
     mahalanobis2 = mahalanobis_distance_squared(
         preds["y_irreps"] - preds["mu_irreps"], preds["scale_irreps"]
@@ -653,6 +699,8 @@ def main():
             {
                 "coordinate_space": "log_kelvin_mandel",
                 "scale_materialization_dtype": "float64",
+                "distribution": getattr(train_args, "distribution", "gaussian"),
+                "student_t_dof": getattr(train_args, "student_t_dof", 5.0),
                 "calibration": cal_err,
                 "coverage": coverage,
                 "mahalanobis2_mean": float(mahalanobis2.mean().item()),

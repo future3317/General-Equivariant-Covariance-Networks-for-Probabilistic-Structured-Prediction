@@ -21,6 +21,7 @@ from evaluation.calibration import (
     qq_data,
     sharpness,
 )
+from evaluation.temperature import apply_temperature, fit_temperature, scale_nll
 from evaluation.equivariance import (
     mean_equivariance_error,
     scale_equivariance_error,
@@ -62,6 +63,9 @@ __all__ = [
     "calibration_error",
     "qq_data",
     "sharpness",
+    "scale_nll",
+    "fit_temperature",
+    "apply_temperature",
     "mean_equivariance_error",
     "scale_equivariance_error",
     "average_equivariance_error",

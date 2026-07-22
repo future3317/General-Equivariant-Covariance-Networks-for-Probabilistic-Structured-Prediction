@@ -11,6 +11,7 @@ from spd_maps.isotropic import IsotropicMap
 from spd_maps.irrep_block_diag import IrrepBlockDiagonalMap
 from spd_maps.isotypic_block import IsotypicBlockMap
 from spd_maps.graph_precision import GraphStructuredPrecisionMap
+from spd_maps.representation_metric import RepresentationMetricMap
 
 __all__ = [
     "SPDMap",
@@ -24,4 +25,5 @@ __all__ = [
     "IrrepBlockDiagonalMap",
     "IsotypicBlockMap",
     "GraphStructuredPrecisionMap",
+    "RepresentationMetricMap",
 ]

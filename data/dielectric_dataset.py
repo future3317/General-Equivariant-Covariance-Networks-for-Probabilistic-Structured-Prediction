@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import copy
 
 import torch
 from compatibility.e3nn import o3
@@ -11,7 +12,7 @@ from compatibility.torch_geometric import PyGDataLoader
 
 from dielectric_data_loader import DielectricDataset, ShardBatchSampler
 from data.paths import dataset_dir
-from data.tensor_conversions import km_to_irreps
+from data.tensor_conversions import irreps_to_km, km_to_irreps
 
 
 class DielectricIrrepsDataset(Dataset):
@@ -39,6 +40,8 @@ class DielectricIrrepsDataset(Dataset):
         *,
         storage: str = "files",
         shard_cache_size: int = 2,
+        rotation_augmentation: bool = False,
+        rotation_probability: float = 1.0,
     ):
         self._base = DielectricDataset(
             base_dir,
@@ -47,6 +50,12 @@ class DielectricIrrepsDataset(Dataset):
             shard_cache_size=shard_cache_size,
         )
         self.lmax = lmax
+        self.rotation_augmentation = bool(rotation_augmentation)
+        if not 0.0 <= rotation_probability <= 1.0:
+            raise ValueError("rotation_probability must lie in [0, 1]")
+        self.rotation_probability = float(rotation_probability)
+        self._edge_irreps = o3.Irreps.spherical_harmonics(self.lmax) if self.lmax is not None else None
+        self._target_irreps = o3.Irreps("0e + 2e")
 
         # Precomputed edge_sh dimension for the requested lmax.
         if self.lmax is not None:
@@ -69,13 +78,29 @@ class DielectricIrrepsDataset(Dataset):
 
     def __getitem__(self, idx):
         data = self._base[idx]
+        rotation = None
 
-        # Optionally downsample spherical-harmonics to a lower lmax.
+        # Reduce precomputed high-order harmonics before applying the
+        # requested representation transform; the D matrix must match this
+        # exact feature contract.
         if (
             self._edge_sh_dim is not None
             and data.edge_sh.shape[-1] != self._edge_sh_dim
         ):
             data.edge_sh = data.edge_sh[..., : self._edge_sh_dim]
+
+        if self.rotation_augmentation and torch.rand(()) < self.rotation_probability:
+            # Shard storage returns a shallow copy, so clone every tensor that
+            # is modified to keep the cached graph immutable across epochs.
+            data = copy.copy(data)
+            data.pos = data.pos.clone()
+            data.edge_sh = data.edge_sh.clone()
+            rotation = o3.rand_matrix(dtype=data.pos.dtype, device=data.pos.device)
+            data.pos = data.pos @ rotation.T
+            if self._edge_irreps is None:
+                raise ValueError("rotation augmentation requires a finite lmax")
+            edge_matrix = self._edge_irreps.D_from_matrix(rotation)
+            data.edge_sh = data.edge_sh @ edge_matrix.T
 
         # y is [6] normalized log-KM; reshape to [1, 6] for conversion helpers.
         y_km_norm = data.y.view(1, -1)
@@ -92,6 +117,10 @@ class DielectricIrrepsDataset(Dataset):
         # Keep a leading dimension so PyG stacks graph-level targets to [B, 6].
         data.y_irreps = y_irreps
         data.y_km = y_km
+        if rotation is not None:
+            target_matrix = self._target_irreps.D_from_matrix(rotation)
+            data.y_irreps = data.y_irreps @ target_matrix.T
+            data.y_km = irreps_to_km(data.y_irreps)
         return data
 
 
@@ -106,6 +135,8 @@ def get_dielectric_irreps_loaders(
     lmax: int | None = None,
     storage: str = "files",
     shard_cache_size: int = 2,
+    rotation_augmentation: bool = False,
+    rotation_probability: float = 1.0,
 ):
     """Create PyG data loaders with irrep-space dielectric targets."""
     data_dir = dataset_dir(data_dir, "mp_dielectric")
@@ -114,7 +145,13 @@ def get_dielectric_irreps_loaders(
         "storage": storage,
         "shard_cache_size": shard_cache_size,
     }
-    train_dataset = DielectricIrrepsDataset(data_dir, "train", **dataset_kwargs)
+    train_dataset = DielectricIrrepsDataset(
+        data_dir,
+        "train",
+        **dataset_kwargs,
+        rotation_augmentation=rotation_augmentation,
+        rotation_probability=rotation_probability,
+    )
     val_dataset = DielectricIrrepsDataset(data_dir, "val", **dataset_kwargs)
     test_dataset = DielectricIrrepsDataset(data_dir, "test", **dataset_kwargs)
 
