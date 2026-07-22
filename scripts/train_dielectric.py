@@ -213,6 +213,15 @@ def main():
     )
     args = parser.parse_args()
     args.data_dir = str(dataset_dir(args.data_dir, "mp_dielectric"))
+    if (
+        args.backbone_precision == "bf16"
+        and args.tp_backend == "cueq"
+        and args.cueq_method == "fused_tp"
+    ):
+        raise ValueError(
+            "cuEquivariance fused_tp does not provide the BF16 edge-feature "
+            "kernel required by this backbone; use --backbone_precision fp32"
+        )
     _set_seed(args.seed)
     device = torch.device(args.device)
     if device.type == "cuda":
