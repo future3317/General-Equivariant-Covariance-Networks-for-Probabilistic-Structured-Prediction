@@ -177,7 +177,6 @@ def validate(
             batch,
             target=batch.y_irreps,
             use_bf16=use_bf16,
-            return_scale=diagnostics,
         )
         if not bool(torch.isfinite(result["loss"].detach()).all()):
             raise FloatingPointError("non-finite dielectric validation loss")
@@ -190,9 +189,18 @@ def validate(
         num_mae_elements += batch_size
 
         if diagnostics:
-            predictions.append(result["mu"].detach().cpu())
-            targets.append(batch.y_irreps.detach().cpu())
-            scales.append(result["scale"].detach().cpu())
+            # The model is trained in FP32, but diagnostics of a declared
+            # spectral interval must not mistake FP32 reconstruction error of
+            # a high-condition-number matrix for a violation of the compiled
+            # distribution.  Re-materialize the same frozen generator in
+            # FP64; this changes neither mu nor the trained parameters.
+            if model.spd_map is None:
+                raise TypeError("dielectric diagnostics require a probabilistic SPD map")
+            predictions.append(result["mu"].detach().double().cpu())
+            targets.append(batch.y_irreps.detach().double().cpu())
+            scales.append(
+                model.spd_map(result["params"].detach().double()).cpu()
+            )
 
     metrics = {
         "loss": total_loss / max(num_loss_samples, 1),
@@ -210,6 +218,7 @@ def validate(
     maha2 = mahalanobis_distance_squared(target - prediction, scale)
     metrics["probabilistic_diagnostics"] = {
         "coordinate_space": "log_kelvin_mandel",
+        "scale_materialization_dtype": "float64",
         "calibration": calibration_error(prediction, target, scale),
         "ellipsoid_coverage": empirical_coverage(prediction, target, scale),
         "sharpness": sharpness(scale),

@@ -386,7 +386,10 @@ python -m scripts.train_dielectric \
 
 # Re-evaluate an existing dielectric checkpoint.  The JSON output contains
 # proper-likelihood-space calibration/ellipsoid coverage, sharpness, whitened
-# residual diagnostics, and spectral-window bound utilization.
+# residual diagnostics, and spectral-window bound utilization.  Calibration is
+# computed in log--Kelvin--Mandel space (the Gaussian likelihood's coordinate
+# system); covariance matrices are materialized in FP64 for this audit so
+# floating-point reconstruction error is not reported as a spectral violation.
 python -m scripts.train_dielectric \
   --save_dir /path/to/dielectric_run --evaluate_only --device cuda
 
