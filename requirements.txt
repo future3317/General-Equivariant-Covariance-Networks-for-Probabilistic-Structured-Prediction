@@ -16,6 +16,7 @@ h5py>=3.8.0
 # Materials science utilities
 ase>=3.22.0
 pymatgen>=2023.0.0
+emmet-core>=0.87.0
 
 # Training & visualization
 tqdm>=4.65.0
