@@ -40,7 +40,9 @@ def infer_representation_block_metric(
     return metric, stats
 
 
-def infer_rank2_block_metric(dataset, *, eps: float = 1e-3) -> tuple[torch.Tensor, dict[str, float]]:
+def infer_rank2_block_metric(
+    dataset, *, eps: float = 1e-3, max_samples: int | None = 256
+) -> tuple[torch.Tensor, dict[str, float]]:
     """Infer a ``0e + 2e`` metric from training targets only.
 
     The scalar channel is scaled by its standard deviation.  The five
@@ -49,7 +51,8 @@ def infer_rank2_block_metric(dataset, *, eps: float = 1e-3) -> tuple[torch.Tenso
     """
     scalar_values: list[torch.Tensor] = []
     l2_energy: list[torch.Tensor] = []
-    for index in range(len(dataset)):
+    count = len(dataset) if max_samples is None else min(len(dataset), int(max_samples))
+    for index in range(count):
         target = dataset[index].y_irreps.reshape(-1, 6).detach().float()
         scalar_values.append(target[:, 0])
         l2_energy.append(target[:, 1:].square().mean(dim=-1))

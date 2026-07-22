@@ -289,6 +289,10 @@ def main():
         default="none",
         help="equivariant 0e/2e target metric for multi-scale outputs",
     )
+    parser.add_argument(
+        "--metric_sample_limit", type=int, default=256,
+        help="maximum training samples used to estimate the equivariant metric",
+    )
     parser.add_argument("--rotation_augmentation", action="store_true")
     parser.add_argument("--rotation_probability", type=float, default=1.0)
     parser.add_argument(
@@ -385,7 +389,9 @@ def main():
     compilation = plan.compilation
     model = plan.bind(backbone).to(device)
     if args.representation_metric == "block_auto":
-        metric, metric_stats = infer_rank2_block_metric(train_loader.dataset)
+        metric, metric_stats = infer_rank2_block_metric(
+            train_loader.dataset, max_samples=args.metric_sample_limit
+        )
         args.metric_scalar = metric_stats["metric_scalar"]
         args.metric_l2 = metric_stats["metric_l2"]
         args.metric_stats = metric_stats
