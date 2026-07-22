@@ -282,13 +282,13 @@ def plot_uncertainty_alignment(
     fig, axes = plt.subplots(1, 3, figsize=cm2inch(16.5, 5.4))
     norm = Normalize(vmin=-1.0, vmax=1.0)
     for ax, matrix, title in (
-        (axes[0], residual_corr.numpy(), "Empirical residual correlation"),
-        (axes[1], predicted_corr.numpy(), "Mean predicted correlation"),
+        (axes[0], residual_corr.numpy(), "(a) Empirical residual correlation"),
+        (axes[1], predicted_corr.numpy(), "(b) Mean predicted correlation"),
     ):
         image = ax.imshow(matrix, cmap=DIVERGING_CMAP, norm=norm)
         ax.set_xticks(range(6), labels, rotation=45, ha="right", fontsize=7)
         ax.set_yticks(range(6), labels, fontsize=7)
-        ax.set_title(title, fontsize=9)
+        ax.set_title(title, loc="left", fontsize=9, fontweight="bold")
         for i in range(6):
             for j in range(6):
                 ax.text(j, i, f"{matrix[i, j]:.2f}", ha="center", va="center", fontsize=6)
@@ -317,11 +317,10 @@ def plot_uncertainty_alignment(
     axes[2].set_xticks(x, labels, rotation=45, ha="right", fontsize=7)
     axes[2].set_ylim(0, 1.05)
     axes[2].set_ylabel("Empirical coverage", fontsize=8)
-    axes[2].set_title("Marginal calibration", fontsize=9)
+    axes[2].set_title("(c) Marginal calibration", loc="left", fontsize=9, fontweight="bold")
     axes[2].legend(fontsize=7, loc="lower left")
     for ax in axes:
         ax.tick_params(labelsize=7)
-    label_panels(axes, x=-0.10, y=1.02, fontsize=9)
     fig.subplots_adjust(left=0.06, right=0.96, bottom=0.20, top=0.88, wspace=0.50)
     save_figure(fig, save_path)
     plt.close(fig)
