@@ -71,6 +71,8 @@ def audit(checkpoint_dir: Path, device: str) -> dict:
     ).sum(dim=-1)
 
     components = []
+    marginal_levels = (0.5, 0.8, 0.9, 0.95)
+    normal = torch.distributions.Normal(0.0, 1.0)
     for index in range(6):
         truth = target[:, index]
         error = residual[:, index]
@@ -88,6 +90,16 @@ def audit(checkpoint_dir: Path, device: str) -> dict:
                 "pearson": float(torch.corrcoef(torch.stack((truth, prediction)))[0, 1]),
                 "mean_predictive_std": float(torch.sqrt(scale[:, index, index]).mean()),
                 "median_predictive_std": float(torch.sqrt(scale[:, index, index]).median()),
+                "marginal_coverage": {
+                    f"coverage_{int(level * 100):02d}": float(
+                        (
+                            error.abs()
+                            <= normal.icdf(torch.tensor((1.0 + level) / 2.0))
+                            * torch.sqrt(scale[:, index, index])
+                        ).double().mean()
+                    )
+                    for level in marginal_levels
+                },
             }
         )
 
