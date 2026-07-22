@@ -111,3 +111,13 @@ def test_spectral_window_enforces_declared_spectrum_and_is_equivariant():
     transformed = orthogonal @ A @ orthogonal.T
     expected = orthogonal @ covariance @ orthogonal.T
     torch.testing.assert_close(spd_map(transformed), expected, atol=2e-5, rtol=2e-5)
+
+
+def test_spectral_window_statistics_have_finite_gradients_at_repeated_eigenvalues():
+    spd_map = SpectralWindowMap(-3.0, 2.0)
+    generator = (0.25 * torch.eye(6)).expand(3, 6, 6).clone().requires_grad_()
+    residual = torch.randn(3, 6, requires_grad=True)
+    logdet, quadratic = spd_map.statistics(generator, residual)
+    (logdet + quadratic).sum().backward()
+    assert torch.isfinite(generator.grad).all()
+    assert torch.isfinite(residual.grad).all()

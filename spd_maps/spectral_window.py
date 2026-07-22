@@ -8,6 +8,73 @@ from spd_maps.base import SPDMap, symmetrize
 from spd_maps.matrix_softplus import _SpectralMapFunction
 
 
+class _SpectralWindowStatisticsFunction(torch.autograd.Function):
+    """Gaussian sufficient statistics with a finite repeated-eigenvalue VJP."""
+
+    @staticmethod
+    def forward(ctx, A, residual, log_variance_min, log_variance_max, threshold):
+        eigenvalues, eigenvectors = torch.linalg.eigh(A)
+        width = log_variance_max - log_variance_min
+        sigmoid = torch.sigmoid(eigenvalues)
+        log_variance = log_variance_min + width * sigmoid
+        inverse_variance = torch.exp(-log_variance)
+        projected = torch.matmul(
+            eigenvectors.transpose(-1, -2), residual.unsqueeze(-1)
+        ).squeeze(-1)
+        ctx.save_for_backward(eigenvectors, eigenvalues, projected, inverse_variance)
+        ctx.log_variance_min = log_variance_min
+        ctx.log_variance_max = log_variance_max
+        ctx.threshold = threshold
+        return log_variance.sum(-1), (projected.square() * inverse_variance).sum(-1)
+
+    @staticmethod
+    def backward(ctx, grad_logdet, grad_quadratic):
+        eigenvectors, eigenvalues, projected, inverse_variance = ctx.saved_tensors
+        width = ctx.log_variance_max - ctx.log_variance_min
+        sigmoid = torch.sigmoid(eigenvalues)
+        log_variance_derivative = width * sigmoid * (1.0 - sigmoid)
+
+        # Gradient of tr(log Sigma(A)): g'(A) for g(lambda)=log variance(lambda).
+        diagonal = grad_logdet.unsqueeze(-1) * log_variance_derivative
+        gradient_eigenbasis = torch.diag_embed(diagonal)
+
+        # Gradient of r^T h(A) r, h(lambda)=1 / variance(lambda), using
+        # Lowner divided differences.  This remains defined when eigenvalues
+        # coincide, where the ordinary eigvector VJP is undefined.
+        delta = eigenvalues.unsqueeze(-1) - eigenvalues.unsqueeze(-2)
+        lambda_i = eigenvalues.unsqueeze(-1)
+        lambda_j = eigenvalues.unsqueeze(-2)
+        denominator = torch.where(
+            delta.abs() > ctx.threshold, delta, torch.ones_like(delta)
+        )
+        h_i = inverse_variance.unsqueeze(-1)
+        h_j = inverse_variance.unsqueeze(-2)
+        divided = (h_i - h_j) / denominator
+        midpoint = 0.5 * (lambda_i + lambda_j)
+        midpoint_sigmoid = torch.sigmoid(midpoint)
+        derivative = -torch.exp(
+            -(ctx.log_variance_min + width * midpoint_sigmoid)
+        ) * width * midpoint_sigmoid * (1.0 - midpoint_sigmoid)
+        lowner = torch.where(delta.abs() > ctx.threshold, divided, derivative)
+        quadratic_eigenbasis = lowner * (
+            projected.unsqueeze(-1) * projected.unsqueeze(-2)
+        )
+        gradient_eigenbasis = gradient_eigenbasis + grad_quadratic.unsqueeze(
+            -1
+        ).unsqueeze(-1) * quadratic_eigenbasis
+        grad_A = torch.matmul(
+            eigenvectors,
+            torch.matmul(gradient_eigenbasis, eigenvectors.transpose(-1, -2)),
+        )
+        grad_A = symmetrize(grad_A)
+
+        grad_residual = 2.0 * grad_quadratic.unsqueeze(-1) * torch.matmul(
+            eigenvectors,
+            (inverse_variance * projected).unsqueeze(-1),
+        ).squeeze(-1)
+        return grad_A, grad_residual, None, None, None
+
+
 class SpectralWindowMap(SPDMap):
     """Map a symmetric generator to an SPD matrix with bounded spectrum.
 
@@ -63,12 +130,13 @@ class SpectralWindowMap(SPDMap):
         self, A: torch.Tensor, residual: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         A = symmetrize(A)
-        eigenvalues, eigenvectors = torch.linalg.eigh(A)
-        log_variance = self._log_variance(eigenvalues)
-        projected = torch.matmul(
-            eigenvectors.transpose(-1, -2), residual.unsqueeze(-1)
-        ).squeeze(-1)
-        return log_variance.sum(-1), (projected.square() * torch.exp(-log_variance)).sum(-1)
+        return _SpectralWindowStatisticsFunction.apply(
+            A,
+            residual,
+            self.log_variance_min,
+            self.log_variance_max,
+            self.delta_threshold,
+        )
 
     def logdet(self, A: torch.Tensor) -> torch.Tensor:
         A = symmetrize(A)
