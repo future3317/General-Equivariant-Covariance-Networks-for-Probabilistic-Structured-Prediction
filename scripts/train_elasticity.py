@@ -18,7 +18,7 @@ from models import EquivariantBackbone
 from data.elasticity_dataset import get_elasticity_irreps_loaders
 from data.representation_metrics import infer_representation_block_metric
 from data.paths import dataset_dir
-from data.tensor_conversions import irreps_to_elasticity_21d
+from data.tensor_conversions import elasticity_21d_to_irreps, irreps_to_elasticity_21d
 from scripts._common import (
     add_tensor_product_arguments,
     covariance_policy_from_cli,
