@@ -101,6 +101,11 @@ def audit(checkpoint_dir: Path, device: str) -> dict:
             "mahalanobis2_km_mean": float(maha2.mean()),
             "scale_symmetry_error_irreps": float(torch.max(torch.abs(scale_irreps - scale_irreps.transpose(-1, -2)))),
         },
+        "irrep_statistics": {
+            "target_std": target_irreps.std(dim=0).tolist(),
+            "prediction_std": mu_irreps.std(dim=0).tolist(),
+            "residual_std": residual_irreps.std(dim=0).tolist(),
+        },
         "components": components,
         "target_covariance": target_cov.tolist(),
         "residual_covariance": residual_cov.tolist(),
