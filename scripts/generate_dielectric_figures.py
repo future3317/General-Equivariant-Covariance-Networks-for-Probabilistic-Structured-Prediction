@@ -282,8 +282,8 @@ def plot_uncertainty_alignment(
     fig, axes = plt.subplots(1, 3, figsize=cm2inch(16.5, 5.4))
     norm = Normalize(vmin=-1.0, vmax=1.0)
     for ax, matrix, title in (
-        (axes[0], residual_corr.numpy(), "(a) Empirical residual correlation"),
-        (axes[1], predicted_corr.numpy(), "(b) Mean predicted correlation"),
+        (axes[0], residual_corr.numpy(), "(a) Residual correlation"),
+        (axes[1], predicted_corr.numpy(), "(b) Predicted correlation"),
     ):
         image = ax.imshow(matrix, cmap=DIVERGING_CMAP, norm=norm)
         ax.set_xticks(range(6), labels, rotation=45, ha="right", fontsize=7)
