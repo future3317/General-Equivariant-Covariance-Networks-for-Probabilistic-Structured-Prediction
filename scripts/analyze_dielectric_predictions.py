@@ -45,10 +45,11 @@ def audit(checkpoint_dir: Path, device: str) -> dict:
     mu = irreps_to_km(mu_irreps)
     target = predictions["y_km"].double()
     scale_irreps = predictions["scale_irreps"].double()
+    basis = irreps_to_km(torch.eye(6, dtype=torch.float64))
     scale = _covariance_to_km(scale_irreps)
+    scale_transposed = torch.einsum("ab,nbc,cd->nad", basis.T, scale_irreps, basis)
     residual = mu - target
 
-    basis = irreps_to_km(torch.eye(6, dtype=torch.float64))
     residual_cov = torch.cov(residual.T)
     target_cov = torch.cov(target.T)
     mean_scale = scale.mean(dim=0)
@@ -64,6 +65,10 @@ def audit(checkpoint_dir: Path, device: str) -> dict:
     maha2_irreps = (
         residual_irreps
         * torch.linalg.solve(scale_irreps, residual_irreps.unsqueeze(-1)).squeeze(-1)
+    ).sum(dim=-1)
+    maha2_transposed = (
+        residual
+        * torch.linalg.solve(scale_transposed, residual.unsqueeze(-1)).squeeze(-1)
     ).sum(dim=-1)
 
     components = []
@@ -95,6 +100,8 @@ def audit(checkpoint_dir: Path, device: str) -> dict:
             "target_max_error": float(torch.max(torch.abs(target - irreps_to_km(target_irreps)))),
             "mahalanobis2_irreps_mean": float(maha2_irreps.mean()),
             "mahalanobis2_km_mean": float(maha2.mean()),
+            "mahalanobis2_transposed_km_mean": float(maha2_transposed.mean()),
+            "scale_symmetry_error_irreps": float(torch.max(torch.abs(scale_irreps - scale_irreps.transpose(-1, -2)))),
         },
         "components": components,
         "target_covariance": target_cov.tolist(),
