@@ -35,14 +35,15 @@ can reject an unreachable or unsupported lowering with a certificate instead of
 silently changing the requested representation or probabilistic family.
 
 The repository contains the complete ITOP data interface, geometry/feature
-cache builders, single-GPU study runner, and metric/evaluation code. It does
-not claim a completed ITOP training result yet. The experiments described below
-are the reproducible protocol to run next, not reported accuracy or calibration
-numbers.
+cache builders, single-GPU study runner, and metric/evaluation code. A bounded
+server smoke run now exercises side/top OOD metrics; its artifacts are archived
+with the TPAMI manuscript. It is development evidence only, not a replacement
+for the final full-data benchmark.
 
 ## What is automatic
 
-- `Sym^2(V)` decomposition and an orthonormal symmetric-operator basis.
+- Analytic `Sym^2(V)` irrep decomposition (including high-multiplicity outputs)
+  with lazy dense basis materialization only when a dense operator is selected.
 - Shortest CG paths and a depth-minimal, target-pruned representation frontier
   from the backbone representation to `T(V)`.
 - Parity reachability checks and exact final irrep multiplicities.
