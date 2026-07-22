@@ -26,6 +26,7 @@ def write_itop_geometry_cache(
     split: str,
     num_points: int,
     num_neighbors: int,
+    max_samples: int | None = None,
 ) -> Path:
     """Write one immutable, parameter-bound cache without touching raw data."""
     root = dataset_dir(data_dir, "ITOP").resolve()
@@ -45,7 +46,9 @@ def write_itop_geometry_cache(
         num_points=num_points,
         num_neighbors=num_neighbors,
     )
-    count = len(source)
+    count = len(source) if max_samples is None else min(int(max_samples), len(source))
+    if count <= 0:
+        raise ValueError("max_samples must leave at least one sample")
     arrays = {
         "points": np.lib.format.open_memmap(
             staging / "points.npy",
@@ -98,6 +101,7 @@ def write_itop_geometry_cache(
         "view": view,
         "split": split,
         "num_samples": count,
+        "sample_limit": max_samples,
         "num_points": num_points,
         "num_neighbors": num_neighbors,
         "centering": "observable_point_cloud_centroid",
@@ -124,6 +128,10 @@ def main() -> None:
     parser.add_argument("--split", choices=("train", "test", "all"), default="all")
     parser.add_argument("--num_points", type=int, choices=(256, 512), default=512)
     parser.add_argument("--num_neighbors", type=int, default=16)
+    parser.add_argument(
+        "--max_samples", type=int, default=None,
+        help="optional deterministic prefix limit for smoke tests; omit for full cache",
+    )
     args = parser.parse_args()
     views = ("side", "top") if args.view == "all" else (args.view,)
     splits = ("train", "test") if args.split == "all" else (args.split,)
@@ -135,6 +143,7 @@ def main() -> None:
                 split=split,
                 num_points=args.num_points,
                 num_neighbors=args.num_neighbors,
+                max_samples=args.max_samples,
             )
             print(output)
 
