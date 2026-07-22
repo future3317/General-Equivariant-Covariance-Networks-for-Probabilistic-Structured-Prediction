@@ -40,9 +40,12 @@ def audit(checkpoint_dir: Path, device: str) -> dict:
         shard_cache_size=getattr(args, "shard_cache_size", 2),
     )
     predictions = collect_predictions(model, loader, device)
-    mu = irreps_to_km(predictions["mu_irreps"]).double()
+    mu_irreps = predictions["mu_irreps"].double()
+    target_irreps = predictions["y_irreps"].double()
+    mu = irreps_to_km(mu_irreps)
     target = predictions["y_km"].double()
-    scale = _covariance_to_km(predictions["scale_irreps"].double())
+    scale_irreps = predictions["scale_irreps"].double()
+    scale = _covariance_to_km(scale_irreps)
     residual = mu - target
 
     basis = irreps_to_km(torch.eye(6, dtype=torch.float64))
@@ -57,6 +60,11 @@ def audit(checkpoint_dir: Path, device: str) -> dict:
     )
     solved = torch.linalg.solve(scale, residual.unsqueeze(-1)).squeeze(-1)
     maha2 = (residual * solved).sum(dim=-1)
+    residual_irreps = mu_irreps - target_irreps
+    maha2_irreps = (
+        residual_irreps
+        * torch.linalg.solve(scale_irreps, residual_irreps.unsqueeze(-1)).squeeze(-1)
+    ).sum(dim=-1)
 
     components = []
     for index in range(6):
@@ -83,6 +91,11 @@ def audit(checkpoint_dir: Path, device: str) -> dict:
         "coordinate_space": "log_kelvin_mandel",
         "num_samples": int(target.shape[0]),
         "basis_orthogonality_error": float(torch.linalg.norm(basis @ basis.T - torch.eye(6))),
+        "coordinate_change_check": {
+            "target_max_error": float(torch.max(torch.abs(target - irreps_to_km(target_irreps)))),
+            "mahalanobis2_irreps_mean": float(maha2_irreps.mean()),
+            "mahalanobis2_km_mean": float(maha2.mean()),
+        },
         "components": components,
         "target_covariance": target_cov.tolist(),
         "residual_covariance": residual_cov.tolist(),
