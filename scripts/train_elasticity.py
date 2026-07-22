@@ -16,6 +16,7 @@ from equivcompiler import FeatureSpec, plan_readout
 from representations import rank4_elasticity_irreps
 from models import EquivariantBackbone
 from data.elasticity_dataset import get_elasticity_irreps_loaders
+from data.representation_metrics import infer_representation_block_metric
 from data.paths import dataset_dir
 from data.tensor_conversions import irreps_to_elasticity_21d
 from scripts._common import (
@@ -23,6 +24,7 @@ from scripts._common import (
     covariance_policy_from_cli,
     tensor_product_kwargs,
 )
+from spd_maps import RepresentationMetricMap
 
 
 def setup_logger(save_dir: str, experiment_name: str | None = None):
@@ -138,6 +140,10 @@ def main():
         "--objective", choices=["gaussian", "student_t"], default="gaussian"
     )
     parser.add_argument("--student_t_dof", type=float, default=5.0)
+    parser.add_argument(
+        "--representation_metric", choices=("none", "block_auto"), default="none",
+        help="training-set RMS metric repeated over each O(3) isotypic block",
+    )
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--lr", type=float, default=5e-4)
     parser.add_argument("--weight_decay", type=float, default=1e-4)
@@ -209,6 +215,19 @@ def main():
     )
     compilation = plan.compilation
     model = plan.bind(backbone).to(args.device)
+    if args.representation_metric == "block_auto":
+        # Convert normalized Cartesian targets once; the metric is inferred
+        # from representation blocks and is independent of the dataset name.
+        target_irreps = elasticity_21d_to_irreps(
+            torch.as_tensor(train_dataset.target_21d_norm, dtype=torch.float32)
+        )
+        metric, metric_stats = infer_representation_block_metric(
+            target_irreps, rank4_elasticity_irreps()
+        )
+        args.metric_stats = metric_stats
+        args.metric = metric.tolist()
+        model.spd_map = RepresentationMetricMap(model.spd_map, metric).to(args.device)
+        logger.info("Representation metric: %s", metric_stats)
     if args.compile_tp:
         model.backbone.compile_tensor_products(dynamic=True)
 

@@ -3,6 +3,41 @@
 from __future__ import annotations
 
 import torch
+from compatibility.e3nn import o3
+
+
+def infer_representation_block_metric(
+    values: torch.Tensor,
+    output_irreps: o3.Irreps,
+    *,
+    eps: float = 1e-3,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Infer an equivariant diagonal metric for any finite O(3) output.
+
+    Every isotypic block (fixed ``(l, parity)``) receives one RMS scale,
+    repeated over its multiplicity and irrep components.  This is the most
+    general diagonal metric that commutes with the representation; no dataset
+    name or Cartesian tensor rank is involved.
+    """
+    values = torch.as_tensor(values).detach().float()
+    irreps = o3.Irreps(output_irreps)
+    if values.ndim != 2 or values.shape[-1] != irreps.dim:
+        raise ValueError(f"values must have shape (N, {irreps.dim})")
+    if values.shape[0] == 0:
+        raise ValueError("cannot infer a metric from an empty sample set")
+    metric = torch.empty(irreps.dim, dtype=torch.float32)
+    stats: dict[str, float] = {}
+    offset = 0
+    for mul, ir in irreps:
+        width = int(mul * ir.dim)
+        rms = torch.sqrt(values[:, offset : offset + width].square().mean())
+        scale = float(torch.clamp(rms, min=eps))
+        key = f"l{ir.l}{ir.p:+d}"
+        stats[f"{key}_rms"] = scale
+        metric[offset : offset + width] = 1.0 / scale
+        offset += width
+    stats.update({"metric_min": float(metric.min()), "metric_max": float(metric.max())})
+    return metric, stats
 
 
 def infer_rank2_block_metric(dataset, *, eps: float = 1e-3) -> tuple[torch.Tensor, dict[str, float]]:
@@ -25,10 +60,7 @@ def infer_rank2_block_metric(dataset, *, eps: float = 1e-3) -> tuple[torch.Tenso
     scalar_std = scalar.std(unbiased=False)
     scalar_scale = float(torch.clamp(scalar_std, min=eps))
     l2_scale = float(torch.clamp(l2_rms, min=eps))
-    metric = torch.tensor(
-        [1.0 / scalar_scale] + [1.0 / l2_scale] * 5,
-        dtype=torch.float32,
-    )
+    metric = torch.tensor([1.0 / scalar_scale] + [1.0 / l2_scale] * 5, dtype=torch.float32)
     return metric, {
         "scalar_std": scalar_scale,
         "l2_rms_per_component": l2_scale,
