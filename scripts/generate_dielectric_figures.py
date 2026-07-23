@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from matplotlib.colors import Normalize
-from scipy.stats import beta as beta_dist
+from scipy.stats import beta as beta_dist, t as student_t_dist
 from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -288,12 +288,13 @@ def plot_uncertainty_alignment(
     )
 
     normal = torch.distributions.Normal(0.0, 1.0)
-    student = torch.distributions.StudentT(float(student_t_dof))
     marginal_coverage: dict[str, list[float]] = {}
     for level in (0.5, 0.9):
         z = (normal.icdf(torch.tensor((1.0 + level) / 2.0))
-             if distribution == "gaussian"
-             else student.icdf(torch.tensor((1.0 + level) / 2.0)))
+             if distribution == "gaussian" else torch.tensor(
+                 float(student_t_dist.ppf((1.0 + level) / 2.0, df=student_t_dof)),
+                 dtype=scale.dtype,
+             ))
         marginal_coverage[f"coverage_{int(level * 100):02d}"] = (
             (residual.abs() <= z * torch.sqrt(torch.diagonal(scale, dim1=-2, dim2=-1)))
             .double()
