@@ -31,8 +31,8 @@ def scale_nll(
     else:
         nu = float(student_t_dof)
         nll = (
-            math.lgamma((nu + d) / 2.0)
-            - math.lgamma(nu / 2.0)
+            -math.lgamma((nu + d) / 2.0)
+            + math.lgamma(nu / 2.0)
             + 0.5 * (d * math.log(nu * math.pi) + logdet)
             + 0.5 * (nu + d) * torch.log1p(q / nu)
         )

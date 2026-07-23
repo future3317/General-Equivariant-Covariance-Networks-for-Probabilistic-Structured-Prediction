@@ -1,3 +1,6 @@
+import math
+
+import pytest
 import torch
 
 from evaluation.temperature import apply_temperature, fit_temperature, scale_nll
@@ -31,3 +34,12 @@ def test_student_t_temperature_is_finite():
         distribution="student_t", student_t_dof=5.0,
     ).isfinite()
 
+
+def test_student_t_nll_uses_scale_parameterization_constant():
+    pred = torch.zeros(1, 2)
+    target = torch.zeros(1, 2)
+    scale = torch.eye(2).unsqueeze(0)
+    expected = -math.lgamma(3.5) + math.lgamma(2.5) + math.log(5.0 * math.pi)
+    assert scale_nll(
+        pred, target, scale, distribution="student_t", student_t_dof=5.0
+    ).item() == pytest.approx(expected)
