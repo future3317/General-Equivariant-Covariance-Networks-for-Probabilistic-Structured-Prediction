@@ -84,3 +84,75 @@ def apply_temperature(scale: Tensor, temperature: float) -> Tensor:
     if temperature <= 0:
         raise ValueError("temperature must be positive")
     return scale * float(temperature)
+
+
+def apply_block_temperature(
+    scale: Tensor, block_ids: Tensor, temperatures: Tensor | list[float]
+) -> Tensor:
+    """Apply positive isotypic-block temperatures to an SPD scale.
+
+    If ``F`` is diagonal and constant on every irreducible ``(l, parity)``
+    block, ``F S F`` commutes with the representation action.  Consequently
+    this calibration changes uncertainty sharpness without breaking the
+    compiler's equivariance contract.
+    """
+    if scale.ndim != 3 or scale.shape[-1] != scale.shape[-2]:
+        raise ValueError("scale must have shape (N, d, d)")
+    block_ids = torch.as_tensor(block_ids, dtype=torch.long, device=scale.device)
+    temperatures = torch.as_tensor(
+        temperatures, dtype=scale.dtype, device=scale.device
+    )
+    if block_ids.ndim != 1 or block_ids.numel() != scale.shape[-1]:
+        raise ValueError("block_ids must have one entry per output coordinate")
+    if temperatures.ndim != 1 or temperatures.numel() == 0:
+        raise ValueError("temperatures must be a non-empty vector")
+    if bool((block_ids < 0).any()) or int(block_ids.max()) >= temperatures.numel():
+        raise ValueError("block_ids contain an invalid block index")
+    if bool((temperatures <= 0).any()) or not bool(torch.isfinite(temperatures).all()):
+        raise ValueError("temperatures must be finite and positive")
+    factors = torch.sqrt(temperatures[block_ids])
+    return factors.view(1, -1, 1) * scale * factors.view(1, 1, -1)
+
+
+def fit_block_temperatures(
+    pred: Tensor,
+    target: Tensor,
+    scale: Tensor,
+    block_ids: Tensor,
+    *,
+    distribution: str = "gaussian",
+    student_t_dof: float = 5.0,
+    min_temperature: float = 1e-3,
+    max_temperature: float = 1e3,
+    steps: int = 80,
+) -> list[float]:
+    """Fit validation-only positive temperatures, one per isotypic block."""
+    if not (0.0 < min_temperature < max_temperature):
+        raise ValueError("invalid temperature bounds")
+    pred = pred.detach().clone()
+    target = target.detach().clone()
+    scale = scale.detach().clone()
+    block_ids = torch.as_tensor(block_ids, dtype=torch.long, device=scale.device)
+    num_blocks = int(block_ids.max().item()) + 1
+    log_t = torch.zeros(num_blocks, dtype=scale.dtype, device=scale.device)
+    log_t.requires_grad_()
+    optimizer = torch.optim.LBFGS(
+        [log_t], lr=0.5, max_iter=steps, line_search_fn="strong_wolfe"
+    )
+
+    def closure() -> Tensor:
+        optimizer.zero_grad()
+        temperatures = log_t.exp().clamp(min_temperature, max_temperature)
+        calibrated = apply_block_temperature(scale, block_ids, temperatures)
+        loss = scale_nll(
+            pred,
+            target,
+            calibrated,
+            distribution=distribution,
+            student_t_dof=student_t_dof,
+        )
+        loss.backward()
+        return loss
+
+    optimizer.step(closure)
+    return log_t.detach().exp().clamp(min_temperature, max_temperature).tolist()

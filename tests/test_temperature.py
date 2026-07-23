@@ -3,7 +3,13 @@ import math
 import pytest
 import torch
 
-from evaluation.temperature import apply_temperature, fit_temperature, scale_nll
+from evaluation.temperature import (
+    apply_block_temperature,
+    apply_temperature,
+    fit_block_temperatures,
+    fit_temperature,
+    scale_nll,
+)
 
 
 def _toy(n=128, d=3):
@@ -43,3 +49,15 @@ def test_student_t_nll_uses_scale_parameterization_constant():
     assert scale_nll(
         pred, target, scale, distribution="student_t", student_t_dof=5.0
     ).item() == pytest.approx(expected)
+
+
+def test_block_temperature_preserves_spd_and_fits_positive_scales():
+    pred, target, scale = _toy(d=3)
+    block_ids = torch.tensor([0, 1, 1])
+    calibrated = apply_block_temperature(scale, block_ids, [2.0, 0.5])
+    assert torch.all(torch.linalg.eigvalsh(calibrated) > 0)
+    temperatures = fit_block_temperatures(
+        pred, target, scale, block_ids, steps=20
+    )
+    assert len(temperatures) == 2
+    assert all(t > 0 for t in temperatures)

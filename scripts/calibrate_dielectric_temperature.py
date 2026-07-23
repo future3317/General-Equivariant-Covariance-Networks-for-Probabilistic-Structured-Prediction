@@ -10,7 +10,13 @@ import torch
 
 from data.dielectric_dataset import get_dielectric_irreps_loaders
 from evaluation import calibration_error, empirical_coverage
-from evaluation.temperature import apply_temperature, fit_temperature, scale_nll
+from evaluation.temperature import (
+    apply_block_temperature,
+    apply_temperature,
+    fit_block_temperatures,
+    fit_temperature,
+    scale_nll,
+)
 from scripts.generate_dielectric_figures import collect_predictions, load_model
 
 
@@ -43,6 +49,20 @@ def main() -> None:
         distribution=distribution, student_t_dof=dof,
     )
     calibrated_scale = apply_temperature(test["scale_irreps"], temperature)
+    # ``0e + 2e`` has two isotypic blocks: one scalar coordinate and one
+    # five-dimensional l=2 block.  Block temperatures preserve equivariance.
+    block_ids = torch.tensor([0, 1, 1, 1, 1, 1], dtype=torch.long)
+    block_temperatures = fit_block_temperatures(
+        val["mu_irreps"],
+        val["y_irreps"],
+        val["scale_irreps"],
+        block_ids,
+        distribution=distribution,
+        student_t_dof=dof,
+    )
+    block_calibrated_scale = apply_block_temperature(
+        test["scale_irreps"], block_ids, block_temperatures
+    )
     result = {
         "checkpoint_dir": str(checkpoint_dir),
         "fit_split": "validation",
@@ -78,6 +98,22 @@ def main() -> None:
             test["mu_irreps"], test["y_irreps"], calibrated_scale,
             reference=distribution, student_t_dof=dof,
         ),
+        "block_temperature": {
+            "block_ids": block_ids.tolist(),
+            "temperatures": block_temperatures,
+            "test_nll_after": float(scale_nll(
+                test["mu_irreps"], test["y_irreps"], block_calibrated_scale,
+                distribution=distribution, student_t_dof=dof,
+            ).item()),
+            "test_calibration_after": calibration_error(
+                test["mu_irreps"], test["y_irreps"], block_calibrated_scale,
+                reference=distribution, student_t_dof=dof,
+            ),
+            "test_coverage_after": empirical_coverage(
+                test["mu_irreps"], test["y_irreps"], block_calibrated_scale,
+                reference=distribution, student_t_dof=dof,
+            ),
+        },
     }
     output = Path(args.output) if args.output else checkpoint_dir / "temperature_calibration.json"
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -87,4 +123,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
