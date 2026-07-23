@@ -460,6 +460,13 @@ def main():
             raise FileNotFoundError(f"missing checkpoint: {checkpoint_path}")
         model.load_state_dict(torch.load(checkpoint_path, map_location=device))
         validation_metrics, test_metrics = write_final_evaluations()
+        # Keep evaluate-only runs self-describing as well.  This is required
+        # by downstream calibration/figure scripts and avoids losing the
+        # exact reconstruction contract after an interrupted training job.
+        with open(os.path.join(args.save_dir, "args.json"), "w") as f:
+            json.dump(vars(args), f, indent=2)
+        with open(os.path.join(args.save_dir, "compilation.json"), "w") as f:
+            json.dump(compilation.as_dict(), f, indent=2)
         logger.info(
             "Validation: loss=%.4f, phys_mae=%.4f, log_mae=%.4f",
             validation_metrics["loss"],
