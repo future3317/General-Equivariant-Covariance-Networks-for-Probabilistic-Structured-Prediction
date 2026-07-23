@@ -21,7 +21,10 @@ from equivcompiler import (
 )
 from models import EquivariantBackbone
 from data.dielectric_dataset import get_dielectric_irreps_loaders
-from data.representation_metrics import infer_rank2_block_metric
+from data.representation_metrics import (
+    infer_rank2_block_metric,
+    transformed_spectral_bounds,
+)
 from data.paths import dataset_dir
 from data.tensor_conversions import irreps_to_km, irreps_to_matrix_exp_voigt
 from voigt_utils import kelvin_mandel_to_voigt
@@ -413,6 +416,16 @@ def main():
             if args.covariance_parameterization == "spectral_window"
             else None
         )
+        # ``RepresentationMetricMap`` materializes the physical scale as
+        # ``D^{-1} S_tilde D^{-1}``.  The declared spectral window therefore
+        # has to be expressed in physical coordinates before diagnostics;
+        # comparing against the internal window would report false violations.
+        if bounds is not None and args.representation_metric == "block_auto":
+            metric = torch.tensor(
+                [args.metric_scalar] + [args.metric_l2] * 5,
+                dtype=torch.float64,
+            )
+            bounds = transformed_spectral_bounds(bounds, metric)
         validation_metrics = validate(
             model,
             val_loader,

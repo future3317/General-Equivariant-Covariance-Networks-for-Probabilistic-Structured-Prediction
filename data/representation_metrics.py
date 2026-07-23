@@ -40,6 +40,25 @@ def infer_representation_block_metric(
     return metric, stats
 
 
+def transformed_spectral_bounds(
+    log_variance_bounds: tuple[float, float], metric: torch.Tensor
+) -> tuple[float, float]:
+    """Bounds for physical scatter after ``S = D^{-1} S_tilde D^{-1}``.
+
+    A spectral map constrains the scaled-coordinate scatter ``S_tilde``.  The
+    corresponding physical eigenvalues lie in conservative bounds obtained
+    from the smallest/largest diagonal metric entries.
+    """
+    lower, upper = log_variance_bounds
+    metric = torch.as_tensor(metric, dtype=torch.float64)
+    if metric.ndim != 1 or metric.numel() == 0 or bool((metric <= 0).any()):
+        raise ValueError("metric must be a positive non-empty vector")
+    return (
+        float(lower - 2.0 * torch.log(metric.max()).item()),
+        float(upper - 2.0 * torch.log(metric.min()).item()),
+    )
+
+
 def infer_rank2_block_metric(
     dataset, *, eps: float = 1e-3, max_samples: int | None = 256
 ) -> tuple[torch.Tensor, dict[str, float]]:

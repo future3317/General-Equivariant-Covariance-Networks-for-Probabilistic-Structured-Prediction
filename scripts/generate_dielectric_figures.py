@@ -21,6 +21,7 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from data.dielectric_dataset import get_dielectric_irreps_loaders
+from data.representation_metrics import transformed_spectral_bounds
 from data.tensor_conversions import irreps_to_km
 from equivcompiler import FeatureSpec, FullCovariance, SpectralWindowCovariance, plan_readout
 from evaluation.calibration import calibration_error, qq_data
@@ -676,6 +677,12 @@ def main():
         if train_args.covariance_parameterization == "spectral_window"
         else None
     )
+    if bounds is not None and getattr(train_args, "representation_metric", "none") == "block_auto":
+        metric = torch.tensor(
+            [float(train_args.metric_scalar)] + [float(train_args.metric_l2)] * 5,
+            dtype=torch.float64,
+        )
+        bounds = transformed_spectral_bounds(bounds, metric)
     spectrum = plot_spectral_diagnostics(
         preds["scale_irreps"], bounds, output_dir / "dielectric_spectrum"
     )

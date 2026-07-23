@@ -1,5 +1,7 @@
 """Tests for evaluation metrics, calibration, and equivariance validators."""
 
+import math
+
 import pytest
 import torch
 
@@ -18,6 +20,7 @@ from evaluation import (
     calibration_error,
     sharpness,
 )
+from data.representation_metrics import transformed_spectral_bounds
 
 
 def _make_gaussian_data(batch=16, d=6, seed=0, well_specified: bool = False):
@@ -137,3 +140,9 @@ def test_covariance_spectrum_diagnostics_reports_window_saturation():
     assert diagnostics["bound_violation_fraction"] == 0.0
     assert diagnostics["lower_boundary_fraction"] == pytest.approx(1.0 / 3.0)
     assert diagnostics["upper_boundary_fraction"] == pytest.approx(1.0 / 3.0)
+
+
+def test_transformed_spectral_bounds_account_for_diagonal_metric():
+    lower, upper = transformed_spectral_bounds((-4.0, 4.0), torch.tensor([2.0, 0.5]))
+    assert lower == pytest.approx(-4.0 - 2.0 * math.log(2.0))
+    assert upper == pytest.approx(4.0 - 2.0 * math.log(0.5))
