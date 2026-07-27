@@ -10,6 +10,7 @@ from data.pseudo_covariance import (
     validate_oof_residual_payload,
     validate_pseudo_cache,
 )
+from data.oof import fold_assignments
 
 
 class _Graph:
@@ -76,3 +77,13 @@ def test_untransported_directional_knn_fails_single_query_rotation_gate():
     # orthogonal coordinate action.
     safe = result["covariance"][0]
     torch.testing.assert_close(safe, rotation @ safe @ rotation.T)
+
+
+def test_oof_assignment_is_deterministic_and_each_holdout_is_disjoint():
+    assignments = fold_assignments(101, folds=5, seed=17)
+    torch.testing.assert_close(assignments, fold_assignments(101, folds=5, seed=17))
+    for fold in range(5):
+        train = torch.where(assignments != fold)[0]
+        held_out = torch.where(assignments == fold)[0]
+        assert torch.isin(held_out, train).sum() == 0
+        assert len(train) + len(held_out) == 101

@@ -12,6 +12,7 @@ from compatibility.torch_geometric import PyGDataLoader
 
 from dielectric_data_loader import DielectricDataset, ShardBatchSampler
 from data.paths import dataset_dir
+from data.oof import fold_assignments
 from data.tensor_conversions import irreps_to_km, km_to_irreps
 
 
@@ -140,6 +141,9 @@ def get_dielectric_irreps_loaders(
     shard_cache_size: int = 2,
     rotation_augmentation: bool = False,
     rotation_probability: float = 1.0,
+    oof_folds: int | None = None,
+    oof_holdout_fold: int | None = None,
+    oof_seed: int = 0,
 ):
     """Create PyG data loaders with irrep-space dielectric targets."""
     data_dir = dataset_dir(data_dir, "mp_dielectric")
@@ -158,6 +162,14 @@ def get_dielectric_irreps_loaders(
     val_dataset = DielectricIrrepsDataset(data_dir, "val", **dataset_kwargs)
     test_dataset = DielectricIrrepsDataset(data_dir, "test", **dataset_kwargs)
 
+    if (oof_folds is None) != (oof_holdout_fold is None):
+        raise ValueError("oof_folds and oof_holdout_fold must be supplied together")
+    if oof_folds is not None:
+        if not 0 <= int(oof_holdout_fold) < int(oof_folds):
+            raise ValueError("oof_holdout_fold must lie in [0, oof_folds)")
+        assignments = fold_assignments(len(train_dataset), int(oof_folds), int(oof_seed))
+        indices = torch.where(assignments != int(oof_holdout_fold))[0].tolist()
+        train_dataset = torch.utils.data.Subset(train_dataset, indices)
     if train_subset is not None and train_subset < len(train_dataset):
         import random
 

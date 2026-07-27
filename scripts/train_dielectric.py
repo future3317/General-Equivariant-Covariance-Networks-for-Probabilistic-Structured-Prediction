@@ -454,6 +454,9 @@ def main():
     )
     parser.add_argument("--allow_tf32", action="store_true")
     parser.add_argument("--train_subset", type=int, default=None)
+    parser.add_argument("--oof_folds", type=int, default=None, help="Number of deterministic OOF folds for a mean checkpoint.")
+    parser.add_argument("--oof_holdout_fold", type=int, default=None, help="Fold excluded from this OOF mean checkpoint.")
+    parser.add_argument("--oof_seed", type=int, default=0, help="Shared OOF assignment seed recorded in every fold run.")
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--persistent_workers", action="store_true")
     parser.add_argument("--pin_memory", action="store_true")
@@ -517,6 +520,15 @@ def main():
         args.shape_min < args.shape_max and args.volume_min < args.volume_max
     ):
         parser.error("centered spectral bounds must be strictly increasing")
+    if (args.oof_folds is None) != (args.oof_holdout_fold is None):
+        parser.error("--oof_folds and --oof_holdout_fold must be supplied together")
+    if args.oof_folds is not None:
+        if args.training_stage != "mean":
+            parser.error("OOF fold exclusion is valid only while training mean checkpoints")
+        if args.oof_folds != 5:
+            parser.error("dielectric OOF residual construction requires exactly five folds")
+        if not 0 <= args.oof_holdout_fold < args.oof_folds:
+            parser.error("--oof_holdout_fold must lie in [0, --oof_folds)")
     # A successor stage inherits every model-semantic field from its declared
     # predecessor.  This prevents a default CLI value from silently changing
     # the compiled representation, SPD map, or likelihood between stages.
@@ -566,6 +578,9 @@ def main():
         shard_cache_size=args.shard_cache_size,
         rotation_augmentation=args.rotation_augmentation,
         rotation_probability=args.rotation_probability,
+        oof_folds=args.oof_folds,
+        oof_holdout_fold=args.oof_holdout_fold,
+        oof_seed=args.oof_seed,
     )
 
     if args.representation_metric == "block_auto" and not args.evaluate_only:

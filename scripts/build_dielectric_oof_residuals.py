@@ -23,6 +23,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from compatibility.torch_geometric import PyGDataLoader
 from data.dielectric_dataset import DielectricIrrepsDataset
+from data.oof import fold_assignments
 from data.paths import dataset_dir
 from scripts.dielectric_runtime import (
     configure_inference_contract,
@@ -34,16 +35,6 @@ from scripts.dielectric_runtime import (
     load_run_record,
     sha256_file,
 )
-
-
-def _fold_assignments(size: int, folds: int, seed: int) -> torch.Tensor:
-    if folds < 2:
-        raise ValueError("cross-fitting requires at least two folds")
-    generator = torch.Generator().manual_seed(seed)
-    permutation = torch.randperm(size, generator=generator)
-    assignments = torch.empty(size, dtype=torch.long)
-    assignments[permutation] = torch.arange(size) % folds
-    return assignments
 
 
 @torch.inference_mode()
@@ -72,12 +63,24 @@ def build_oof_residuals(
         storage=storage,
         shard_cache_size=shard_cache_size,
     )
-    assignments = _fold_assignments(len(dataset), folds, seed)
+    assignments = fold_assignments(len(dataset), folds, seed)
     residuals = torch.empty(len(dataset), 6, dtype=torch.float64)
     filled = torch.zeros(len(dataset), dtype=torch.bool)
     checkpoint_hashes = []
     for fold, checkpoint_dir in enumerate(checkpoint_dirs):
         checkpoint_dir = Path(checkpoint_dir)
+        checkpoint_args = load_dielectric_data_args(checkpoint_dir)
+        if getattr(checkpoint_args, "training_stage", None) != "mean":
+            raise ValueError(f"OOF checkpoint {checkpoint_dir} is not a mean-stage run")
+        if (
+            getattr(checkpoint_args, "oof_folds", None) != folds
+            or getattr(checkpoint_args, "oof_seed", None) != seed
+            or getattr(checkpoint_args, "oof_holdout_fold", None) != fold
+        ):
+            raise ValueError(
+                f"OOF checkpoint {checkpoint_dir} does not certify fold {fold} "
+                f"under the requested {fold}-fold seed-{seed} split"
+            )
         checkpoint_hashes.append(
             {"path": str(checkpoint_dir / "best_model.pt"), "sha256": sha256_file(checkpoint_dir / "best_model.pt")}
         )
