@@ -175,3 +175,65 @@ class StructuredProbabilisticPredictor(torch.nn.Module):
             result["precision"] = self.spd_map.precision(params)
 
         return result
+
+    def forward_faithful_from_features(
+        self,
+        node_features: torch.Tensor,
+        batch: torch.Tensor,
+        *,
+        target: torch.Tensor,
+        covariance_residual: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor | dict[str, torch.Tensor]]:
+        """Evaluate a faithful heteroscedastic objective.
+
+        The mean/trunk path receives only the MSE gradient.  The covariance
+        path sees a detached mean residual and detached backbone features, so
+        its NLL cannot suppress mean updates or rewrite the shared trunk.  A
+        supplied ``covariance_residual`` is an out-of-fold residual cache;
+        otherwise the residual of the current mean is used.
+        """
+        readout_parameter = next(self.parameters(), None)
+        if readout_parameter is not None and node_features.dtype != readout_parameter.dtype:
+            node_features = node_features.to(dtype=readout_parameter.dtype)
+        if self.joint_head is not None:
+            required = ("_compiled_features", "forward_parameters", "mean_projection")
+            if any(not hasattr(self.joint_head, name) for name in required):
+                raise TypeError("joint_head does not expose the faithful readout protocol")
+            compiled = self.joint_head._compiled_features(node_features, batch)
+            mu = self.joint_head.mean_projection(compiled)
+            # Detaching before the second lowering is essential: covariance
+            # gradients may update its projection but never the shared lifting
+            # or backbone parameters.
+            params = self.joint_head.forward_parameters(node_features.detach(), batch)
+        else:
+            if self.mean_head is None or self.covariance_head is None:
+                raise TypeError("faithful updates require mean and covariance heads")
+            if self._heads_share_pooling:
+                pooled = mean_pool(node_features, batch)
+                mu = self.mean_head.forward_pooled(pooled)
+                params = self.covariance_head.forward_pooled(pooled.detach())
+            else:
+                mu = self.mean_head(node_features, batch)
+                params = self.covariance_head(node_features.detach(), batch)
+        if self.spd_map is None or self.distribution is None:
+            raise TypeError("faithful updates require an SPD map and distribution")
+        if target.dtype != mu.dtype:
+            target = target.to(dtype=mu.dtype)
+        mean_loss = torch.nn.functional.mse_loss(mu, target)
+        residual = (
+            covariance_residual.to(dtype=mu.dtype, device=mu.device)
+            if covariance_residual is not None
+            else target.detach() - mu.detach()
+        )
+        covariance_target = mu.detach() + residual
+        covariance_loss, components = self.distribution(
+            mu.detach(), params, covariance_target, self.spd_map
+        )
+        return {
+            "mu": mu,
+            "params": params,
+            "loss": mean_loss + covariance_loss,
+            "mean_loss": mean_loss,
+            "covariance_loss": covariance_loss,
+            "components": components,
+        }

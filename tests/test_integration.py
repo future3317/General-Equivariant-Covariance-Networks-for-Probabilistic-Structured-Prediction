@@ -78,6 +78,48 @@ def test_full_rank_rank2_forward_backward():
     result["loss"].backward()
 
 
+def test_faithful_objective_separates_mean_and_covariance_gradients():
+    output_spec = O3IrrepsSpec("0e + 2e")
+    backbone = EquivariantBackbone(
+        hidden_dim=8, lmax=2, num_layers=1, atom_feature_dim=49, num_basis=8
+    )
+    mean_head = EquivariantMeanHead(backbone.irreps_out, output_spec.irreps, pool=True)
+    cov_head = O3EquivariantSymmetricOperatorHead(
+        backbone.irreps_out, output_spec, pool=True
+    )
+    model = StructuredProbabilisticPredictor(
+        backbone=backbone,
+        output_spec=output_spec,
+        mean_head=mean_head,
+        covariance_head=cov_head,
+        spd_map=MatrixExponentialMap(),
+        distribution=GaussianNLL(),
+    )
+    data = _make_data()
+    target = torch.randn(2, output_spec.dim)
+    features, batch = model.backbone(data)
+    result = model.forward_faithful_from_features(features, batch, target=target)
+    result["loss"].backward()
+    backbone_grad = torch.cat(
+        [p.grad.reshape(-1) for p in model.backbone.parameters() if p.grad is not None]
+    )
+    covariance_grad = torch.cat(
+        [p.grad.reshape(-1) for p in model.covariance_head.parameters() if p.grad is not None]
+    )
+    assert torch.isfinite(backbone_grad).all() and backbone_grad.norm() > 0
+    assert torch.isfinite(covariance_grad).all() and covariance_grad.norm() > 0
+
+    # The backbone gradient is exactly the MSE gradient, not an NLL mixture.
+    model.zero_grad(set_to_none=True)
+    features_mean, batch_mean = model.backbone(data)
+    mean_only = model.forward_from_features(features_mean, batch_mean, target=target)
+    torch.nn.functional.mse_loss(mean_only["mu"], target).backward()
+    mean_grad = torch.cat(
+        [p.grad.reshape(-1) for p in model.backbone.parameters() if p.grad is not None]
+    )
+    torch.testing.assert_close(backbone_grad, mean_grad, atol=1e-6, rtol=1e-5)
+
+
 def test_low_rank_rank2_forward_backward():
     output_spec = O3IrrepsSpec("0e + 2e")
     backbone = EquivariantBackbone(

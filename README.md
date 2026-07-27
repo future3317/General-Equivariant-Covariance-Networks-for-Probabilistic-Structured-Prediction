@@ -125,6 +125,19 @@ target and whether backend lowering is algebraically exact. A budget-selected
 low-rank or graph family can therefore never be mislabeled as full covariance,
 and contraction truncation can never be mislabeled as checkpoint-equivalent.
 
+## Statistical identification protocol (implemented, not yet benchmarked)
+
+The dielectric trainer now exposes `--faithful_joint`, which sends MSE-only
+gradients through the mean/shared trunk and uses detached residuals for the
+covariance path. `scripts/build_dielectric_oof_residuals.py` constructs fixed
+out-of-fold residual caches from mean checkpoints, and
+`--oof_residuals <cache.pt>` consumes them during covariance training. The
+`evaluation.ensemble` API and `scripts/evaluate_dielectric_ensemble.py` report
+the law-of-total-covariance decomposition, exact finite-mixture NLL, Energy
+Score, and dependence-sensitive variogram score. These extensions have not yet
+been used to claim improved dielectric performance; they require a controlled
+cross-fitted/ensemble rerun.
+
 Every operator program is verified in a typed environment containing its
 named representation bindings, declared output representation, and optional
 output graph. The verifier checks parameter slices after layout conversion,

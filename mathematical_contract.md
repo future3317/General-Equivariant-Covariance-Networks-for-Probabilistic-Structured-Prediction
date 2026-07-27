@@ -63,6 +63,20 @@ Sampling uses \(Y=\mu+Lz\) for Gaussian \(LL^T=S\), and
 Mahalanobis, coverage, calibration and angular diagnostics must consume the
 same prediction materialization and inference precision contract.
 
+For an equally weighted ensemble of (M) members, the moment decomposition is
+
+\[
+\bar\mu=M^{-1}\sum_m\mu_m,\qquad
+\Sigma_{\mathrm{total}}=M^{-1}\sum_m\Sigma_m+
+M^{-1}\sum_m(\mu_m-\bar\mu)(\mu_m-\bar\mu)^T.
+\]
+
+The second term is epistemic spread. A finite ensemble is a mixture density,
+not a single Gaussian or Student-t; its proper NLL is the log-sum-exp of member
+log densities. Moment-based coverage is therefore labeled explicitly as a
+moment-Gaussian diagnostic. Variogram score is retained as a dependence-
+sensitive complement to Energy Score.
+
 ## 4. Kelvin--Mandel and matrix logarithm
 
 For a symmetric 3-by-3 tensor,

@@ -138,17 +138,39 @@ def forward_dielectric(
     target: torch.Tensor | None = None,
     return_scale: bool = False,
     contract: Mapping[str, Any] | None = None,
+    faithful: bool = False,
+    covariance_residual: torch.Tensor | None = None,
 ):
-    """Run one prediction under the recorded BF16/FP32 contract."""
+    """Run one prediction under the recorded BF16/FP32 contract.
+
+    ``faithful=True`` is a training-only objective boundary: mean/trunk
+    gradients use MSE while the covariance NLL uses detached features and a
+    detached (optionally out-of-fold) residual.  Evaluation must keep the
+    default probabilistic path so reported NLL remains the proper model score.
+    """
     contract = contract or {"backbone_precision": "fp32"}
     use_bf16 = contract.get("backbone_precision") == "bf16" and batch.pos.device.type == "cuda"
+    def _from_features(features, graph_batch):
+        if faithful:
+            if target is None:
+                raise ValueError("faithful inference requires target")
+            return model.forward_faithful_from_features(
+                features,
+                graph_batch,
+                target=target,
+                covariance_residual=covariance_residual,
+            )
+        return model.forward_from_features(
+            features, graph_batch, target=target, return_scale=return_scale
+        )
     if not use_bf16:
+        if faithful:
+            node_features, graph_batch = model.backbone(batch)
+            return _from_features(node_features, graph_batch)
         return model(batch, target=target, return_scale=return_scale)
     with torch.autocast(device_type=batch.pos.device.type, dtype=torch.bfloat16):
         node_features, graph_batch = model.backbone(batch)
-    return model.forward_from_features(
-        node_features.float(), graph_batch, target=target, return_scale=return_scale
-    )
+    return _from_features(node_features.float(), graph_batch)
 
 
 @dataclass(frozen=True)

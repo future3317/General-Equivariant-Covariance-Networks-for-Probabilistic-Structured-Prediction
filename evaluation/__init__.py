@@ -27,6 +27,12 @@ from evaluation.calibration import (
     sharpness,
 )
 from evaluation.temperature import apply_temperature, fit_temperature, scale_nll
+from evaluation.ensemble import (
+    combine_ensemble_moments,
+    ensemble_nll,
+    sample_ensemble,
+    variogram_score,
+)
 from evaluation.equivariance import (
     mean_equivariance_error,
     scale_equivariance_error,
@@ -76,6 +82,10 @@ __all__ = [
     "scale_nll",
     "fit_temperature",
     "apply_temperature",
+    "combine_ensemble_moments",
+    "ensemble_nll",
+    "sample_ensemble",
+    "variogram_score",
     "mean_equivariance_error",
     "scale_equivariance_error",
     "average_equivariance_error",

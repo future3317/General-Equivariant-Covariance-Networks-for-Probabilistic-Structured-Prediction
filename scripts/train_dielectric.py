@@ -67,13 +67,21 @@ def _forward(
     target: torch.Tensor,
     use_bf16: bool,
     return_scale: bool = False,
+    faithful: bool = False,
+    covariance_residual: torch.Tensor | None = None,
 ):
     """Compatibility wrapper around the unique inference runtime."""
     contract = {
         "backbone_precision": "bf16" if use_bf16 else "fp32",
     }
     return forward_dielectric(
-        model, batch, target=target, return_scale=return_scale, contract=contract
+        model,
+        batch,
+        target=target,
+        return_scale=return_scale,
+        contract=contract,
+        faithful=faithful,
+        covariance_residual=covariance_residual,
     )
 
 
@@ -122,6 +130,8 @@ def train_epoch(
     warmup_mse_weight: float = 0.0,
     non_blocking: bool = False,
     use_bf16: bool = False,
+    faithful: bool = False,
+    oof_residuals: torch.Tensor | None = None,
 ):
     model.train()
     total_loss = torch.tensor(0.0, device=device)
@@ -134,11 +144,21 @@ def train_epoch(
 
         optimizer.zero_grad(set_to_none=True)
 
+        covariance_residual = None
+        if oof_residuals is not None:
+            if not hasattr(batch, "sample_index"):
+                raise ValueError("OOF residual training requires dataset sample_index")
+            sample_index = batch.sample_index.detach().cpu().long().reshape(-1)
+            if sample_index.max().item() >= oof_residuals.shape[0]:
+                raise ValueError("OOF residual cache does not cover this dataset split")
+            covariance_residual = oof_residuals[sample_index].to(device)
         result = _forward(
             model,
             batch,
             target=batch.y_irreps,
             use_bf16=use_bf16,
+            faithful=faithful,
+            covariance_residual=covariance_residual,
         )
         mse = torch.nn.functional.mse_loss(result["mu"], batch.y_irreps)
         loss = mse if training_stage == "mean" else result["loss"]
@@ -364,6 +384,16 @@ def main():
         default="joint",
         help="strict training state: deterministic mean, covariance fit, or joint fine-tuning",
     )
+    parser.add_argument(
+        "--faithful_joint",
+        action="store_true",
+        help="Use MSE-only mean/trunk gradients and detached covariance residuals during joint training.",
+    )
+    parser.add_argument(
+        "--oof_residuals",
+        default=None,
+        help="Path to a build_dielectric_oof_residuals.py cache used as fixed covariance residual supervision.",
+    )
     parser.add_argument("--init_checkpoint", default=None)
     parser.add_argument(
         "--distribution",
@@ -422,6 +452,14 @@ def main():
             merged_args["save_dir"] = runtime_save_dir
             merged_args["evaluate_only"] = True
             args = argparse.Namespace(**merged_args)
+    oof_residuals = None
+    if args.oof_residuals is not None:
+        if args.training_stage == "mean":
+            parser.error("--oof_residuals is only valid for covariance or joint stages")
+        payload = torch.load(args.oof_residuals, map_location="cpu")
+        if not isinstance(payload, dict) or "residuals" not in payload:
+            parser.error("invalid OOF residual cache: expected a residuals tensor")
+        oof_residuals = payload["residuals"].float().contiguous()
     if args.covariance_parameterization == "spectral_window" and not (
         args.log_variance_min < args.log_variance_max
     ):
@@ -500,6 +538,9 @@ def main():
     stage_record = None
     if not args.evaluate_only:
         stage_record = configure_training_stage(model, spec, args)
+        stage_record["faithful_joint"] = bool(
+            args.faithful_joint and args.training_stage == "joint"
+        )
         write_run_spec(
             args.save_dir,
             spec,
@@ -618,6 +659,8 @@ def main():
             warmup_mse,
             non_blocking=non_blocking,
             use_bf16=use_bf16,
+            faithful=args.faithful_joint and args.training_stage == "joint",
+            oof_residuals=oof_residuals,
         )
         val_metrics = validate(
             model,
