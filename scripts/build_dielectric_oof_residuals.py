@@ -74,6 +74,7 @@ def build_oof_residuals(
     )
     assignments = _fold_assignments(len(dataset), folds, seed)
     residuals = torch.empty(len(dataset), 6, dtype=torch.float64)
+    filled = torch.zeros(len(dataset), dtype=torch.bool)
     checkpoint_hashes = []
     for fold, checkpoint_dir in enumerate(checkpoint_dirs):
         checkpoint_dir = Path(checkpoint_dir)
@@ -102,6 +103,13 @@ def build_oof_residuals(
             residuals[sample_index] = (
                 batch.y_irreps.detach().double().cpu() - result["mu"].detach().double().cpu()
             )
+            filled[sample_index] = True
+    if not bool(filled.all()):
+        missing = torch.where(~filled)[0].tolist()
+        raise RuntimeError(
+            f"OOF residual construction skipped {len(missing)} train samples; "
+            "refusing to write a partially initialized covariance target"
+        )
     payload = {
         "version": 1,
         "split": "train",
