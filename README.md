@@ -138,6 +138,15 @@ Score, and dependence-sensitive variogram score. These extensions have not yet
 been used to claim improved dielectric performance; they require a controlled
 cross-fitted/ensemble rerun.
 
+The controlled order is fixed: first compare ordinary faithful Student-t with
+OOF-residual faithful Student-t; then evaluate a five-member probabilistic
+ensemble; finally retain isotropic pseudo-Wasserstein only if it improves a
+validation probabilistic criterion without degrading the others. The primary
+comparison reports proper mixture/NLL semantics, joint coverage, angular
+whitening defect, and variogram score. Moment covariance is
+`mean(Sigma_m) + Cov(mu_m)`, where each Student-t member contributes
+`Sigma_m = nu/(nu-2) * S_m`; it is not relabeled as a single Student-t density.
+
 An optional, explicitly non-directional auxiliary is also available for
 audited ablations. `scripts/build_dielectric_pseudo_covariance.py` consumes a
 five-fold, train-only OOF cache and constructs an isotropic residual-covariance
@@ -440,6 +449,24 @@ symmetric-operator parameters and records that restriction in the report.
 # calibration, and figure generation.  Train the deterministic mean first.
 python -m scripts.train_dielectric --training_stage mean \
   --save_dir /path/to/dielectric_mean --device cuda
+
+# Cross-fitted means: train exactly five models. Fold k excludes the samples
+# with deterministic fold id k; all arguments below must agree across folds.
+for k in 0 1 2 3 4; do
+  python -m scripts.train_dielectric --training_stage mean \
+    --oof_folds 5 --oof_holdout_fold "$k" --oof_seed 0 \
+    --save_dir "/path/to/oof_mean/fold$k" --device cuda
+done
+python -m scripts.build_dielectric_oof_residuals \
+  --checkpoint_dirs /path/to/oof_mean/fold0 /path/to/oof_mean/fold1 \
+    /path/to/oof_mean/fold2 /path/to/oof_mean/fold3 /path/to/oof_mean/fold4 \
+  --folds 5 --seed 0 --output /path/to/oof_residuals.pt --device cuda
+
+# Use the fixed OOF cache only for covariance/joint stages. The builder checks
+# the exact fold/seed contract and refuses in-sample or mismatched checkpoints.
+python -m scripts.train_dielectric --training_stage covariance \
+  --init_checkpoint /path/to/dielectric_mean --oof_residuals /path/to/oof_residuals.pt \
+  --save_dir /path/to/oof_covariance --device cuda
 
 # Fit only the covariance projection from that exact mean checkpoint.
 python -m scripts.train_dielectric --training_stage covariance \
