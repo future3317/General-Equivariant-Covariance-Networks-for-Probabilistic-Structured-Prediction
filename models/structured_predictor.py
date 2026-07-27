@@ -196,7 +196,11 @@ class StructuredProbabilisticPredictor(torch.nn.Module):
         if readout_parameter is not None and node_features.dtype != readout_parameter.dtype:
             node_features = node_features.to(dtype=readout_parameter.dtype)
         if self.joint_head is not None:
-            required = ("_compiled_features", "forward_parameters", "mean_projection")
+            required = (
+                "_compiled_features",
+                "forward_parameters_detached_features",
+                "mean_projection",
+            )
             if any(not hasattr(self.joint_head, name) for name in required):
                 raise TypeError("joint_head does not expose the faithful readout protocol")
             compiled = self.joint_head._compiled_features(node_features, batch)
@@ -204,7 +208,9 @@ class StructuredProbabilisticPredictor(torch.nn.Module):
             # Detaching before the second lowering is essential: covariance
             # gradients may update its projection but never the shared lifting
             # or backbone parameters.
-            params = self.joint_head.forward_parameters(node_features.detach(), batch)
+            params = self.joint_head.forward_parameters_detached_features(
+                node_features.detach(), batch
+            )
         else:
             if self.mean_head is None or self.covariance_head is None:
                 raise TypeError("faithful updates require mean and covariance heads")

@@ -91,3 +91,32 @@ def test_factory_model_is_end_to_end_o3_equivariant():
         torch.testing.assert_close(
             transformed["scale"], expected_scale, atol=3e-4, rtol=3e-4
         )
+
+
+def test_compiled_faithful_path_does_not_train_shared_lifting_from_covariance():
+    torch.manual_seed(9)
+    spec = _spec(
+        num_basis=8,
+        representation_metric="none",
+        metric_scalar=None,
+        metric_l2=None,
+    )
+    model, _ = build_dielectric_model(spec, "cpu")
+    data = _build_graph(torch.randn(7, 3), num_basis=8)
+    target = torch.randn(1, 6)
+    features, graph_batch = model.backbone(data)
+    faithful = model.forward_faithful_from_features(features, graph_batch, target=target)
+    faithful["loss"].backward()
+    lifting_grad = torch.cat(
+        [p.grad.reshape(-1) for p in model.joint_head.lifting.parameters() if p.grad is not None]
+    )
+    assert torch.isfinite(lifting_grad).all() and lifting_grad.norm() > 0
+
+    model.zero_grad(set_to_none=True)
+    features_mean, graph_batch_mean = model.backbone(data)
+    mean_result = model.forward_from_features(features_mean, graph_batch_mean, target=target)
+    torch.nn.functional.mse_loss(mean_result["mu"], target).backward()
+    mean_grad = torch.cat(
+        [p.grad.reshape(-1) for p in model.joint_head.lifting.parameters() if p.grad is not None]
+    )
+    torch.testing.assert_close(lifting_grad, mean_grad, atol=1e-6, rtol=1e-5)

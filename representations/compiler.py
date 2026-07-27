@@ -394,6 +394,19 @@ class O3CompiledOutputHead(torch.nn.Module):
         compiled = self._compiled_features(node_features, batch)
         return project_parameter_bindings(self, compiled)
 
+    def forward_parameters_detached_features(
+        self, node_features: torch.Tensor, batch: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        """Project covariance parameters without gradients through shared lifting.
+
+        The projection weights remain trainable, while the compiled lifting
+        trunk is evaluated as a fixed feature transform.  This is the sole
+        lowering used by the faithful heteroscedastic joint objective.
+        """
+        with torch.no_grad():
+            compiled = self._compiled_features(node_features.detach(), batch)
+        return project_parameter_bindings(self, compiled)
+
     def forward(
         self, node_features: torch.Tensor, batch: torch.Tensor | None = None
     ) -> tuple[torch.Tensor, torch.Tensor]:
