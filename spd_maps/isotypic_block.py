@@ -17,7 +17,7 @@ class IsotypicBlockMap(SPDMap):
     invariant parameters only.
     """
 
-    def __init__(self, irreps: o3.Irreps, min_diagonal: float = 1e-4):
+    def __init__(self, irreps: o3.Irreps, min_diagonal: float = 0.0):
         super().__init__()
         self.irreps = o3.Irreps(irreps)
         self.min_diagonal = min_diagonal

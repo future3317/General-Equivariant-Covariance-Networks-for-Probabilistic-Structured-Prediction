@@ -23,6 +23,7 @@ from equivcompiler import (
     RadialLaw,
     SpecificExecutor,
     SpectralWindowCovariance,
+    CenteredSpectralWindowCovariance,
     TruncatedMultiplicityRank,
     plan_readout,
 )
@@ -105,6 +106,28 @@ def test_spectral_window_is_compiled_as_a_bounded_full_covariance_family():
     log_spectrum = torch.log(torch.linalg.eigvalsh(scale))
     assert log_spectrum.min() >= -3.0 - 2e-6
     assert log_spectrum.max() <= 2.0 + 2e-6
+
+
+def test_centered_spectral_window_compiles_without_conflating_volume_and_shape():
+    plan = plan_readout(
+        SEED,
+        output="ij=ji",
+        covariance=CenteredSpectralWindowCovariance(
+            shape_min=-1.0, shape_max=1.0, volume_min=-6.0, volume_max=6.0
+        ),
+    )
+    attrs = plan.compilation.operator_family.assembly.attribute_dict()
+    assert attrs["map"] == "centered_spectral_window"
+    assert attrs["shape_min"] == -1.0
+    assert attrs["volume_max"] == 6.0
+    spd_map = plan.compilation.build_spd_map()
+    parameters = torch.randn(4, plan.compilation.covariance_parameter_count)
+    scale = spd_map(parameters)
+    spectrum = torch.linalg.eigvalsh(scale)
+    condition = spectrum[..., -1] / spectrum[..., 0]
+    assert float(condition.max()) <= float(torch.exp(torch.tensor(2.0))) + 1e-5
+    scale64 = spd_map(parameters.double())
+    assert scale64.dtype == torch.float64
 
 
 def test_degenerate_structured_families_report_exact_full_coverage():

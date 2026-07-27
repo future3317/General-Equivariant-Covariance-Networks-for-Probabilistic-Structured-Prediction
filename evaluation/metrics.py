@@ -136,8 +136,11 @@ def energy_score(
     scale: Tensor,
     target: Tensor,
     num_samples: int = 50,
+    *,
+    distribution: str = "gaussian",
+    student_t_dof: float = 5.0,
 ) -> Tensor:
-    """Energy Score for multivariate Gaussian predictions.
+    """Monte Carlo Energy Score for Gaussian or Student-t predictions.
 
     Samples from :math:`N(\\mu, S)` and approximates:
 
@@ -160,12 +163,23 @@ def energy_score(
     scale_flat = scale.reshape(-1, d, d)
     target_flat = target.reshape(-1, d)
 
-    # S = L L^T
+    if distribution not in {"gaussian", "student_t"}:
+        raise ValueError("distribution must be 'gaussian' or 'student_t'")
+    if distribution == "student_t" and student_t_dof <= 0:
+        raise ValueError("student_t_dof must be positive")
+    # S = L L^T (Student-t uses the same scale matrix).
     L = torch.linalg.cholesky(scale_flat)
     eps = torch.randn(
         pred_flat.shape[0], num_samples, d, device=pred.device, dtype=pred.dtype
     )
     samples = pred_flat.unsqueeze(1) + torch.einsum("bij,bnj->bni", L, eps)
+    if distribution == "student_t":
+        chi = torch.distributions.Chi2(
+            torch.as_tensor(student_t_dof, dtype=pred.dtype, device=pred.device)
+        ).sample((pred_flat.shape[0], num_samples))
+        samples = pred_flat.unsqueeze(1) + (
+            samples - pred_flat.unsqueeze(1)
+        ) * torch.sqrt(student_t_dof / chi).unsqueeze(-1)
 
     # E ||Y - y_true||
     term1 = torch.norm(samples - target_flat.unsqueeze(1), dim=-1).mean(dim=1)
@@ -177,6 +191,58 @@ def energy_score(
 
     score = term1 - 0.5 * term2
     return score.mean()
+
+
+def isotropic_sliced_crps(
+    pred: Tensor,
+    scale: Tensor,
+    target: Tensor,
+    *,
+    num_directions: int = 32,
+    num_samples: int = 64,
+    distribution: str = "gaussian",
+    student_t_dof: float = 5.0,
+) -> Tensor:
+    """Rotation-invariant Monte Carlo sliced CRPS.
+
+    Each random direction uses the one-dimensional projection of the predicted
+    elliptical distribution.  Averaging over uniformly sampled sphere
+    directions makes the diagnostic independent of the chosen output basis and
+    exposes orientation errors that aggregate Energy Score can underweight.
+    """
+    if num_directions < 1 or num_samples < 2:
+        raise ValueError("num_directions must be positive and num_samples >= 2")
+    if distribution not in {"gaussian", "student_t"}:
+        raise ValueError("distribution must be 'gaussian' or 'student_t'")
+    if distribution == "student_t" and student_t_dof <= 0:
+        raise ValueError("student_t_dof must be positive")
+    *batch, d = pred.shape
+    pred_flat = pred.reshape(-1, d)
+    target_flat = target.reshape(-1, d)
+    scale_flat = scale.reshape(-1, d, d)
+    directions = torch.randn(
+        num_directions, d, dtype=pred.dtype, device=pred.device
+    )
+    directions = directions / torch.linalg.vector_norm(directions, dim=-1, keepdim=True)
+    projected_mean = pred_flat @ directions.T
+    projected_target = target_flat @ directions.T
+    projected_scale = torch.einsum("nd,bde,ne->bn", directions, scale_flat, directions)
+    projected_scale = projected_scale.clamp_min(torch.finfo(pred.dtype).eps).sqrt()
+    noise = torch.randn(
+        pred_flat.shape[0], num_directions, num_samples,
+        dtype=pred.dtype, device=pred.device
+    )
+    samples = projected_mean.unsqueeze(-1) + projected_scale.unsqueeze(-1) * noise
+    if distribution == "student_t":
+        chi = torch.distributions.Chi2(
+            torch.as_tensor(student_t_dof, dtype=pred.dtype, device=pred.device)
+        ).sample((pred_flat.shape[0], num_directions, num_samples))
+        samples = projected_mean.unsqueeze(-1) + (
+            samples - projected_mean.unsqueeze(-1)
+        ) * torch.sqrt(student_t_dof / chi)
+    first = (samples - projected_target.unsqueeze(-1)).abs().mean(-1)
+    pairwise = (samples.unsqueeze(-1) - samples.unsqueeze(-2)).abs().mean((-1, -2))
+    return (first - 0.5 * pairwise).mean()
 
 
 def covariance_relative_error(pred_scale: Tensor, true_scale: Tensor) -> Tensor:
@@ -216,6 +282,129 @@ def whitened_residual_covariance(
     )
     whitened = torch.matmul(z.unsqueeze(-1), z.unsqueeze(-2))
     return torch.trace(whitened.mean(dim=0))
+
+
+def symmetric_whitened_residuals(
+    pred: Tensor,
+    target: Tensor,
+    scale: Tensor,
+) -> Tensor:
+    """Return coordinate-independent symmetric-whitened residuals.
+
+    Unlike triangular (Cholesky) whitening, the principal inverse square root
+    transforms by conjugation under every orthogonal change of basis.  This is
+    therefore the appropriate primitive for angular/equivariant calibration
+    diagnostics.  ``scale`` is the Student-t scale matrix when used with a
+    Student-t model; the function itself does not apply the ``nu/(nu-2)``
+    covariance factor.
+    """
+    if pred.shape != target.shape or scale.ndim < 2:
+        raise ValueError("pred, target, and scale have incompatible shapes")
+    if scale.shape[-2:] != (pred.shape[-1], pred.shape[-1]):
+        raise ValueError("scale matrix dimension does not match predictions")
+    if scale.ndim == 2:
+        scale = scale.expand(*pred.shape[:-1], pred.shape[-1], pred.shape[-1])
+    elif scale.shape[:-2] != pred.shape[:-1]:
+        raise ValueError("pred, target, and scale have incompatible batch shapes")
+    eigenvalues, eigenvectors = torch.linalg.eigh(scale)
+    if bool((eigenvalues <= 0).any()):
+        raise ValueError("scale must be positive definite")
+    inv_sqrt = torch.matmul(
+        eigenvectors * eigenvalues.rsqrt().unsqueeze(-2),
+        eigenvectors.transpose(-1, -2),
+    )
+    residual = target - pred
+    return torch.matmul(inv_sqrt, residual.unsqueeze(-1)).squeeze(-1)
+
+
+def student_t_radial_pit(
+    pred: Tensor,
+    target: Tensor,
+    scale: Tensor,
+    nu: float,
+) -> Tensor:
+    """Probability integral transform of Student-t radial distances.
+
+    For a correctly specified ``d``-variate Student-t scale matrix,
+    ``q / d`` follows ``F(d, nu)``.  SciPy is used only for the scalar CDF,
+    keeping the matrix algebra in torch and making the convention explicit.
+    """
+    if nu <= 0:
+        raise ValueError("nu must be positive")
+    from scipy.stats import f
+
+    q = mahalanobis_distance_squared(target - pred, scale)
+    d = pred.shape[-1]
+    values = f.cdf((q / float(d)).detach().cpu().numpy(), dfn=float(d), dfd=float(nu))
+    return torch.as_tensor(values, dtype=q.dtype, device=q.device)
+
+
+def whitened_angular_defect(
+    pred: Tensor,
+    target: Tensor,
+    scale: Tensor,
+    *,
+    nu: float | None = None,
+) -> Tensor:
+    """Frobenius angular/shape defect after symmetric whitening.
+
+    The expected whitened second moment is ``I`` for a Gaussian and
+    ``nu/(nu-2) I`` for a Student-t with ``nu > 2``.  The returned scalar is
+    invariant to orthogonal coordinate changes and separates shape/orientation
+    error from radial scale error only when interpreted together with PIT.
+    """
+    if nu is not None and nu <= 2:
+        raise ValueError("nu must be greater than 2 for a finite second moment")
+    z = symmetric_whitened_residuals(pred, target, scale)
+    expected = 1.0 if nu is None else float(nu) / (float(nu) - 2.0)
+    moment = torch.matmul(z.transpose(-1, -2), z) if z.ndim == 2 else None
+    if moment is None:
+        outer = z.unsqueeze(-1) * z.unsqueeze(-2)
+        moment = outer.reshape(-1, z.shape[-1], z.shape[-1]).mean(dim=0)
+    else:
+        moment = moment / z.shape[0]
+    identity = torch.eye(z.shape[-1], dtype=z.dtype, device=z.device)
+    return torch.linalg.matrix_norm(moment / expected - identity)
+
+
+def irrep_resolved_whitening_defect(
+    pred: Tensor,
+    target: Tensor,
+    scale: Tensor,
+    basis,
+    *,
+    nu: float = 5.0,
+) -> dict[str, float]:
+    """Project the whitened second-moment defect onto compiled irrep blocks.
+
+    ``basis`` is an ``O3SymmetricOperatorBasis`` (or compatible object).  The
+    output reports isotypic norms; callers should treat individual multiplicity
+    copies as basis-dependent unless a canonical multiplicity basis is declared.
+    """
+    if nu <= 2:
+        raise ValueError("nu must be greater than 2")
+    z = symmetric_whitened_residuals(pred, target, scale)
+    d = z.shape[-1]
+    outer = z.unsqueeze(-1) * z.unsqueeze(-2)
+    expected = float(nu) / (float(nu) - 2.0)
+    defect = outer.reshape(-1, d, d).mean(dim=0) / expected
+    defect = defect - torch.eye(d, dtype=z.dtype, device=z.device)
+    # Compiled bases are usually registered on the model device while audit
+    # tensors may be materialized on CPU (or vice versa).  Project with an
+    # explicitly colocated buffer instead of mutating the model module.
+    basis_tensor = basis.basis.to(device=defect.device, dtype=defect.dtype)
+    coeff = torch.einsum("ij,qij->q", defect, basis_tensor)
+    records: dict[str, float] = {}
+    offset = 0
+    for multiplicity, irrep in basis.operator_irreps:
+        width = int(multiplicity) * (2 * int(irrep.l) + 1)
+        block = coeff[offset : offset + width]
+        key = f"{int(irrep.l)}{ '+' if int(irrep.p) == 1 else '-' }"
+        records[key] = float(torch.linalg.vector_norm(block).item())
+        offset += width
+    if offset != coeff.numel():
+        raise RuntimeError("compiled irrep basis dimension does not match coefficients")
+    return records
 
 
 def covariance_spectrum_diagnostics(

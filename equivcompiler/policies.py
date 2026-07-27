@@ -121,28 +121,93 @@ class SpectralWindowCovariance(OperatorFamilySpec):
 
 
 @dataclass(frozen=True)
+class CenteredSpectralWindowCovariance(OperatorFamilySpec):
+    """Full scatter family with independent volume and shape bounds."""
+
+    shape_min: float = -2.0
+    shape_max: float = 2.0
+    volume_min: float = -8.0
+    volume_max: float = 8.0
+
+    def __post_init__(self) -> None:
+        if not self.shape_min < self.shape_max:
+            raise ValueError("shape_min must be smaller than shape_max")
+        if not self.volume_min < self.volume_max:
+            raise ValueError("volume_min must be smaller than volume_max")
+
+    def compile(self, output: O3IrrepsSpec) -> OperatorFamilyPlan:
+        parameter = SymmetricSquareExpr(IrrepsExpr(output.irreps, "output"))
+        symmetric = OperatorIR.symmetric_operator(
+            parameter=OperatorIR.parameter("operator"),
+            coordinate_space="output_representation",
+            output_irreps=str(output.irreps),
+        )
+        return OperatorFamilyPlan(
+            kind="centered_spectral_window",
+            output_irreps=output.irreps,
+            parameter_bindings=(
+                ParameterBinding("operator", parameter, "covariance_projection"),
+            ),
+            parameter_count=output.dim * (output.dim + 1) // 2,
+            domain="scatter",
+            assembly=OperatorIR.spectral_positive(
+                symmetric,
+                map="centered_spectral_window",
+                shape_min=float(self.shape_min),
+                shape_max=float(self.shape_max),
+                volume_min=float(self.volume_min),
+                volume_max=float(self.volume_max),
+            ),
+            relation_to_full=FamilyRelation.STRICT_SUBSET,
+            restriction="independent_log_volume_and_centered_log_shape_windows",
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "kind": "centered_spectral_window_covariance",
+            "shape_min": self.shape_min,
+            "shape_max": self.shape_max,
+            "volume_min": self.volume_min,
+            "volume_max": self.volume_max,
+            "maximum_condition_number": float(math.exp(self.shape_max - self.shape_min)),
+        }
+
+
+@dataclass(frozen=True)
 class LowRankCovariance(OperatorFamilySpec):
     """Exact low-rank-plus-isotropic scatter subfamily."""
 
     rank: int = 8
 
     def __post_init__(self) -> None:
-        if self.rank < 1:
-            raise ValueError("rank must be positive")
+        if self.rank < 0:
+            raise ValueError("rank must be nonnegative")
 
     def compile(self, output: O3IrrepsSpec) -> OperatorFamilyPlan:
         rank = self.rank
         base = IrrepsExpr(output.irreps, "output")
-        factor_expression = RepeatedExpr(base, rank)
         scale_expression = TrivialScalarsExpr(1)
         isotropic = OperatorIR.positive_scalar_identity(
             OperatorIR.parameter("scale"), dimension=output.dim, minimum=0.0
         )
+        if rank == 0:
+            return OperatorFamilyPlan(
+                kind="low_rank",
+                output_irreps=output.irreps,
+                parameter_bindings=(
+                    ParameterBinding("scale", scale_expression, "scale_projection"),
+                ),
+                parameter_count=1,
+                domain="scatter",
+                assembly=isotropic,
+                relation_to_full=FamilyRelation.STRICT_SUBSET,
+                rank=0,
+                restriction="isotropic_scatter_rank_zero",
+            )
+        factor_expression = RepeatedExpr(base, rank)
         gram = OperatorIR.gram(
             OperatorIR.equivariant_factor(
-                OperatorIR.parameter("factor"),
-                rank=rank,
-                output_irreps=str(output.irreps),
+                OperatorIR.parameter("factor"), rank=rank, output_irreps=str(output.irreps)
             )
         )
         return OperatorFamilyPlan(
@@ -189,6 +254,7 @@ class IsotypicBlockCovariance(OperatorFamilySpec):
                             "blocks", start=cursor, stop=cursor + block_count
                         ),
                         dimension=multiplicity,
+                        minimum=0.0,
                     ),
                     irrep=str(irrep),
                     irrep_dimension=irrep.dim,

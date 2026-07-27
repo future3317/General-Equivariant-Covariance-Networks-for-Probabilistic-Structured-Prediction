@@ -4,6 +4,7 @@ from spd_maps.base import SPDMap
 from spd_maps.matrix_exp import MatrixExponentialMap
 from spd_maps.matrix_softplus import SpectralSoftplusMap
 from spd_maps.spectral_window import SpectralWindowMap
+from spd_maps.centered_spectral_window import CenteredSpectralWindowMap
 from spd_maps.square_plus_identity import SquarePlusIdentityMap
 from spd_maps.precision_exp import PrecisionExponentialMap
 from spd_maps.low_rank import LowRankPlusIsotropicMap
@@ -18,6 +19,7 @@ __all__ = [
     "MatrixExponentialMap",
     "SpectralSoftplusMap",
     "SpectralWindowMap",
+    "CenteredSpectralWindowMap",
     "SquarePlusIdentityMap",
     "PrecisionExponentialMap",
     "LowRankPlusIsotropicMap",

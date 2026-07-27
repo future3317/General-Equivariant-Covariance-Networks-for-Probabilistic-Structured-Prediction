@@ -89,8 +89,10 @@ class Rank2CartesianSTFOperatorBasis(torch.nn.Module):
         canonical_basis = self._build_canonical_basis(
             cartesian, stf2_basis, projector_l4.reshape(9, 5, 5)
         )
-        spherical = O3SymmetricOperatorBasis(RANK2_OUTPUT_IRREPS)
-        spherical_basis = spherical.basis.to(dtype=torch.float64)
+        spherical = O3SymmetricOperatorBasis(
+            RANK2_OUTPUT_IRREPS, dtype=torch.float64
+        )
+        spherical_basis = spherical.basis
         components_to_irreps = torch.einsum(
             "qij,cij->qc", spherical_basis, canonical_basis
         )

@@ -17,7 +17,15 @@ from evaluation.temperature import (
     fit_temperature,
     scale_nll,
 )
-from scripts.generate_dielectric_figures import collect_predictions, load_model
+from scripts.dielectric_runtime import (
+    collect_dielectric_predictions,
+    configure_inference_contract,
+    inference_contract_from_args,
+    inference_contract_hash,
+    load_dielectric_checkpoint,
+    load_dielectric_data_args,
+    load_run_record,
+)
 
 
 def main() -> None:
@@ -27,7 +35,11 @@ def main() -> None:
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
     checkpoint_dir = Path(args.checkpoint_dir)
-    model, train_args = load_model(checkpoint_dir, args.device)
+    model, _, _ = load_dielectric_checkpoint(checkpoint_dir, args.device)
+    train_args = load_dielectric_data_args(checkpoint_dir)
+    record = load_run_record(checkpoint_dir)
+    contract = record.get("inference_contract") or inference_contract_from_args(train_args, args.device)
+    configure_inference_contract(contract)
     loaders = get_dielectric_irreps_loaders(
         data_dir=train_args.data_dir,
         batch_size=train_args.batch_size,
@@ -40,8 +52,8 @@ def main() -> None:
         shard_cache_size=getattr(train_args, "shard_cache_size", 2),
     )
     val_loader, test_loader = loaders[1], loaders[2]
-    val = collect_predictions(model, val_loader, args.device)
-    test = collect_predictions(model, test_loader, args.device)
+    val = collect_dielectric_predictions(model, val_loader, args.device, inference_contract=contract)
+    test = collect_dielectric_predictions(model, test_loader, args.device, inference_contract=contract)
     distribution = getattr(train_args, "distribution", "gaussian")
     dof = getattr(train_args, "student_t_dof", 5.0)
     temperature = fit_temperature(
@@ -69,6 +81,8 @@ def main() -> None:
         "eval_split": "test",
         "distribution": distribution,
         "student_t_dof": dof,
+        "inference_contract": contract,
+        "inference_contract_hash": inference_contract_hash(contract),
         "temperature": temperature,
         "validation_nll_before": float(scale_nll(
             val["mu_irreps"], val["y_irreps"], val["scale_irreps"],

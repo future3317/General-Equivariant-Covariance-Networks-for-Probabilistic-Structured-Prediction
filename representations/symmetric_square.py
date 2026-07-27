@@ -71,12 +71,22 @@ class O3SymmetricOperatorBasis(torch.nn.Module):
     ``V \\otimes V``.
     """
 
-    def __init__(self, output_irreps: o3.Irreps):
+    def __init__(
+        self, output_irreps: o3.Irreps, *, dtype: torch.dtype | None = None
+    ):
         super().__init__()
         self.output_irreps = o3.Irreps(output_irreps)
         self._output_dim = self.output_irreps.dim
 
-        rtp = o3.ReducedTensorProducts("ij=ji", i=self.output_irreps)
+        requested_dtype = dtype or torch.get_default_dtype()
+        previous_dtype = torch.get_default_dtype()
+        if requested_dtype != previous_dtype:
+            torch.set_default_dtype(requested_dtype)
+        try:
+            rtp = o3.ReducedTensorProducts("ij=ji", i=self.output_irreps)
+        finally:
+            if requested_dtype != previous_dtype:
+                torch.set_default_dtype(previous_dtype)
         self._operator_irreps = rtp.irreps_out
         self._operator_dim = self._operator_irreps.dim
 
@@ -90,7 +100,7 @@ class O3SymmetricOperatorBasis(torch.nn.Module):
                 self._operator_dim, self._output_dim, self._output_dim
             )
 
-        self.register_buffer("_basis", basis)
+        self.register_buffer("_basis", basis.to(dtype=requested_dtype))
 
     @property
     def operator_irreps(self) -> o3.Irreps:

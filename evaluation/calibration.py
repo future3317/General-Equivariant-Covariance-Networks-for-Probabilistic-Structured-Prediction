@@ -7,6 +7,21 @@ import torch
 from scipy.stats import chi2
 
 
+def marginal_interval_quantile(
+    level: float, *, reference: str = "gaussian", student_t_dof: float = 5.0
+) -> float:
+    """Return the central marginal quantile for a scale coordinate."""
+    if not 0.0 < level < 1.0:
+        raise ValueError("level must lie in (0, 1)")
+    if reference == "gaussian":
+        return float(torch.distributions.Normal(0.0, 1.0).icdf(torch.tensor((1.0 + level) / 2.0)))
+    if reference == "student_t" and student_t_dof > 0:
+        from scipy.stats import t as student_t
+
+        return float(student_t.ppf((1.0 + level) / 2.0, student_t_dof))
+    raise ValueError("reference must be gaussian or student_t with positive dof")
+
+
 def mahalanobis_distances(
     pred: torch.Tensor,
     target: torch.Tensor,
@@ -46,8 +61,8 @@ def calibration_error(
             ``[0.1, 0.2, ..., 0.9]``.
 
     Returns:
-        Dictionary with ``ece`` (expected calibration error) and
-        ``ace`` (absolute calibration error) in percentage points.
+        Dictionary with signed calibration bias and MACE.  The historical
+        ``ece``/``ace`` keys remain as compatibility aliases.
     """
     if confidence_levels is None:
         confidence_levels = [0.1 * i for i in range(1, 10)]
@@ -72,12 +87,14 @@ def calibration_error(
     observed = np.array(observed)
     expected = np.array(confidence_levels)
 
-    ece = float(np.mean(observed - expected))
-    ace = float(np.mean(np.abs(observed - expected)))
+    signed_bias = float(np.mean(observed - expected))
+    mace = float(np.mean(np.abs(observed - expected)))
 
     return {
-        "ece": ece,
-        "ace": ace,
+        "signed_bias": signed_bias,
+        "mace": mace,
+        "ece": signed_bias,
+        "ace": mace,
         "confidence_levels": confidence_levels,
         "observed_coverages": observed.tolist(),
     }

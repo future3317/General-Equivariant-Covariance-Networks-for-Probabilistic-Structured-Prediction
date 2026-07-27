@@ -16,18 +16,14 @@ import numpy as np
 import torch
 from matplotlib.colors import Normalize
 from scipy.stats import beta as beta_dist, t as student_t_dist
-from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from data.dielectric_dataset import get_dielectric_irreps_loaders
 from data.representation_metrics import transformed_spectral_bounds
 from data.tensor_conversions import irreps_to_km
-from equivcompiler import FeatureSpec, FullCovariance, SpectralWindowCovariance, plan_readout
 from evaluation.calibration import calibration_error, qq_data
 from evaluation.metrics import empirical_coverage, mahalanobis_distance_squared
-from models import EquivariantBackbone
-from spd_maps import RepresentationMetricMap
 from plotting import (
     COLORS,
     DENSITY_CMAP,
@@ -37,85 +33,14 @@ from plotting import (
     save_figure,
     setup_tpami_style,
 )
-from scripts._common import tensor_product_kwargs
-
-
-def load_model(checkpoint_dir: Path, device: str):
-    """Reconstruct and load the dielectric model from a checkpoint directory."""
-    with open(checkpoint_dir / "args.json") as f:
-        args = argparse.Namespace(**json.load(f))
-
-    backbone = EquivariantBackbone(
-        hidden_dim=args.hidden_dim,
-        lmax=args.lmax,
-        num_layers=args.num_layers,
-        atom_feature_dim=49,
-        num_basis=args.num_basis,
-        atom_features=args.atom_features,
-        **tensor_product_kwargs(args),
-    )
-    parameterization = args.covariance_parameterization
-    covariance = (
-        FullCovariance()
-        if parameterization == "matrix_exp"
-        else SpectralWindowCovariance(
-            args.log_variance_min,
-            args.log_variance_max,
-        )
-    )
-    model = plan_readout(
-        FeatureSpec.from_backbone(backbone),
-        output="0e + 2e",
-        covariance=covariance,
-        distribution=getattr(args, "distribution", "gaussian"),
-        student_t_dof=getattr(args, "student_t_dof", 5.0),
-        output_scope="global",
-    ).bind(backbone).to(device)
-    if getattr(args, "representation_metric", "none") == "block_auto":
-        metric = torch.tensor(
-            [float(args.metric_scalar)] + [float(args.metric_l2)] * 5,
-            dtype=torch.float32,
-            device=device,
-        )
-        model.spd_map = RepresentationMetricMap(model.spd_map, metric).to(device)
-
-    state = torch.load(checkpoint_dir / "best_model.pt", map_location=device)
-    model.load_state_dict(state)
-    model.eval()
-    return model, args
-
-
-@torch.inference_mode()
-def collect_predictions(model, dataloader, device):
-    """Collect test predictions in likelihood coordinates.
-
-    The learned generator remains FP32.  For calibration and declared spectral
-    bounds, we materialize the identical spectral map in FP64 to avoid a
-    finite-precision eigendecomposition artifact at the smallest variance.
-    """
-    all_mu = []
-    all_scale = []
-    all_y_irreps = []
-    all_y_km = []
-
-    for batch in tqdm(dataloader, desc="Evaluating", leave=False):
-        batch = batch.to(device)
-        if batch.edge_index is None or batch.edge_index.numel() == 0:
-            continue
-        result = model(batch)
-        if model.spd_map is None:
-            raise TypeError("dielectric figures require a probabilistic SPD map")
-        all_mu.append(result["mu"].double().cpu())
-        all_scale.append(model.spd_map(result["params"].double()).cpu())
-        all_y_irreps.append(batch.y_irreps.double().cpu())
-        all_y_km.append(batch.y_km.double().cpu())
-
-    return {
-        "mu_irreps": torch.cat(all_mu, dim=0),
-        "scale_irreps": torch.cat(all_scale, dim=0),
-        "y_irreps": torch.cat(all_y_irreps, dim=0),
-        "y_km": torch.cat(all_y_km, dim=0),
-    }
+from scripts.dielectric_runtime import (
+    collect_dielectric_predictions,
+    configure_inference_contract,
+    inference_contract_from_args,
+    load_run_record,
+    load_dielectric_checkpoint,
+    load_dielectric_data_args,
+)
 
 
 def plot_training_curves(history: list[dict], save_path: Path) -> None:
@@ -532,6 +457,7 @@ def plot_spectral_diagnostics(
     scale: torch.Tensor,
     log_variance_bounds: tuple[float, float] | None,
     save_path: Path,
+    condition_log_bound: float | None = None,
 ) -> dict[str, float]:
     """Plot covariance-spectrum utilization and condition-number distribution."""
     setup_tpami_style()
@@ -574,8 +500,10 @@ def plot_spectral_diagnostics(
         linewidth=2.3,
         label="Empirical CDF",
     )
-    if log_variance_bounds is not None:
-        upper_condition = np.exp(log_variance_bounds[1] - log_variance_bounds[0])
+    if condition_log_bound is None and log_variance_bounds is not None:
+        condition_log_bound = log_variance_bounds[1] - log_variance_bounds[0]
+    if condition_log_bound is not None:
+        upper_condition = np.exp(condition_log_bound)
         ax_condition.axvline(
             upper_condition,
             color=COLORS["champagne_gold"],
@@ -628,7 +556,13 @@ def main():
     if not (checkpoint_dir / "best_model.pt").exists():
         raise FileNotFoundError(f"best_model.pt not found in {checkpoint_dir}.")
 
-    model, train_args = load_model(checkpoint_dir, args.device)
+    model, _, _ = load_dielectric_checkpoint(checkpoint_dir, args.device)
+    train_args = load_dielectric_data_args(checkpoint_dir)
+    record = load_run_record(checkpoint_dir)
+    inference_contract = record.get("inference_contract") or inference_contract_from_args(
+        train_args, args.device
+    )
+    configure_inference_contract(inference_contract)
 
     _, _, test_loader = get_dielectric_irreps_loaders(
         data_dir=train_args.data_dir,
@@ -642,7 +576,9 @@ def main():
         shard_cache_size=getattr(train_args, "shard_cache_size", 2),
     )
 
-    preds = collect_predictions(model, test_loader, args.device)
+    preds = collect_dielectric_predictions(
+        model, test_loader, args.device, inference_contract=inference_contract
+    )
     pred_km = irreps_to_km(preds["mu_irreps"]).numpy()
     target_km = preds["y_km"].numpy()
 
@@ -673,11 +609,24 @@ def main():
         preds["scale_irreps"],
         output_dir / "dielectric_risk_coverage",
     )
-    bounds = (
-        (train_args.log_variance_min, train_args.log_variance_max)
-        if train_args.covariance_parameterization == "spectral_window"
-        else None
-    )
+    condition_log_bound = None
+    if train_args.covariance_parameterization == "spectral_window":
+        bounds = (train_args.log_variance_min, train_args.log_variance_max)
+        condition_log_bound = train_args.log_variance_max - train_args.log_variance_min
+    elif train_args.covariance_parameterization == "centered_spectral_window":
+        # The centered shape has zero mean after the map; its coordinate-wise
+        # deviation can therefore span [shape_min-shape_max,
+        # shape_max-shape_min] before the bounded log-volume is added.
+        shape_radius = train_args.shape_max - train_args.shape_min
+        bounds = (
+            train_args.volume_min - shape_radius,
+            train_args.volume_max + shape_radius,
+        )
+        # The common log-volume cancels in a condition number.  Only the
+        # centered trace-free shape range controls the certified ratio.
+        condition_log_bound = train_args.shape_max - train_args.shape_min
+    else:
+        bounds = None
     if bounds is not None and getattr(train_args, "representation_metric", "none") == "block_auto":
         metric = torch.tensor(
             [float(train_args.metric_scalar)] + [float(train_args.metric_l2)] * 5,
@@ -685,7 +634,8 @@ def main():
         )
         bounds = transformed_spectral_bounds(bounds, metric)
     spectrum = plot_spectral_diagnostics(
-        preds["scale_irreps"], bounds, output_dir / "dielectric_spectrum"
+        preds["scale_irreps"], bounds, output_dir / "dielectric_spectrum",
+        condition_log_bound=condition_log_bound,
     )
 
     # Print test calibration metrics.

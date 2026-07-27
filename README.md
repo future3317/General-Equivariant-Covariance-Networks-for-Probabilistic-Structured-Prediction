@@ -3,6 +3,11 @@
 TPAMI submission implementation for *A Basis-Agnostic Representation Compiler for Equivariant
 Probabilistic Structured Prediction*.
 
+The normative mathematical and inference semantics are fixed in
+[`mathematical_contract.md`](mathematical_contract.md). Code, experiments, and
+the manuscript reference this contract rather than maintaining parallel
+implicit definitions.
+
 The main abstraction is a representation compiler. Given a finite-dimensional
 orthogonal `O(3)` output representation `V` (or a Cartesian tensor symmetry
 formula), it constructs
@@ -16,6 +21,14 @@ covers every required angular momentum, parity, and irrep multiplicity. The
 same compilation result selects an execution basis, creates the mean/covariance
 head, covariance basis, SPD parameterization, and proper Gaussian or Student-t
 objective.
+
+The same representation layer can compile `Lambda^2(V)` for orientation
+calibration. `EquivariantIsospectralOrientationCalibrator` predicts a skew
+generator `K` in an orthonormal basis and applies `exp(K) S exp(K)^T`. It is
+zero-initialized and preserves SPD, eigenvalues, log-volume, and condition
+number. Dense orientation calibration is intended only for small outputs;
+high-multiplicity and graph-structured outputs must select an explicit
+block/low-rank policy with its compiled cost recorded.
 
 For heteroscedastic full covariance, `SpectralWindowCovariance(a, b)` compiles
 `Q diag(exp(a + (b-a) sigmoid(lambda))) Qᵀ`. This map is orthogonally
@@ -36,9 +49,37 @@ silently changing the requested representation or probabilistic family.
 
 The repository contains the complete ITOP data interface, geometry/feature
 cache builders, single-GPU study runner, and metric/evaluation code. A bounded
-server smoke run now exercises side/top OOD metrics; its artifacts are archived
+server smoke run exercises the side/top OOD path; its artifacts are archived
 with the TPAMI manuscript. It is development evidence only, not a replacement
 for the final full-data benchmark.
+
+## Final dielectric artifact
+
+The current learned result is one single-seed, single-GPU Materials Project
+run on an RTX 4090. It uses the strict `mean -> covariance -> joint` state
+machine, hidden width 32, `lmax=2`, two interactions, batch size 128, BF16
+backbone autocast, FP32 operator/NLL algebra, centered spectral control, and a
+Student-t objective with `nu=5`.
+
+Server checkpoint and audit directory:
+
+```text
+/home/workspace/lrh/RESULTS/Tpami/dielectric/unified_student_t_centered_b128_20260726/
+```
+
+The copied local audit is
+`experiments/results/unified_student_t_centered_b128_20260726/joint/`. Final
+test metrics are NLL `-2.6249`, physical MAE `2.0611`, log-Kelvin--Mandel MAE
+`0.1604`, Energy Score `0.4426`, sliced CRPS `0.1551`, and risk--coverage AUC
+`0.5628`. Joint ellipsoid coverage is `43.8/59.4/71.2/76.9%` at nominal
+`50/80/90/95%`; ACE is `0.1025`. The covariance basis and local Jacobian both
+have rank 21, while the angular whitening defect is `10.55` and the maximum
+condition number is `54.60` (the certified `exp(4)` bound).
+
+Validation-only scalar temperature calibration is intentionally **not applied**:
+it worsens held-out test NLL from approximately `-2.6230` to `-2.4247` (block
+calibration: `-2.3849`). Final figures are in
+`experiments/results/unified_student_t_centered_b128_20260726/joint/figures/`.
 
 ## What is automatic
 
@@ -57,6 +98,12 @@ for the final full-data benchmark.
 - Matrix-exponential full covariance, multiplicity-space block covariance, or
   low-rank-plus-isotropic covariance.
 - Proper multivariate Gaussian and Student-t negative log-likelihoods.
+- Symmetric whitening, Student-t radial PIT, angular whitening defect, and
+  irrep-resolved calibration diagnostics.
+- Gaussian/Student-t Energy Score and isotropic sliced CRPS for
+  orientation-sensitive proper-score evaluation.
+- Centered spectral windows that control log-volume separately from trace-free
+  log-shape.
 
 For repeated variables with a known graph, the compiler predicts equivariant
 unary and relational SPD precision potentials and assembles
@@ -364,8 +411,20 @@ symmetric-operator parameters and records that restriction in the report.
 ## Training
 
 ```bash
-# Rank-2 dielectric output; full covariance is selected explicitly.
-python -m scripts.train_dielectric --device cuda
+# Dielectric uses one immutable RunSpec across training, evaluation,
+# calibration, and figure generation.  Train the deterministic mean first.
+python -m scripts.train_dielectric --training_stage mean \
+  --save_dir /path/to/dielectric_mean --device cuda
+
+# Fit only the covariance projection from that exact mean checkpoint.
+python -m scripts.train_dielectric --training_stage covariance \
+  --init_checkpoint /path/to/dielectric_mean \
+  --save_dir /path/to/dielectric_covariance --device cuda
+
+# Jointly fine-tune from the covariance checkpoint (use a smaller explicit LR).
+python -m scripts.train_dielectric --training_stage joint --lr 1e-4 \
+  --init_checkpoint /path/to/dielectric_covariance \
+  --save_dir /path/to/dielectric_joint --device cuda
 
 # Optional one-time I/O conversion. Shard-aware batching preserves shuffle
 # while avoiding random per-graph file opens.
@@ -393,6 +452,10 @@ python -m scripts.train_dielectric \
 # floating-point reconstruction error is not reported as a spectral violation.
 python -m scripts.train_dielectric \
   --save_dir /path/to/dielectric_run --evaluate_only --device cuda
+
+# Legacy runs are made compatible only through this explicit, audited migration.
+python -m scripts.migrate_dielectric_run_spec \
+  --checkpoint_dir /path/to/legacy_dielectric_run
 
 # Rank-4 elasticity output; choose auto/full/block/low_rank.
 python -m scripts.train_elasticity \
@@ -424,8 +487,8 @@ python -m scripts.run_itop_study \
   --study_dir /home/workspace/lrh/RESULTS/Tpami/ITOP \
   --profile development --gpu 3 --dry_run
 
-# Remove --dry_run to execute. The final protocol uses 512 points and seeds
-# 42/43/44 on the same single GPU. Completed stages are skipped, interrupted
+# Remove --dry_run to execute. The final protocol uses 512 points and one
+# explicitly recorded seed on the same single GPU. Completed stages are skipped, interrupted
 # training resumes from last_state.pt, and patience is five validation epochs.
 python -m scripts.run_itop_study \
   --data_dir /home/workspace/lrh/DATA/Tpami/ITOP \

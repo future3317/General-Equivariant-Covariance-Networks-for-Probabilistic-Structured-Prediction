@@ -99,6 +99,22 @@ class SymmetricSquareExpr(RepExpr):
 
 
 @dataclass(frozen=True)
+class ExteriorSquareExpr(RepExpr):
+    """Symbolic exterior square used by orientation-calibration lowering."""
+
+    operand: RepExpr
+
+    def decompose_o3(self) -> DecomposedRep:
+        from representations.exterior_square import exterior_square_irreps
+
+        operand = self.operand.decompose_o3().irreps
+        return DecomposedRep("O3", exterior_square_irreps(operand))
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"kind": "exterior_square", "operand": self.operand.as_dict()}
+
+
+@dataclass(frozen=True)
 class RepeatedExpr(RepExpr):
     """Ordered copies of a representation, retaining multiplicity semantics."""
 

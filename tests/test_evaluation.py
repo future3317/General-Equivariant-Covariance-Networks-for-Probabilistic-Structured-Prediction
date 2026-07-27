@@ -12,10 +12,14 @@ from evaluation import (
     empirical_coverage,
     negative_log_likelihood_gaussian,
     energy_score,
+    isotropic_sliced_crps,
     covariance_relative_error,
     log_euclidean_error,
     eigenvalue_error,
     whitened_residual_covariance,
+    symmetric_whitened_residuals,
+    student_t_radial_pit,
+    whitened_angular_defect,
     covariance_spectrum_diagnostics,
     calibration_error,
     sharpness,
@@ -74,6 +78,24 @@ def test_energy_score_finite():
     assert score.item() > 0
 
 
+def test_student_t_energy_and_sliced_crps_are_finite():
+    mu, target, S = _make_gaussian_data(batch=12, d=4)
+    energy = energy_score(
+        mu, S, target, num_samples=24, distribution="student_t", student_t_dof=5.0
+    )
+    crps = isotropic_sliced_crps(
+        mu,
+        S,
+        target,
+        num_directions=12,
+        num_samples=24,
+        distribution="student_t",
+        student_t_dof=5.0,
+    )
+    assert torch.isfinite(energy)
+    assert torch.isfinite(crps)
+
+
 def test_covariance_relative_error_zero_when_equal():
     S = torch.randn(4, 6, 6)
     S = torch.matmul(S, S.transpose(-1, -2)) + 0.1 * torch.eye(6)
@@ -113,6 +135,38 @@ def test_whitened_residual_covariance_well_specified():
     S = torch.eye(d).unsqueeze(0).expand(batch, d, d)
     trace = whitened_residual_covariance(mu, target, S)
     assert trace.item() == pytest.approx(float(d), rel=0.1)
+
+
+def test_symmetric_whitening_is_orthogonal_coordinate_invariant():
+    torch.manual_seed(7)
+    residual = torch.randn(32, 3)
+    matrix = torch.randn(3, 3)
+    scale = matrix @ matrix.T + 0.5 * torch.eye(3)
+    q, _ = torch.linalg.qr(torch.randn(3, 3))
+    transformed = symmetric_whitened_residuals(
+        torch.zeros_like(residual) @ q.T,
+        residual @ q.T,
+        q @ scale @ q.T,
+    )
+    reference = symmetric_whitened_residuals(
+        torch.zeros_like(residual), residual, scale
+    )
+    assert torch.allclose(transformed, reference @ q.T, atol=1e-5, rtol=1e-5)
+
+
+def test_student_t_radial_pit_and_angular_defect_are_finite():
+    torch.manual_seed(11)
+    d, n, nu = 3, 2048, 5.0
+    scale = torch.eye(d).expand(n, d, d).clone()
+    normal = torch.randn(n, d)
+    chi = torch.distributions.Chi2(torch.tensor(nu)).sample((n,))
+    residual = normal * torch.sqrt(nu / chi).unsqueeze(-1)
+    pred = torch.zeros_like(residual)
+    pit = student_t_radial_pit(pred, residual, scale, nu)
+    assert torch.isfinite(pit).all()
+    assert abs(float(pit.mean()) - 0.5) < 0.04
+    defect = whitened_angular_defect(pred, residual, scale, nu=nu)
+    assert float(defect) < 0.15
 
 
 def test_calibration_error():

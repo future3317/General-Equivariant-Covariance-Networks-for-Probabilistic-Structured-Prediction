@@ -13,13 +13,6 @@ import torch
 import torch.optim as optim
 from tqdm import tqdm
 
-from equivcompiler import (
-    FeatureSpec,
-    FullCovariance,
-    SpectralWindowCovariance,
-    plan_readout,
-)
-from models import EquivariantBackbone
 from data.dielectric_dataset import get_dielectric_irreps_loaders
 from data.representation_metrics import (
     infer_rank2_block_metric,
@@ -37,8 +30,21 @@ from evaluation import (
     sharpness,
     whitened_residual_covariance,
 )
-from scripts._common import add_tensor_product_arguments, tensor_product_kwargs
-from spd_maps import RepresentationMetricMap
+from scripts._common import add_tensor_product_arguments
+from scripts.dielectric_runtime import (
+    DielectricRunSpec,
+    build_dielectric_model,
+    configure_inference_contract,
+    compilation_record_with_hash,
+    forward_dielectric,
+    inference_contract_from_args,
+    dataset_provenance,
+    load_dielectric_checkpoint,
+    load_run_record,
+    load_run_spec,
+    source_provenance,
+    write_run_spec,
+)
 
 
 def _set_seed(seed: int) -> None:
@@ -56,16 +62,12 @@ def _forward(
     use_bf16: bool,
     return_scale: bool = False,
 ):
-    """Run BF16 only through the backbone; keep SPD/NLL in FP32."""
-    if not use_bf16:
-        return model(batch, target=target, return_scale=return_scale)
-    with torch.autocast(device_type=batch.pos.device.type, dtype=torch.bfloat16):
-        node_features, graph_batch = model.backbone(batch)
-    return model.forward_from_features(
-        node_features.float(),
-        graph_batch,
-        target=target,
-        return_scale=return_scale,
+    """Compatibility wrapper around the unique inference runtime."""
+    contract = {
+        "backbone_precision": "bf16" if use_bf16 else "fp32",
+    }
+    return forward_dielectric(
+        model, batch, target=target, return_scale=return_scale, contract=contract
     )
 
 
@@ -110,6 +112,7 @@ def train_epoch(
     dataloader,
     optimizer,
     device,
+    training_stage: str,
     warmup_mse_weight: float = 0.0,
     non_blocking: bool = False,
     use_bf16: bool = False,
@@ -131,10 +134,10 @@ def train_epoch(
             target=batch.y_irreps,
             use_bf16=use_bf16,
         )
-        loss = result["loss"]
+        mse = torch.nn.functional.mse_loss(result["mu"], batch.y_irreps)
+        loss = mse if training_stage == "mean" else result["loss"]
 
         if warmup_mse_weight > 0.0:
-            mse = torch.nn.functional.mse_loss(result["mu"], batch.y_irreps)
             loss = loss + warmup_mse_weight * mse
 
         if not bool(torch.isfinite(loss.detach()).all()):
@@ -163,9 +166,11 @@ def validate(
     log_variance_bounds: tuple[float, float] | None = None,
     distribution: str = "gaussian",
     student_t_dof: float = 5.0,
+    training_stage: str = "joint",
 ):
     model.eval()
-    total_loss = 0.0
+    total_nll = 0.0
+    total_mse = 0.0
     total_phys_abs = 0.0
     total_log_abs = 0.0
     num_loss_samples = 0
@@ -188,7 +193,10 @@ def validate(
         if not bool(torch.isfinite(result["loss"].detach()).all()):
             raise FloatingPointError("non-finite dielectric validation loss")
         batch_size = batch.y_irreps.shape[0]
-        total_loss += result["loss"].item() * batch_size
+        total_nll += result["loss"].item() * batch_size
+        total_mse += torch.nn.functional.mse_loss(
+            result["mu"], batch.y_irreps
+        ).item() * batch_size
         num_loss_samples += batch_size
 
         total_phys_abs += physical_mae(result["mu"], batch.y_km).item() * batch_size
@@ -210,10 +218,12 @@ def validate(
             )
 
     metrics = {
-        "loss": total_loss / max(num_loss_samples, 1),
+        "nll": total_nll / max(num_loss_samples, 1),
+        "mean_mse": total_mse / max(num_loss_samples, 1),
         "phys_mae": total_phys_abs / max(num_mae_elements, 1),
         "log_mae": total_log_abs / max(num_mae_elements, 1),
     }
+    metrics["loss"] = metrics["mean_mse"] if training_stage == "mean" else metrics["nll"]
     if not diagnostics:
         return metrics
 
@@ -253,6 +263,65 @@ def validate(
     return metrics
 
 
+def _checkpoint_directory(path: str) -> str:
+    candidate = os.path.abspath(path)
+    return os.path.dirname(candidate) if os.path.isfile(candidate) else candidate
+
+
+def configure_training_stage(model, spec: DielectricRunSpec, args: argparse.Namespace) -> dict:
+    """Load the declared predecessor and expose exactly the stage parameters."""
+    stage = args.training_stage
+    expected_predecessor = {"mean": None, "covariance": "mean", "joint": "covariance"}
+    if stage not in expected_predecessor:
+        raise ValueError(f"unknown training stage: {stage}")
+    if stage == "mean" and args.init_checkpoint is not None:
+        raise ValueError("mean stage must start without --init_checkpoint")
+    if stage != "mean" and args.init_checkpoint is None:
+        raise ValueError(f"{stage} stage requires --init_checkpoint")
+
+    source_dir = None
+    if args.init_checkpoint is not None:
+        source_dir = _checkpoint_directory(args.init_checkpoint)
+        source_record = load_run_record(source_dir)
+        source_spec = DielectricRunSpec.from_dict(source_record["model"])
+        if source_spec != spec:
+            raise ValueError(
+                "init checkpoint has a different model semantic contract; "
+                "start a new stage with identical RunSpec fields"
+            )
+        if source_record.get("training_stage") != expected_predecessor[stage]:
+            raise ValueError(
+                f"{stage} stage requires a {expected_predecessor[stage]} checkpoint, "
+                f"got {source_record.get('training_stage')!r}"
+            )
+        source_model, _, _ = load_dielectric_checkpoint(source_dir, args.device)
+        model.load_state_dict(source_model.state_dict())
+
+    for parameter in model.parameters():
+        parameter.requires_grad_(stage != "covariance")
+    if stage == "covariance":
+        projection = getattr(model.joint_head, "covariance_projection", None)
+        if projection is None:
+            raise TypeError("compiled readout does not expose covariance_projection")
+        for parameter in projection.parameters():
+            parameter.requires_grad_(True)
+
+    trainable = [name for name, parameter in model.named_parameters() if parameter.requires_grad]
+    if not trainable:
+        raise RuntimeError(f"{stage} stage exposes no trainable parameters")
+    return {
+        "training_stage": stage,
+        "init_checkpoint": source_dir,
+        "frozen_parameter_names": [
+            name for name, parameter in model.named_parameters() if not parameter.requires_grad
+        ],
+        "trainable_parameter_names": trainable,
+        "trainable_parameter_count": sum(
+            parameter.numel() for parameter in model.parameters() if parameter.requires_grad
+        ),
+    }
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_dir", default=None)
@@ -270,15 +339,26 @@ def main():
     parser.add_argument("--weight_decay", type=float, default=1e-5)
     parser.add_argument(
         "--covariance_parameterization",
-        choices=("matrix_exp", "spectral_window"),
+        choices=("matrix_exp", "spectral_window", "centered_spectral_window"),
         default="spectral_window",
         help="SPD realization used identically for training, validation, and inference.",
     )
     parser.add_argument("--log_variance_min", type=float, default=-4.0)
     parser.add_argument("--log_variance_max", type=float, default=4.0)
+    parser.add_argument("--shape_min", type=float, default=-2.0)
+    parser.add_argument("--shape_max", type=float, default=2.0)
+    parser.add_argument("--volume_min", type=float, default=-8.0)
+    parser.add_argument("--volume_max", type=float, default=8.0)
     parser.add_argument("--num_epochs", type=int, default=100)
     parser.add_argument("--patience", type=int, default=15)
     parser.add_argument("--warmup_epochs", type=int, default=3)
+    parser.add_argument(
+        "--training_stage",
+        choices=("mean", "covariance", "joint"),
+        default="joint",
+        help="strict training state: deterministic mean, covariance fit, or joint fine-tuning",
+    )
+    parser.add_argument("--init_checkpoint", default=None)
     parser.add_argument(
         "--distribution",
         choices=("gaussian", "student_t"),
@@ -321,10 +401,43 @@ def main():
         "--device", default="cuda" if torch.cuda.is_available() else "cpu"
     )
     args = parser.parse_args()
+    if args.evaluate_only:
+        checkpoint_args_path = os.path.join(args.save_dir, "args.json")
+        if os.path.isfile(checkpoint_args_path):
+            # Reconstruct the exact training semantics before creating the
+            # model.  Only the runtime device and requested output directory
+            # are allowed to come from the evaluate-only invocation.
+            saved_args = json.loads(open(checkpoint_args_path, encoding="utf-8").read())
+            runtime_device = args.device
+            runtime_save_dir = args.save_dir
+            merged_args = vars(args).copy()
+            merged_args.update(saved_args)
+            merged_args["device"] = runtime_device
+            merged_args["save_dir"] = runtime_save_dir
+            merged_args["evaluate_only"] = True
+            args = argparse.Namespace(**merged_args)
     if args.covariance_parameterization == "spectral_window" and not (
         args.log_variance_min < args.log_variance_max
     ):
         parser.error("--log_variance_min must be smaller than --log_variance_max")
+    if args.covariance_parameterization == "centered_spectral_window" and not (
+        args.shape_min < args.shape_max and args.volume_min < args.volume_max
+    ):
+        parser.error("centered spectral bounds must be strictly increasing")
+    # A successor stage inherits every model-semantic field from its declared
+    # predecessor.  This prevents a default CLI value from silently changing
+    # the compiled representation, SPD map, or likelihood between stages.
+    if not args.evaluate_only and args.training_stage != "mean":
+        if args.init_checkpoint is None:
+            parser.error(f"--training_stage {args.training_stage} requires --init_checkpoint")
+        inherited_spec = load_run_spec(_checkpoint_directory(args.init_checkpoint))
+        for field, value in inherited_spec.as_dict().items():
+            setattr(args, field, value)
+    # The released dielectric graph cache contains an eight-coordinate radial
+    # basis.  Treat this as an explicit dataset contract rather than allowing
+    # a later opaque matrix-multiplication failure in the message-passing MLP.
+    if args.num_basis != 8:
+        parser.error("the dielectric graph cache requires --num_basis 8")
     args.data_dir = str(dataset_dir(args.data_dir, "mp_dielectric"))
     if (
         args.backbone_precision == "bf16"
@@ -337,10 +450,8 @@ def main():
         )
     _set_seed(args.seed)
     device = torch.device(args.device)
-    if device.type == "cuda":
-        torch.backends.cuda.matmul.allow_tf32 = args.allow_tf32
-        torch.backends.cudnn.allow_tf32 = args.allow_tf32
-        torch.backends.cudnn.benchmark = True
+    inference_contract = inference_contract_from_args(args, device)
+    configure_inference_contract(inference_contract)
 
     logger, experiment_name = setup_logger(args.save_dir)
     logger.info("=" * 60)
@@ -364,42 +475,43 @@ def main():
         rotation_probability=args.rotation_probability,
     )
 
-    backbone = EquivariantBackbone(
-        hidden_dim=args.hidden_dim,
-        lmax=args.lmax,
-        num_layers=args.num_layers,
-        atom_feature_dim=49,
-        num_basis=args.num_basis,
-        atom_features=args.atom_features,
-        **tensor_product_kwargs(args),
-    )
-    covariance = (
-        FullCovariance()
-        if args.covariance_parameterization == "matrix_exp"
-        else SpectralWindowCovariance(
-            args.log_variance_min,
-            args.log_variance_max,
-        )
-    )
-    plan = plan_readout(
-        FeatureSpec.from_backbone(backbone),
-        output="0e + 2e",
-        covariance=covariance,
-        distribution=args.distribution,
-        student_t_dof=args.student_t_dof,
-        output_scope="global",
-    )
-    compilation = plan.compilation
-    model = plan.bind(backbone).to(device)
-    if args.representation_metric == "block_auto":
+    if args.representation_metric == "block_auto" and not args.evaluate_only:
         metric, metric_stats = infer_rank2_block_metric(
             train_loader.dataset, max_samples=args.metric_sample_limit
         )
         args.metric_scalar = metric_stats["metric_scalar"]
         args.metric_l2 = metric_stats["metric_l2"]
         args.metric_stats = metric_stats
-        model.spd_map = RepresentationMetricMap(model.spd_map, metric).to(device)
         logger.info("Representation metric: %s", metric_stats)
+    if args.evaluate_only:
+        model, spec, compilation = load_dielectric_checkpoint(args.save_dir, device)
+        record = load_run_record(args.save_dir)
+        inference_contract = record.get("inference_contract") or inference_contract
+        configure_inference_contract(inference_contract)
+    else:
+        spec = DielectricRunSpec.from_namespace(args)
+        model, compilation = build_dielectric_model(spec, device)
+    stage_record = None
+    if not args.evaluate_only:
+        stage_record = configure_training_stage(model, spec, args)
+        write_run_spec(
+            args.save_dir,
+            spec,
+            compilation=compilation.as_dict(),
+            training_stage=args.training_stage,
+            init_checkpoint=stage_record["init_checkpoint"],
+            inference_contract=inference_contract,
+            provenance={
+                "source": source_provenance(
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                ),
+                "dataset": dataset_provenance(args.data_dir),
+            },
+        )
+        with open(os.path.join(args.save_dir, "stage.json"), "w") as f:
+            json.dump(stage_record, f, indent=2)
+        with open(os.path.join(args.save_dir, "args.json"), "w") as f:
+            json.dump(vars(args), f, indent=2)
     if args.compile_tp:
         model.backbone.compile_tensor_products(dynamic=True)
 
@@ -434,8 +546,9 @@ def main():
             use_bf16=use_bf16,
             diagnostics=True,
             log_variance_bounds=bounds,
-            distribution=args.distribution,
-            student_t_dof=args.student_t_dof,
+            distribution=spec.distribution,
+            student_t_dof=spec.student_t_dof,
+            training_stage=args.training_stage,
         )
         test_metrics = validate(
             model,
@@ -445,8 +558,9 @@ def main():
             use_bf16=use_bf16,
             diagnostics=True,
             log_variance_bounds=bounds,
-            distribution=args.distribution,
-            student_t_dof=args.student_t_dof,
+            distribution=spec.distribution,
+            student_t_dof=spec.student_t_dof,
+            training_stage=args.training_stage,
         )
         with open(os.path.join(args.save_dir, "validation_metrics.json"), "w") as f:
             json.dump(validation_metrics, f, indent=2)
@@ -455,18 +569,13 @@ def main():
         return validation_metrics, test_metrics
 
     if args.evaluate_only:
-        checkpoint_path = os.path.join(args.save_dir, "best_model.pt")
-        if not os.path.isfile(checkpoint_path):
-            raise FileNotFoundError(f"missing checkpoint: {checkpoint_path}")
-        model.load_state_dict(torch.load(checkpoint_path, map_location=device))
         validation_metrics, test_metrics = write_final_evaluations()
-        # Keep evaluate-only runs self-describing as well.  This is required
-        # by downstream calibration/figure scripts and avoids losing the
-        # exact reconstruction contract after an interrupted training job.
-        with open(os.path.join(args.save_dir, "args.json"), "w") as f:
-            json.dump(vars(args), f, indent=2)
+        # ``args.json`` is the immutable training contract.  Never overwrite
+        # it from an evaluate-only invocation: doing so would replace the
+        # checkpoint's parameterization/distribution with CLI defaults and
+        # make the next evaluation mathematically inconsistent.
         with open(os.path.join(args.save_dir, "compilation.json"), "w") as f:
-            json.dump(compilation.as_dict(), f, indent=2)
+            json.dump(compilation_record_with_hash(compilation.as_dict()), f, indent=2)
         logger.info(
             "Validation: loss=%.4f, phys_mae=%.4f, log_mae=%.4f",
             validation_metrics["loss"],
@@ -493,12 +602,13 @@ def main():
     history = []
 
     for epoch in range(args.num_epochs):
-        warmup_mse = 0.1 if epoch < args.warmup_epochs else 0.0
+        warmup_mse = 0.1 if args.training_stage == "joint" and epoch < args.warmup_epochs else 0.0
         train_loss = train_epoch(
             model,
             train_loader,
             optimizer,
             device,
+            args.training_stage,
             warmup_mse,
             non_blocking=non_blocking,
             use_bf16=use_bf16,
@@ -509,6 +619,7 @@ def main():
             device,
             non_blocking=non_blocking,
             use_bf16=use_bf16,
+            training_stage=args.training_stage,
         )
         scheduler.step(val_metrics["loss"])
 
@@ -543,10 +654,8 @@ def main():
         f"Test: loss={test_metrics['loss']:.4f}, phys_mae={test_metrics['phys_mae']:.4f}, log_mae={test_metrics['log_mae']:.4f}"
     )
 
-    with open(os.path.join(args.save_dir, "args.json"), "w") as f:
-        json.dump(vars(args), f, indent=2)
     with open(os.path.join(args.save_dir, "compilation.json"), "w") as f:
-        json.dump(compilation.as_dict(), f, indent=2)
+        json.dump(compilation_record_with_hash(compilation.as_dict()), f, indent=2)
     with open(os.path.join(args.save_dir, "history.json"), "w") as f:
         json.dump(history, f, indent=2)
 

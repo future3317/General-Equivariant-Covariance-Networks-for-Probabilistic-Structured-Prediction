@@ -16,8 +16,8 @@ class LowRankPlusIsotropicMap(SPDMap):
 
     def __init__(self, dim: int, rank: int, min_sigma2: float = 1e-4):
         super().__init__()
-        if dim < 1 or rank < 1:
-            raise ValueError("dim and rank must be positive")
+        if dim < 1 or rank < 0:
+            raise ValueError("dim must be positive and rank must be nonnegative")
         if min_sigma2 < 0:
             raise ValueError("min_sigma2 must be nonnegative")
         self.dim = dim
@@ -37,6 +37,8 @@ class LowRankPlusIsotropicMap(SPDMap):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Return ``L``, ``sigma2`` and the Cholesky factor of Woodbury ``M``."""
         L, sigma2 = self._unpack(params)
+        if self.rank == 0:
+            return L, sigma2, L.new_empty(*L.shape[:-2], 0, 0)
         gram = torch.matmul(L.transpose(-1, -2), L)
         identity = torch.eye(self.rank, device=params.device, dtype=params.dtype)
         system = identity + gram / sigma2[..., None, None]
@@ -51,6 +53,11 @@ class LowRankPlusIsotropicMap(SPDMap):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if residual.shape[-1] != self.dim:
             raise ValueError(f"residual last dim {residual.shape[-1]} != {self.dim}")
+        if self.rank == 0:
+            return (
+                self.dim * torch.log(sigma2),
+                residual.square().sum(-1) / sigma2,
+            )
         logdet = self.dim * torch.log(sigma2) + 2.0 * torch.log(
             torch.diagonal(cholesky, dim1=-2, dim2=-1)
         ).sum(-1)

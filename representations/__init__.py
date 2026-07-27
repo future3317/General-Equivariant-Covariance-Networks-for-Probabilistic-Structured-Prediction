@@ -5,6 +5,7 @@ from representations.symmetric_square import (
     O3SymmetricOperatorBasis,
     symmetric_square_irreps,
 )
+from representations.exterior_square import O3SkewOperatorBasis, exterior_square_irreps
 from representations.o3_irreps import O3IrrepsSpec
 from representations.cartesian_outputs import (
     rank2_symmetric_irreps,
@@ -52,6 +53,7 @@ from representations.representation_ir import (
     RepExpr,
     RepeatedExpr,
     SymmetricSquareExpr,
+    ExteriorSquareExpr,
     TrivialScalarsExpr,
 )
 from representations.operator_ir import (
@@ -72,6 +74,8 @@ __all__ = [
     "O3IrrepsSpec",
     "O3SymmetricOperatorBasis",
     "symmetric_square_irreps",
+    "O3SkewOperatorBasis",
+    "exterior_square_irreps",
     "rank2_symmetric_irreps",
     "rank4_elasticity_irreps",
     "O3AdaptiveLifting",
@@ -103,6 +107,7 @@ __all__ = [
     "IrrepsExpr",
     "DirectSumExpr",
     "SymmetricSquareExpr",
+    "ExteriorSquareExpr",
     "RepeatedExpr",
     "TrivialScalarsExpr",
     "InvariantMetricSpec",

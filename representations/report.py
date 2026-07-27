@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
@@ -102,6 +103,37 @@ def _readout_parameter_count(compilation: "O3Compilation") -> int:
     for binding in compilation.operator_family.parameter_bindings:
         count += _linear_parameter_count(active, binding.irreps)
     return count
+
+
+def _lifting_parameter_count(compilation: "O3Compilation") -> int:
+    plan = compilation.active_plan
+    if plan.depth == 0:
+        return _linear_parameter_count(plan.seed_irreps, plan.target_irreps)
+    contraction_rank = (
+        compilation.stf_contraction_rank
+        if compilation.backend == "cartesian_stf"
+        else None
+    )
+    return sum(
+        _linear_parameter_count(stage.irreps_in, stage.irreps_out)
+        + _tensor_product_parameter_count(
+            stage.irreps_in, plan.seed_irreps, stage.irreps_out, contraction_rank
+        )
+        for stage in plan.stages
+    )
+
+
+def _mean_parameter_count(compilation: "O3Compilation") -> int:
+    return _linear_parameter_count(
+        compilation.active_target_irreps, compilation.mean_irreps
+    )
+
+
+def _uncertainty_parameter_count(compilation: "O3Compilation") -> int:
+    return sum(
+        _linear_parameter_count(compilation.active_target_irreps, binding.irreps)
+        for binding in compilation.operator_family.parameter_bindings
+    )
 
 
 def _covariance_complexity(compilation: "O3Compilation") -> dict[str, Any]:
@@ -396,6 +428,14 @@ def build_compilation_report(
         "canonical_target_dimension": compilation.canonical_target_irreps.dim,
         "active_target_dimension": compilation.active_target_irreps.dim,
         "readout_trainable": _readout_parameter_count(compilation),
+        "shared_lifting": _lifting_parameter_count(compilation),
+        "mean_projection": _mean_parameter_count(compilation),
+        "uncertainty_projection": _uncertainty_parameter_count(compilation),
+        "readout_role_total": (
+            _lifting_parameter_count(compilation)
+            + _mean_parameter_count(compilation)
+            + _uncertainty_parameter_count(compilation)
+        ),
     }
     if executable is not None:
         parameter_counts["executable_trainable"] = sum(
@@ -505,9 +545,16 @@ def build_compilation_report(
             ),
             "parameter_counts": parameter_counts,
         },
+        # Hash the canonical compilation identity, excluding the hash field
+        # itself.  Reports are consumed as provenance artifacts, so leaving
+        # this field null would make two semantically different compilations
+        # indistinguishable to downstream runners.
         "compatibility_hash": None,
         "probability": probability,
         "output_scope": compilation.config.output_scope,
         "certificates": certificates,
     }
+    identity = {k: v for k, v in record.items() if k != "compatibility_hash"}
+    payload = json.dumps(identity, sort_keys=True, separators=(",", ":"), default=str)
+    record["compatibility_hash"] = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     return CompilationReport.from_dict(record)

@@ -4,6 +4,7 @@ import pytest
 import torch
 
 from spd_maps import (
+    CenteredSpectralWindowMap,
     MatrixExponentialMap,
     SpectralSoftplusMap,
     SpectralWindowMap,
@@ -121,3 +122,28 @@ def test_spectral_window_statistics_have_finite_gradients_at_repeated_eigenvalue
     (logdet + quadratic).sum().backward()
     assert torch.isfinite(generator.grad).all()
     assert torch.isfinite(residual.grad).all()
+
+
+def test_centered_spectral_window_separates_volume_and_conditioning():
+    torch.manual_seed(13)
+    A_raw = torch.randn(8, 4, 4)
+    A = 0.5 * (A_raw + A_raw.transpose(-1, -2))
+    spdm = CenteredSpectralWindowMap(shape_min=-1.0, shape_max=1.0)
+    scale = spdm(A)
+    eigenvalues = torch.linalg.eigvalsh(scale)
+    condition = eigenvalues[..., -1] / eigenvalues[..., 0]
+    assert torch.all(eigenvalues > 0)
+    assert float(condition.max()) <= float(torch.exp(torch.tensor(2.0))) + 1e-5
+    shifted = spdm(A + 10.0 * torch.eye(4))
+    shifted_eigenvalues = torch.linalg.eigvalsh(shifted)
+    shifted_condition = shifted_eigenvalues[..., -1] / shifted_eigenvalues[..., 0]
+    assert torch.allclose(condition, shifted_condition, atol=1e-5, rtol=1e-5)
+
+
+def test_centered_spectral_window_has_finite_repeated_eigenvalue_gradients():
+    generator = (0.25 * torch.eye(6)).expand(3, 6, 6).clone().requires_grad_()
+    spdm = CenteredSpectralWindowMap()
+    residual = torch.randn(3, 6)
+    logdet, quadratic = spdm.statistics(generator, residual)
+    (logdet + quadratic).sum().backward()
+    assert torch.isfinite(generator.grad).all()

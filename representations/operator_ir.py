@@ -52,7 +52,11 @@ class FamilyRelation(str, Enum):
     UNKNOWN = "unknown"
 
 
-_POSITIVE_SPECTRAL_MAPS = {"matrix_exponential", "spectral_window"}
+_POSITIVE_SPECTRAL_MAPS = {
+    "matrix_exponential",
+    "spectral_window",
+    "centered_spectral_window",
+}
 _VERIFIED_INTERTWINERS = {"homogeneous_graph_coboundary"}
 
 
@@ -554,6 +558,18 @@ def _verify_node(
                 errors.append("spectral_window requires numeric log-variance bounds")
             elif not float(lower) < float(upper):
                 errors.append("spectral_window requires log_variance_min < log_variance_max")
+        if spectral_map == "centered_spectral_window":
+            for name in ("shape_min", "shape_max", "volume_min", "volume_max"):
+                if not isinstance(attributes.get(name), (int, float)):
+                    errors.append(f"centered_spectral_window requires numeric {name}")
+            shape_min = attributes.get("shape_min")
+            shape_max = attributes.get("shape_max")
+            volume_min = attributes.get("volume_min")
+            volume_max = attributes.get("volume_max")
+            if isinstance(shape_min, (int, float)) and isinstance(shape_max, (int, float)) and not float(shape_min) < float(shape_max):
+                errors.append("centered_spectral_window requires shape_min < shape_max")
+            if isinstance(volume_min, (int, float)) and isinstance(volume_max, (int, float)) and not float(volume_min) < float(volume_max):
+                errors.append("centered_spectral_window requires volume_min < volume_max")
         if children:
             dimension = children[0].certificate.result_dimension
             result_irreps = children[0].irreps

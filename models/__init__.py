@@ -8,6 +8,7 @@ from models.covariance_head import (
     O3QuadraticSymmetricOperatorHead,
     O3EquivariantLowRankCovarianceHead,
 )
+from models.orientation_calibrator import EquivariantIsospectralOrientationCalibrator
 from models.structured_predictor import StructuredProbabilisticPredictor
 from models.baselines import (
     DeterministicHead,
@@ -22,6 +23,7 @@ __all__ = [
     "EquivariantMeanHead",
     "O3EquivariantSymmetricOperatorHead",
     "O3QuadraticSymmetricOperatorHead",
+    "EquivariantIsospectralOrientationCalibrator",
     "O3EquivariantLowRankCovarianceHead",
     "StructuredProbabilisticPredictor",
     "DeterministicHead",

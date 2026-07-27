@@ -87,8 +87,11 @@ class RecursiveOperatorMap(SPDMap):
             coefficients = children[0]
             space = attributes.get("coordinate_space")
             if space == "output_representation":
+                basis = self._output_basis.to(
+                    device=coefficients.device, dtype=coefficients.dtype
+                )
                 return symmetrize(
-                    torch.einsum("...q,qij->...ij", coefficients, self._output_basis)
+                    torch.einsum("...q,qij->...ij", coefficients, basis)
                 )
             if space == "graph_local":
                 copies = int(attributes.get("copies", 1))
@@ -101,12 +104,15 @@ class RecursiveOperatorMap(SPDMap):
                             self.graph.block_dim,
                         )
                     )
-                local_count = self._local_basis.shape[0]
+                local_basis = self._local_basis.to(
+                    device=coefficients.device, dtype=coefficients.dtype
+                )
+                local_count = local_basis.shape[0]
                 reshaped = coefficients.reshape(
                     *coefficients.shape[:-1], copies, local_count
                 )
                 return symmetrize(
-                    torch.einsum("...nq,qij->...nij", reshaped, self._local_basis)
+                    torch.einsum("...nq,qij->...nij", reshaped, local_basis)
                 )
             raise ValueError(f"unknown symmetric coordinate space: {space!r}")
         if node.kind == "equivariant_factor":
@@ -147,6 +153,15 @@ class RecursiveOperatorMap(SPDMap):
                 return SpectralWindowMap(
                     float(attributes["log_variance_min"]),
                     float(attributes["log_variance_max"]),
+                )(generator)
+            if attributes["map"] == "centered_spectral_window":
+                from spd_maps import CenteredSpectralWindowMap
+
+                return CenteredSpectralWindowMap(
+                    shape_min=float(attributes["shape_min"]),
+                    shape_max=float(attributes["shape_max"]),
+                    volume_min=float(attributes["volume_min"]),
+                    volume_max=float(attributes["volume_max"]),
                 )(generator)
             raise ValueError(f"no spectral runtime for {attributes['map']!r}")
         if node.kind == "gram":
@@ -500,6 +515,7 @@ def _try_optimized_map(compilation: "O3Compilation") -> OptimizedProgramMap | No
     from spd_maps import (
         GraphStructuredPrecisionMap,
         IsotypicBlockMap,
+        IsotropicMap,
         LowRankPlusIsotropicMap,
         MatrixExponentialMap,
         SpectralWindowMap,
@@ -548,6 +564,14 @@ def _try_optimized_map(compilation: "O3Compilation") -> OptimizedProgramMap | No
 
     if certificate.optimization_name == "woodbury_and_determinant_lemma_oracle":
         rank = int(certificate.rank or 0)
+        if rank == 0:
+            minimum = float(family.assembly.attribute_dict().get("minimum", 0.0))
+            return OptimizedProgramMap(
+                compilation,
+                IsotropicMap(compilation.output_spec.dim, min_sigma2=minimum),
+                lambda params: params[..., slices["scale"]],
+                certificate,
+            )
         factor_layout = RepeatedIrrepLayout(compilation.output_spec.irreps, rank)
         minimum = float(family.assembly.inputs[0].attribute_dict()["minimum"])
 
@@ -656,6 +680,7 @@ def _registered_runtime_node(node: OperatorIR) -> None:
     if node.kind == "spectral_positive" and attributes.get("map") not in {
         "matrix_exponential",
         "spectral_window",
+        "centered_spectral_window",
     }:
         raise ValueError(f"no spectral runtime for {attributes.get('map')!r}")
     if (
