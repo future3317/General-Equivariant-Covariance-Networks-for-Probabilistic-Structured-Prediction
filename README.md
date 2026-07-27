@@ -69,17 +69,18 @@ Server checkpoint and audit directory:
 
 The copied local audit is
 `experiments/results/unified_student_t_centered_b128_20260726/joint/`. Final
-test metrics are NLL `-2.6249`, physical MAE `2.0611`, log-Kelvin--Mandel MAE
-`0.1604`, Energy Score `0.4426`, sliced CRPS `0.1551`, and risk--coverage AUC
-`0.5628`. Joint ellipsoid coverage is `43.8/59.4/71.2/76.9%` at nominal
+test metrics are NLL `-2.6248`, physical MAE `2.0611`, log-Kelvin--Mandel MAE
+`0.1604`, Energy Score `0.4427`, sliced CRPS `0.1551`, and risk--coverage AUC
+`0.5623`. Joint ellipsoid coverage is `43.8/59.4/71.2/76.9%` at nominal
 `50/80/90/95%`; ACE is `0.1025`. The covariance basis and local Jacobian both
-have rank 21, while the angular whitening defect is `10.55` and the maximum
-condition number is `54.60` (the certified `exp(4)` bound).
+have rank 21, while the angular whitening defect is `10.4612` and the maximum
+condition number is `54.5975` (the certified `exp(4)` bound). All metrics and
+figures use the recorded inference-contract hash.
 
 Validation-only scalar temperature calibration is intentionally **not applied**:
-it worsens held-out test NLL from approximately `-2.6230` to `-2.4247` (block
-calibration: `-2.3849`). Final figures are in
-`experiments/results/unified_student_t_centered_b128_20260726/joint/figures/`.
+it worsens held-out test NLL from `-2.6248` to `-2.4257` (block calibration:
+`-2.3850`). Final figures are in
+`experiments/results/unified_student_t_centered_b128_20260726/joint/figures_fixed/`.
 
 ## What is automatic
 
