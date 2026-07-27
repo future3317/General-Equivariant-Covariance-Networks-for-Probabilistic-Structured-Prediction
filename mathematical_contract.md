@@ -158,3 +158,27 @@ dataset/split/statistics hashes, checkpoint-chain SHA256, compiler
 compatibility hash, and an inference contract hash covering device, dtype,
 autocast, TF32, model semantic spec and evaluation script. A result is not
 reproducible evidence without these fields.
+
+## 9. Formula-to-code map and acceptance classes
+
+The following map is the reviewable boundary between the specification and the
+implementation.  The named tests are executable witnesses, not replacements
+for the definitions above.
+
+| Contract statement | Reference implementation | Independent regression witness |
+| --- | --- | --- |
+| (\operatorname{Sym}^2(V)), (\Lambda^2(V)), parity and multiplicity | `representations/symmetric_square.py`, `representations/exterior_square.py` | `tests/test_exterior_square.py` |
+| target-directed CG reachability | `representations/adaptive_lifting.py`, `equivcompiler/planning.py` | `tests/test_unified_compiler_ir.py` |
+| typed SPD/operator IR and recursive lowering | `representations/operator_ir.py`, `representations/operator_lowering.py` | `tests/test_unified_compiler_ir.py` |
+| Gaussian/Student-t NLL and Student-t marginal quantile | `evaluation/metrics.py`, `evaluation/calibration.py` | `tests/test_mathematical_contract.py`, `tests/test_evaluation.py` |
+| centered spectral map and condition bound | `spd_maps/centered_spectral_window.py` | `tests/test_mathematical_contract.py`, `tests/test_spd_maps.py` |
+| Kelvin--Mandel native dtype and matrix-log semantics | `representations/cartesian_stf.py`, `data/tensor_conversions.py` | `tests/test_mathematical_contract.py` |
+| unified dielectric inference precision | `scripts/dielectric_runtime.py` | `tests/test_dielectric_runtime.py` and server run hashes |
+| provenance identity | `scripts/attach_dielectric_provenance.py` | run `run_spec.json`/`compilation.json` fields |
+
+The compiler theorem and the reference executor are mathematical/general
+claims.  STF/dense-projector, Woodbury, graph Schur and cuEquivariance are
+exact specializations only after the eligibility certificate and gradient
+comparison pass.  Full, block, low-rank and graph precision are exact
+statistical subfamilies with their own parameter domains; reduced precision,
+rank truncation and Monte Carlo scores remain numerical approximations.
