@@ -243,3 +243,37 @@ class StructuredProbabilisticPredictor(torch.nn.Module):
             "covariance_loss": covariance_loss,
             "components": components,
         }
+
+    def forward_isotropic_wasserstein_from_features(
+        self,
+        node_features: torch.Tensor,
+        batch: torch.Tensor,
+        *,
+        pseudo_sqrt_covariance: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        """Covariance-head-only Wasserstein loss against an isotropic target.
+
+        The target is a detached *residual covariance* square root.  Mean,
+        backbone and shared lifting are evaluated without autograd; only the
+        certified covariance projection can receive this auxiliary gradient.
+        This is intentionally separate from the proper likelihood.
+        """
+        if self.spd_map is None or self.distribution is None:
+            raise TypeError("Wasserstein warm-up requires a probabilistic model")
+        if not hasattr(self.distribution, "nu") or float(self.distribution.nu) <= 2.0:
+            raise ValueError("Student-t Wasserstein covariance geometry requires nu > 2")
+        if self.joint_head is None or not hasattr(self.joint_head, "forward_parameters_detached_features"):
+            raise TypeError("Wasserstein warm-up requires compiled detached covariance lowering")
+        parameter = next(self.parameters(), None)
+        if parameter is not None and node_features.dtype != parameter.dtype:
+            node_features = node_features.to(dtype=parameter.dtype)
+        params = self.joint_head.forward_parameters_detached_features(node_features.detach(), batch)
+        scale = self.spd_map(params)
+        covariance = scale * (float(self.distribution.nu) / (float(self.distribution.nu) - 2.0))
+        eigenvalues, eigenvectors = torch.linalg.eigh(covariance)
+        sqrt_covariance = (eigenvectors * eigenvalues.clamp_min(torch.finfo(covariance.dtype).eps).sqrt().unsqueeze(-2)) @ eigenvectors.transpose(-1, -2)
+        target = pseudo_sqrt_covariance.detach().to(device=scale.device, dtype=scale.dtype)
+        if target.shape != sqrt_covariance.shape:
+            raise ValueError("pseudo covariance square-root shape does not match model output")
+        loss = (sqrt_covariance - target).square().sum(dim=(-2, -1)).mean()
+        return {"params": params, "wasserstein_loss": loss}

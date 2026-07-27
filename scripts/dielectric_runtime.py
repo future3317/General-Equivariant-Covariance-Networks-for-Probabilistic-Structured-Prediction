@@ -140,6 +140,7 @@ def forward_dielectric(
     contract: Mapping[str, Any] | None = None,
     faithful: bool = False,
     covariance_residual: torch.Tensor | None = None,
+    pseudo_sqrt_covariance: torch.Tensor | None = None,
 ):
     """Run one prediction under the recorded BF16/FP32 contract.
 
@@ -150,7 +151,13 @@ def forward_dielectric(
     """
     contract = contract or {"backbone_precision": "fp32"}
     use_bf16 = contract.get("backbone_precision") == "bf16" and batch.pos.device.type == "cuda"
+    if faithful and pseudo_sqrt_covariance is not None:
+        raise ValueError("faithful NLL and Wasserstein warm-up are distinct objectives")
     def _from_features(features, graph_batch):
+        if pseudo_sqrt_covariance is not None:
+            return model.forward_isotropic_wasserstein_from_features(
+                features, graph_batch, pseudo_sqrt_covariance=pseudo_sqrt_covariance
+            )
         if faithful:
             if target is None:
                 raise ValueError("faithful inference requires target")

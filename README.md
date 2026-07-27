@@ -138,6 +138,17 @@ Score, and dependence-sensitive variogram score. These extensions have not yet
 been used to claim improved dielectric performance; they require a controlled
 cross-fitted/ensemble rerun.
 
+An optional, explicitly non-directional auxiliary is also available for
+audited ablations. `scripts/build_dielectric_pseudo_covariance.py` consumes a
+five-fold, train-only OOF cache and constructs an isotropic residual-covariance
+target with invariant structural kNN, negative squared-distance weights, and
+recorded shrinkage/provenance. It does not construct a full directional target:
+without a verified neighbour-to-query O(3) transport certificate the runtime
+rejects that mode. `covariance_warmup` sends its Wasserstein gradient only to
+the covariance projection, then a normal covariance and faithful Student-t
+stage must follow. It is not a replacement for the proper NLL, OOF residuals,
+or an ensemble, and no dielectric result currently claims a benefit from it.
+
 Every operator program is verified in a typed environment containing its
 named representation bindings, declared output representation, and optional
 output graph. The verifier checks parameter slices after layout conversion,
@@ -434,6 +445,17 @@ python -m scripts.train_dielectric --training_stage mean \
 python -m scripts.train_dielectric --training_stage covariance \
   --init_checkpoint /path/to/dielectric_mean \
   --save_dir /path/to/dielectric_covariance --device cuda
+
+# Optional only after all pseudo-label Go/No-Go tests pass: warm up the
+# covariance projection from a train-only cache, then continue with the
+# ordinary covariance stage above (which accepts this checkpoint).
+python -m scripts.build_dielectric_pseudo_covariance \
+  --oof_residuals /path/to/oof_residuals.pt --output /path/to/pseudo.pt \
+  --k 32 --tau 1.0
+python -m scripts.train_dielectric --training_stage covariance_warmup \
+  --init_checkpoint /path/to/dielectric_mean \
+  --pseudo_covariance_cache /path/to/pseudo.pt \
+  --save_dir /path/to/dielectric_warmup --device cuda
 
 # Jointly fine-tune from the covariance checkpoint (use a smaller explicit LR).
 python -m scripts.train_dielectric --training_stage joint --lr 1e-4 \

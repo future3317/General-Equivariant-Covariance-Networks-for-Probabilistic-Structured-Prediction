@@ -173,7 +173,49 @@ compatibility hash, and an inference contract hash covering device, dtype,
 autocast, TF32, model semantic spec and evaluation script. A result is not
 reproducible evidence without these fields.
 
-## 9. Formula-to-code map and acceptance classes
+## 9. OOF residual pseudo-covariance auxiliary supervision
+
+This optional mechanism is not a replacement for the proper Student-t NLL,
+cross-fitted residual likelihood, or an ensemble.  It is defined only from the
+train split.  Five mean models provide out-of-fold residuals
+
+\[
+r_i=y_i-\mu_{-f(i)}(x_i).
+\]
+
+Neighbour search uses a deterministic structural descriptor `z_i` that is
+invariant to translations, proper and improper O(3) transformations, and atom
+permutations.  It excludes the query itself and uses
+
+\[
+w_{ij}=\frac{\exp(-\lVert z_i-z_j\rVert^2/\tau)}
+{\sum_{j'\in N_i}\exp(-\lVert z_i-z_{j'}\rVert^2/\tau)},\quad
+m_i=\sum_jw_{ij}r_j,
+\quad C_i=\sum_jw_{ij}(r_j-m_i)(r_j-m_i)^T.
+\]
+
+The Ledoit-style estimator is
+\(ar C_i=(1-\lambda)C_i+\lambda\operatorname{tr}(C_i)I/d+\epsilon I\).
+However, invariant kNN does not provide a transport from a neighbour's output
+frame to the query's output frame.  Consequently the executable dielectric
+target is only the safe isotropic projection
+\(\widetilde\Sigma_i=d^{-1}\operatorname{tr}(\bar C_i)I\), which is a
+**residual covariance**, not a Student-t scale.  Directional/full targets are
+invalid unless a separately verified transport certificate establishes
+\(\widetilde\Sigma(Rx)=\rho(R)\widetilde\Sigma(x)\rho(R)^T\) for both
+\(\det R=1\) and \(-1\); the runtime rejects them otherwise.
+
+For Student-t \(\nu>2\), warm-up compares covariances rather than scales:
+\[
+\Sigma_{pred}=\frac{\nu}{\nu-2}S,\qquad
+L_W=\lVert\Sigma_{pred}^{1/2}-\widetilde\Sigma^{1/2}\rVert_F^2.
+\]
+Its target square root is cached in native float64 and detached.  Its gradient
+is restricted to the covariance projection: it cannot update the mean,
+backbone, or shared lifting.  The warm-up stage is followed by a separate,
+faithful Student-t NLL stage; the two losses are never combined for reporting.
+
+## 10. Formula-to-code map and acceptance classes
 
 The following map is the reviewable boundary between the specification and the
 implementation.  The named tests are executable witnesses, not replacements
@@ -189,6 +231,7 @@ for the definitions above.
 | Kelvin--Mandel native dtype and matrix-log semantics | `representations/cartesian_stf.py`, `data/tensor_conversions.py` | `tests/test_mathematical_contract.py` |
 | unified dielectric inference precision | `scripts/dielectric_runtime.py` | `tests/test_dielectric_runtime.py` and server run hashes |
 | provenance identity | `scripts/attach_dielectric_provenance.py` | run `run_spec.json`/`compilation.json` fields |
+| train-only OOF isotropic pseudo-covariance and detached Wasserstein warm-up | `data/pseudo_covariance.py`, `scripts/build_dielectric_pseudo_covariance.py` | `tests/test_pseudo_covariance.py`, `tests/test_dielectric_runtime.py` |
 
 The compiler theorem and the reference executor are mathematical/general
 claims.  STF/dense-projector, Woodbury, graph Schur and cuEquivariance are

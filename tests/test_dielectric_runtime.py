@@ -120,3 +120,19 @@ def test_compiled_faithful_path_does_not_train_shared_lifting_from_covariance():
         [p.grad.reshape(-1) for p in model.joint_head.lifting.parameters() if p.grad is not None]
     )
     torch.testing.assert_close(lifting_grad, mean_grad, atol=1e-6, rtol=1e-5)
+
+
+def test_isotropic_wasserstein_warmup_only_updates_covariance_projection():
+    torch.manual_seed(10)
+    spec = _spec(num_basis=8, representation_metric="none", metric_scalar=None, metric_l2=None)
+    model, _ = build_dielectric_model(spec, "cpu")
+    data = _build_graph(torch.randn(7, 3), num_basis=8)
+    features, graph_batch = model.backbone(data)
+    target_sqrt = torch.eye(6).unsqueeze(0)
+    result = model.forward_isotropic_wasserstein_from_features(
+        features, graph_batch, pseudo_sqrt_covariance=target_sqrt
+    )
+    result["wasserstein_loss"].backward()
+    assert any(p.grad is not None for p in model.joint_head.covariance_projection.parameters())
+    assert all(p.grad is None for p in model.backbone.parameters())
+    assert all(p.grad is None for p in model.joint_head.lifting.parameters())

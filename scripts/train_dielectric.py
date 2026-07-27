@@ -25,6 +25,7 @@ from data.representation_metrics import (
     transformed_spectral_bounds,
 )
 from data.paths import dataset_dir
+from data.pseudo_covariance import validate_pseudo_cache
 from data.tensor_conversions import irreps_to_km, irreps_to_matrix_exp_voigt
 from voigt_utils import kelvin_mandel_to_voigt
 from matrix_log_transform import matrix_exponential_transform
@@ -49,6 +50,7 @@ from scripts.dielectric_runtime import (
     load_run_record,
     load_run_spec,
     source_provenance,
+    sha256_file,
     write_run_spec,
 )
 
@@ -69,6 +71,7 @@ def _forward(
     return_scale: bool = False,
     faithful: bool = False,
     covariance_residual: torch.Tensor | None = None,
+    pseudo_sqrt_covariance: torch.Tensor | None = None,
 ):
     """Compatibility wrapper around the unique inference runtime."""
     contract = {
@@ -82,6 +85,7 @@ def _forward(
         contract=contract,
         faithful=faithful,
         covariance_residual=covariance_residual,
+        pseudo_sqrt_covariance=pseudo_sqrt_covariance,
     )
 
 
@@ -132,6 +136,7 @@ def train_epoch(
     use_bf16: bool = False,
     faithful: bool = False,
     oof_residuals: torch.Tensor | None = None,
+    pseudo_sqrt_covariances: torch.Tensor | None = None,
 ):
     model.train()
     total_loss = torch.tensor(0.0, device=device)
@@ -145,6 +150,7 @@ def train_epoch(
         optimizer.zero_grad(set_to_none=True)
 
         covariance_residual = None
+        pseudo_sqrt_covariance = None
         if oof_residuals is not None:
             if not hasattr(batch, "sample_index"):
                 raise ValueError("OOF residual training requires dataset sample_index")
@@ -152,6 +158,13 @@ def train_epoch(
             if sample_index.max().item() >= oof_residuals.shape[0]:
                 raise ValueError("OOF residual cache does not cover this dataset split")
             covariance_residual = oof_residuals[sample_index].to(device)
+        if pseudo_sqrt_covariances is not None:
+            if not hasattr(batch, "sample_index"):
+                raise ValueError("pseudo-covariance training requires dataset sample_index")
+            sample_index = batch.sample_index.detach().cpu().long().reshape(-1)
+            if sample_index.max().item() >= pseudo_sqrt_covariances.shape[0]:
+                raise ValueError("pseudo-covariance cache does not cover this dataset split")
+            pseudo_sqrt_covariance = pseudo_sqrt_covariances[sample_index].to(device)
         result = _forward(
             model,
             batch,
@@ -159,9 +172,18 @@ def train_epoch(
             use_bf16=use_bf16,
             faithful=faithful,
             covariance_residual=covariance_residual,
+            pseudo_sqrt_covariance=pseudo_sqrt_covariance,
         )
-        mse = torch.nn.functional.mse_loss(result["mu"], batch.y_irreps)
-        loss = mse if training_stage == "mean" else result["loss"]
+        mse = (
+            torch.zeros((), device=device)
+            if training_stage == "covariance_warmup"
+            else torch.nn.functional.mse_loss(result["mu"], batch.y_irreps)
+        )
+        loss = (
+            mse if training_stage == "mean" else
+            result["wasserstein_loss"] if training_stage == "covariance_warmup" else
+            result["loss"]
+        )
 
         if warmup_mse_weight > 0.0:
             loss = loss + warmup_mse_weight * mse
@@ -297,7 +319,7 @@ def _checkpoint_directory(path: str) -> str:
 def configure_training_stage(model, spec: DielectricRunSpec, args: argparse.Namespace) -> dict:
     """Load the declared predecessor and expose exactly the stage parameters."""
     stage = args.training_stage
-    expected_predecessor = {"mean": None, "covariance": "mean", "joint": "covariance"}
+    expected_predecessor = {"mean": None, "covariance_warmup": "mean", "covariance": ("mean", "covariance_warmup"), "joint": "covariance"}
     if stage not in expected_predecessor:
         raise ValueError(f"unknown training stage: {stage}")
     if stage == "mean" and args.init_checkpoint is not None:
@@ -315,17 +337,19 @@ def configure_training_stage(model, spec: DielectricRunSpec, args: argparse.Name
                 "init checkpoint has a different model semantic contract; "
                 "start a new stage with identical RunSpec fields"
             )
-        if source_record.get("training_stage") != expected_predecessor[stage]:
+        allowed = expected_predecessor[stage]
+        allowed = (allowed,) if isinstance(allowed, str) else allowed
+        if source_record.get("training_stage") not in allowed:
             raise ValueError(
-                f"{stage} stage requires a {expected_predecessor[stage]} checkpoint, "
+                f"{stage} stage requires a predecessor in {allowed}, "
                 f"got {source_record.get('training_stage')!r}"
             )
         source_model, _, _ = load_dielectric_checkpoint(source_dir, args.device)
         model.load_state_dict(source_model.state_dict())
 
     for parameter in model.parameters():
-        parameter.requires_grad_(stage != "covariance")
-    if stage == "covariance":
+        parameter.requires_grad_(stage not in {"covariance", "covariance_warmup"})
+    if stage in {"covariance", "covariance_warmup"}:
         projection = getattr(model.joint_head, "covariance_projection", None)
         if projection is None:
             raise TypeError("compiled readout does not expose covariance_projection")
@@ -380,7 +404,7 @@ def main():
     parser.add_argument("--warmup_epochs", type=int, default=3)
     parser.add_argument(
         "--training_stage",
-        choices=("mean", "covariance", "joint"),
+        choices=("mean", "covariance_warmup", "covariance", "joint"),
         default="joint",
         help="strict training state: deterministic mean, covariance fit, or joint fine-tuning",
     )
@@ -388,6 +412,11 @@ def main():
         "--faithful_joint",
         action="store_true",
         help="Use MSE-only mean/trunk gradients and detached covariance residuals during joint training.",
+    )
+    parser.add_argument(
+        "--pseudo_covariance_cache",
+        default=None,
+        help="Train-only isotropic OOF residual-covariance cache used only by covariance_warmup.",
     )
     parser.add_argument(
         "--oof_residuals",
@@ -453,6 +482,8 @@ def main():
             merged_args["evaluate_only"] = True
             args = argparse.Namespace(**merged_args)
     oof_residuals = None
+    pseudo_sqrt_covariances = None
+    pseudo_covariance_metadata = None
     if args.oof_residuals is not None:
         if args.training_stage == "mean":
             parser.error("--oof_residuals is only valid for covariance or joint stages")
@@ -460,6 +491,24 @@ def main():
         if not isinstance(payload, dict) or "residuals" not in payload:
             parser.error("invalid OOF residual cache: expected a residuals tensor")
         oof_residuals = payload["residuals"].float().contiguous()
+    if args.pseudo_covariance_cache is not None:
+        if args.training_stage != "covariance_warmup":
+            parser.error("--pseudo_covariance_cache is valid only for covariance_warmup")
+        payload = torch.load(args.pseudo_covariance_cache, map_location="cpu", weights_only=False)
+        if not isinstance(payload, dict):
+            parser.error("invalid pseudo-covariance cache")
+        try:
+            validate_pseudo_cache(payload)
+        except ValueError as error:
+            parser.error(str(error))
+        pseudo_sqrt_covariances = payload["sqrt_covariance"].float().contiguous()
+        pseudo_covariance_metadata = {
+            key: value for key, value in payload.items() if not isinstance(value, torch.Tensor)
+        }
+        pseudo_covariance_metadata["cache_path"] = str(args.pseudo_covariance_cache)
+        pseudo_covariance_metadata["cache_sha256"] = sha256_file(args.pseudo_covariance_cache)
+    elif args.training_stage == "covariance_warmup":
+        parser.error("covariance_warmup requires --pseudo_covariance_cache")
     if args.covariance_parameterization == "spectral_window" and not (
         args.log_variance_min < args.log_variance_max
     ):
@@ -541,6 +590,8 @@ def main():
         stage_record["faithful_joint"] = bool(
             args.faithful_joint and args.training_stage == "joint"
         )
+        if pseudo_covariance_metadata is not None:
+            stage_record["pseudo_covariance"] = pseudo_covariance_metadata
         write_run_spec(
             args.save_dir,
             spec,
@@ -661,6 +712,7 @@ def main():
             use_bf16=use_bf16,
             faithful=args.faithful_joint and args.training_stage == "joint",
             oof_residuals=oof_residuals,
+            pseudo_sqrt_covariances=pseudo_sqrt_covariances,
         )
         val_metrics = validate(
             model,
