@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 import torch
 
+from compatibility.torch_geometric import Data, PyGDataLoader
 from data.pseudo_covariance import (
     PSEUDO_CACHE_VERSION,
     build_isotropic_pseudo_covariance,
@@ -87,3 +88,12 @@ def test_oof_assignment_is_deterministic_and_each_holdout_is_disjoint():
         held_out = torch.where(assignments == fold)[0]
         assert torch.isin(held_out, train).sum() == 0
         assert len(train) + len(held_out) == 101
+
+
+def test_pyg_preserves_split_local_sample_id_without_connectivity_increment():
+    graphs = [
+        Data(pos=torch.randn(2, 3), edge_index=torch.tensor([[0, 1], [1, 0]]), sample_id=torch.tensor(i))
+        for i in (0, 4235)
+    ]
+    batch = next(iter(PyGDataLoader(graphs, batch_size=2, shuffle=False)))
+    torch.testing.assert_close(batch.sample_id, torch.tensor([0, 4235]))

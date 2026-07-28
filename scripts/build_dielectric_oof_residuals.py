@@ -102,11 +102,11 @@ def build_oof_residuals(
             if batch.edge_index is None or batch.edge_index.numel() == 0:
                 continue
             result = forward_dielectric(model, batch, contract=contract)
-            sample_index = batch.sample_index.detach().cpu().long().reshape(-1)
-            residuals[sample_index] = (
+            sample_id = batch.sample_id.detach().cpu().long().reshape(-1)
+            residuals[sample_id] = (
                 batch.y_irreps.detach().double().cpu() - result["mu"].detach().double().cpu()
             )
-            filled[sample_index] = True
+            filled[sample_id] = True
     if not bool(filled.all()):
         missing = torch.where(~filled)[0].tolist()
         raise RuntimeError(

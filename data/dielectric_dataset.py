@@ -80,8 +80,9 @@ class DielectricIrrepsDataset(Dataset):
     def __getitem__(self, idx):
         data = self._base[idx]
         # Stable split-local identity used by out-of-fold residual caches.
-        # PyG preserves this scalar through batching as ``sample_index``.
-        data.sample_index = torch.tensor(idx, dtype=torch.long)
+        # Do not call it ``*_index``: PyG's default batching increments fields
+        # whose names contain ``index`` as if they were graph connectivity.
+        data.sample_id = torch.tensor(idx, dtype=torch.long)
         rotation = None
 
         # Reduce precomputed high-order harmonics before applying the

@@ -152,19 +152,19 @@ def train_epoch(
         covariance_residual = None
         pseudo_sqrt_covariance = None
         if oof_residuals is not None:
-            if not hasattr(batch, "sample_index"):
-                raise ValueError("OOF residual training requires dataset sample_index")
-            sample_index = batch.sample_index.detach().cpu().long().reshape(-1)
-            if sample_index.max().item() >= oof_residuals.shape[0]:
+            if not hasattr(batch, "sample_id"):
+                raise ValueError("OOF residual training requires dataset sample_id")
+            sample_id = batch.sample_id.detach().cpu().long().reshape(-1)
+            if sample_id.max().item() >= oof_residuals.shape[0]:
                 raise ValueError("OOF residual cache does not cover this dataset split")
-            covariance_residual = oof_residuals[sample_index].to(device)
+            covariance_residual = oof_residuals[sample_id].to(device)
         if pseudo_sqrt_covariances is not None:
-            if not hasattr(batch, "sample_index"):
-                raise ValueError("pseudo-covariance training requires dataset sample_index")
-            sample_index = batch.sample_index.detach().cpu().long().reshape(-1)
-            if sample_index.max().item() >= pseudo_sqrt_covariances.shape[0]:
+            if not hasattr(batch, "sample_id"):
+                raise ValueError("pseudo-covariance training requires dataset sample_id")
+            sample_id = batch.sample_id.detach().cpu().long().reshape(-1)
+            if sample_id.max().item() >= pseudo_sqrt_covariances.shape[0]:
                 raise ValueError("pseudo-covariance cache does not cover this dataset split")
-            pseudo_sqrt_covariance = pseudo_sqrt_covariances[sample_index].to(device)
+            pseudo_sqrt_covariance = pseudo_sqrt_covariances[sample_id].to(device)
         result = _forward(
             model,
             batch,
