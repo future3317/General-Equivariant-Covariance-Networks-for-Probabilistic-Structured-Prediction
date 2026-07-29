@@ -570,7 +570,7 @@ python -m scripts.download_itop --view side
 python -m scripts.run_itop_study \
   --data_dir /home/workspace/lrh/DATA/Tpami/ITOP \
   --study_dir /home/workspace/lrh/RESULTS/Tpami/ITOP \
-  --profile development --gpu 3 --dry_run
+  --profile development --gpu 3 --seeds 42 --dry_run
 
 # Remove --dry_run to execute. The final protocol uses 512 points and one
 # explicitly recorded seed on the same single GPU. Completed stages are skipped, interrupted

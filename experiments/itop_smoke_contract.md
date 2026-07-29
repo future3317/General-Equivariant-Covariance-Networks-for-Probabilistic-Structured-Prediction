@@ -1,0 +1,30 @@
+# ITOP small-sample learning gate
+
+This is a development gate, not a benchmark result. It uses deterministic
+prefix-limited geometry caches solely to verify that the existing ITOP training
+route can fit signal and execute the same side/top evaluation path as a full
+run.
+
+## Fixed scientific contract
+
+- Output: 15 centered 3D joints in the declared `15 x 1o` representation.
+- Input: side-view depth reconstructed to 256-point XYZ clouds; no label-based
+  centering, augmentation, or split mixing.
+- Geometry: exact cached 16-neighbour graph; 640 side-train frames and 256
+  frames for each side/top test cache. The cache limit is part of its path and
+  metadata, so it cannot be confused with the eventual full-data cache.
+- Objective: deterministic MSE first, followed only after that gate by the
+  existing graph Student-t proper NLL. The production output semantics and
+  graph family are unchanged.
+- Precision: BF16 only in the backbone; readout, SPD assembly, Cholesky,
+  precision algebra, and likelihood remain FP32. TF32 remains disabled.
+- Optimizer: existing AdamW, learning rate `5e-4`, batch size 16, seed 42,
+  exact epoch-addressable sampler order, validation early stopping with
+  patience 5, and no distributed training.
+- Gates: finite loss/gradients, a clear validation-MPJPE reduction over the
+  deterministic initial epoch, valid checkpoints/history/side/top artifacts,
+  SPD finite graph Student-t loss, and rotation/SPD regression tests. No speed
+  claim is made until an eager profile is recorded on the same panel.
+
+The small cache changes only data volume and is never used for full-data
+metrics, model selection, or paper claims.

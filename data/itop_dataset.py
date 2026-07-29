@@ -256,12 +256,14 @@ def itop_cache_dir(
     split: str,
     num_points: int,
     num_neighbors: int,
+    sample_limit: int | None = None,
 ) -> Path:
     """Return the parameter-bound deterministic geometry-cache directory."""
+    suffix = "" if sample_limit is None else f"_m{int(sample_limit)}"
     return (
         Path(data_dir)
         / "cache"
-        / (f"{view}_{split}_n{num_points}_k{num_neighbors}_centered_v1")
+        / (f"{view}_{split}_n{num_points}_k{num_neighbors}_centered_v1{suffix}")
     )
 
 
@@ -377,14 +379,17 @@ def get_itop_loaders(
     pin_memory: bool = False,
     persistent_workers: bool = False,
     prefetch_factor: int | None = None,
+    cache_sample_limit: int | None = None,
 ) -> tuple[PyGDataLoader, PyGDataLoader, PyGDataLoader]:
     """Build loaders from required immutable ITOP geometry caches."""
     data_dir = dataset_dir(data_dir, "ITOP")
     test_view = test_view or train_view
     train_cache = itop_cache_dir(
-        data_dir, train_view, "train", num_points, num_neighbors
+        data_dir, train_view, "train", num_points, num_neighbors, cache_sample_limit
     )
-    test_cache = itop_cache_dir(data_dir, test_view, "test", num_points, num_neighbors)
+    test_cache = itop_cache_dir(
+        data_dir, test_view, "test", num_points, num_neighbors, cache_sample_limit
+    )
     train_full = ITOPCachedDataset(
         train_cache,
         view=train_view,
@@ -450,12 +455,15 @@ def get_itop_split_loader(
     pin_memory: bool = False,
     persistent_workers: bool = False,
     prefetch_factor: int | None = None,
+    cache_sample_limit: int | None = None,
 ) -> PyGDataLoader:
     """Build one deterministic loader from its required geometry cache."""
     if split not in {"train", "test"}:
         raise ValueError("split must be 'train' or 'test'")
     root = dataset_dir(data_dir, "ITOP")
-    cache = itop_cache_dir(root, view, split, num_points, num_neighbors)
+    cache = itop_cache_dir(
+        root, view, split, num_points, num_neighbors, cache_sample_limit
+    )
     dataset = ITOPCachedDataset(
         cache,
         view=view,

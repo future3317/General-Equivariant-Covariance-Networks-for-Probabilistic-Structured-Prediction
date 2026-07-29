@@ -173,6 +173,7 @@ def test_existing_run_directory_requires_resumable_state(tmp_path):
         epochs=2,
     )
     assert command[-1] == "--continue_run"
+    assert command[command.index("--tp_backend") + 1] == "e3nn"
 
 
 def test_rng_checkpoint_round_trip_is_exact(tmp_path):

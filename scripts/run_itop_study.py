@@ -12,7 +12,6 @@ from typing import Iterable
 import statistics
 
 
-SEEDS = (42, 43, 44)
 PROBABILISTIC_MODELS = (
     "independent_gaussian",
     "graph_gaussian",
@@ -90,9 +89,9 @@ def _training_command(
         "--backbone_precision",
         "bf16",
         "--tp_backend",
-        "cueq",
+        getattr(args, "tp_backend", "e3nn"),
         "--cueq_method",
-        "fused_tp",
+        getattr(args, "cueq_method", "naive"),
         "--device",
         "cuda:0",
     ]
@@ -140,6 +139,18 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--num_workers", type=int, default=8)
     parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument(
+        "--tp_backend", choices=("e3nn", "cueq"), default="e3nn",
+        help="explicit tensor-product backend; no implicit kernel fallback",
+    )
+    parser.add_argument(
+        "--cueq_method", choices=("naive", "fused_tp"), default="naive",
+        help="cuEquivariance method when --tp_backend=cueq",
+    )
+    parser.add_argument(
+        "--seeds", default="42",
+        help="comma-separated seeds; default is the single controlled seed 42",
+    )
     parser.add_argument("--dry_run", action="store_true")
     return parser.parse_args()
 
@@ -148,13 +159,17 @@ def main() -> None:
     args = _parse_args()
     if "," in args.gpu:
         raise ValueError("--gpu must name exactly one physical GPU")
+    try:
+        seeds = tuple(int(value) for value in args.seeds.split(",") if value)
+    except ValueError as error:
+        raise ValueError("--seeds must be comma-separated integers") from error
+    if not seeds or len(set(seeds)) != len(seeds):
+        raise ValueError("--seeds must contain at least one distinct seed")
     if args.profile == "development":
         args.num_points = 256
-        seeds = SEEDS[:1]
         deterministic_epochs, frozen_epochs, joint_epochs = 30, 20, 10
     else:
         args.num_points = 512
-        seeds = SEEDS
         deterministic_epochs, frozen_epochs, joint_epochs = 100, 60, 30
 
     environment = os.environ.copy()

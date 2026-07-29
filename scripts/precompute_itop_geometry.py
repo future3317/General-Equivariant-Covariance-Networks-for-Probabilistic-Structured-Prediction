@@ -31,7 +31,9 @@ def write_itop_geometry_cache(
     """Write one immutable, parameter-bound cache without touching raw data."""
     root = dataset_dir(data_dir, "ITOP").resolve()
     depth, labels = itop_paths(root, view, split)
-    destination = itop_cache_dir(root, view, split, num_points, num_neighbors)
+    destination = itop_cache_dir(
+        root, view, split, num_points, num_neighbors, max_samples
+    )
     if destination.exists():
         raise FileExistsError(f"refusing to overwrite ITOP cache: {destination}")
     staging = destination.with_name(destination.name + ".partial")

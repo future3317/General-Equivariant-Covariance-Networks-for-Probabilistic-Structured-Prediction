@@ -14,6 +14,7 @@ from data.itop_dataset import (
     depth_to_point_cloud,
     get_itop_split_loader,
     itop_train_validation_indices,
+    itop_cache_dir,
     require_itop_file,
 )
 from data.itop_features import get_itop_feature_loaders
@@ -21,6 +22,13 @@ from equivcompiler import FeatureSpec, GraphPrecision, plan_readout
 from models import ControlledMeanOperatorHead, DeterministicHead, EquivariantBackbone
 from representations import O3IrrepsSpec
 from scripts.precompute_itop_geometry import write_itop_geometry_cache
+
+
+def test_limited_geometry_cache_has_a_distinct_contract_path(tmp_path):
+    full = itop_cache_dir(tmp_path, "side", "train", 256, 16)
+    limited = itop_cache_dir(tmp_path, "side", "train", 256, 16, 640)
+    assert full != limited
+    assert limited.name.endswith("_m640")
 
 
 def _write_fixture(tmp_path):
