@@ -10,12 +10,16 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
-from pathlib import Path
-
 import torch
 
 from data.dielectric_dataset import get_dielectric_irreps_loaders
-from evaluation import energy_score, isotropic_sliced_crps, risk_coverage_auc
+from evaluation import (
+    energy_score,
+    isotropic_sliced_crps,
+    risk_coverage_auc,
+    sample_ensemble,
+    variogram_score,
+)
 from evaluation.metrics import mahalanobis_distance_squared
 from scripts.dielectric_runtime import (
     collect_dielectric_predictions,
@@ -34,6 +38,10 @@ def main() -> None:
     parser.add_argument("--output", required=True)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--seed", type=int, default=0, help="Monte-Carlo score seed")
+    parser.add_argument(
+        "--samples", type=int, default=128,
+        help="Monte-Carlo samples for Energy Score and variogram score",
+    )
     args = parser.parse_args()
     checkpoint = Path(args.checkpoint_dir)
     model, _, _ = load_dielectric_checkpoint(checkpoint, args.device)
@@ -61,15 +69,24 @@ def main() -> None:
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
+    samples = sample_ensemble(
+        mu.unsqueeze(0),
+        scale.unsqueeze(0),
+        num_samples=args.samples,
+        distribution=distribution,
+        student_t_dof=dof,
+    )
     result = {
         "coordinate_space": "compiled_irreps",
         "distribution": distribution,
         "student_t_dof": dof,
         "monte_carlo_seed": args.seed,
+        "monte_carlo_samples": args.samples,
         "inference_contract": contract,
         "inference_contract_hash": inference_contract_hash(contract),
-        "energy_score": float(energy_score(mu, scale, target, num_samples=128, distribution=distribution, student_t_dof=dof)),
+        "energy_score": float(energy_score(mu, scale, target, num_samples=args.samples, distribution=distribution, student_t_dof=dof)),
         "isotropic_sliced_crps": float(isotropic_sliced_crps(mu, scale, target, num_directions=256, distribution=distribution, student_t_dof=dof)),
+        "variogram_score": float(variogram_score(samples, target).item()),
         "risk_coverage_auc_log_irreps": float(risk_coverage_auc(uncertainty, error)),
         "mahalanobis2_mean": float(mahalanobis_distance_squared(target - mu, scale).mean()),
     }

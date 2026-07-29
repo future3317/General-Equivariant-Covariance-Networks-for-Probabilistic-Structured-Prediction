@@ -14,9 +14,11 @@ def exterior_square_irreps(output_irreps: o3.Irreps) -> o3.Irreps:
     ]
     counts: dict[tuple[int, int], int] = {}
 
-    def add(l: int, parity: int, multiplicity: int) -> None:
+    def add(angular_momentum: int, parity: int, multiplicity: int) -> None:
         if multiplicity:
-            counts[(l, parity)] = counts.get((l, parity), 0) + multiplicity
+            counts[(angular_momentum, parity)] = (
+                counts.get((angular_momentum, parity), 0) + multiplicity
+            )
 
     for multiplicity, angular_momentum, parity in groups:
         symmetric_copies = multiplicity * (multiplicity + 1) // 2

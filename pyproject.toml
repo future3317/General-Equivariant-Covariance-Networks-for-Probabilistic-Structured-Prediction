@@ -1,3 +1,9 @@
 [build-system]
 requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.ruff.lint.per-file-ignores]
+# Command-line entry points deliberately add the repository root before importing
+# project modules, so direct ``python scripts/foo.py`` execution remains supported.
+"scripts/*.py" = ["E402"]
+"experiments/*.py" = ["E402"]
