@@ -77,6 +77,46 @@ log densities. Moment-based coverage is therefore labeled explicitly as a
 moment-Gaussian diagnostic. Variogram score is retained as a dependence-
 sensitive complement to Energy Score.
 
+### 3.1 Uncertainty interpretation and conformal regions
+
+The compiler certifies that a learned `S(x)`, `Q(x)`, or other SPD output has
+the declared representation and distribution semantics. It does **not** by
+itself certify calibration, identify an aleatoric source, or establish that a
+scatter matrix is a physical covariance. With one deterministic label from a
+fixed simulator protocol, a learned proper-score distribution is interpreted
+as *surrogate predictive uncertainty* unless repeated labels identify a more
+specific source.
+
+An optional split-conformal wrapper consumes an SPD **shape** matrix `C(x)`;
+`C` is not relabeled as a Gaussian covariance or Student-t scale. On a
+calibration split disjoint from fitting and model selection, define
+
+\[
+q_i=(y_i-\mu_i)^T C_i^{-1}(y_i-\mu_i).
+\]
+
+For calibration size \(n_{cal}\), its finite-sample threshold at miscoverage
+\(\alpha\) is the order statistic with rank
+\(\lceil(n_{cal}+1)(1-\alpha)\rceil\), using the conventional \(+\infty\)
+endpoint when necessary. The region is
+
+\[
+\mathcal R_{1-\alpha}(x)=\{y:(y-\mu(x))^T C(x)^{-1}(y-\mu(x))
+\le c_{\alpha}\}.
+\]
+
+Because \(\rho(g)\) is orthogonal and the compiler gives
+\(C(gx)=\rho(g)C(x)\rho(g)^T\), the score and region are equivariant.
+Under exchangeability, split conformal supplies marginal coverage only; it
+does not supply nontrivial pointwise conditional coverage. Region evaluation
+therefore reports empirical coverage, log-volume, and declared group/data
+subgroup coverage separately from proper distributional scores.
+
+Three sources must remain distinct in reports: (i) surrogate predictive
+uncertainty on one fixed-protocol label, (ii) protocol/model-form uncertainty
+identified from repeated calculations of the same object, and (iii) physical
+condition variability identified from explicitly varied physical conditions.
+
 ## 4. Kelvin--Mandel and matrix logarithm
 
 For a symmetric 3-by-3 tensor,
@@ -195,7 +235,7 @@ m_i=\sum_jw_{ij}r_j,
 \]
 
 The Ledoit-style estimator is
-\(ar C_i=(1-\lambda)C_i+\lambda\operatorname{tr}(C_i)I/d+\epsilon I\).
+\(\bar C_i=(1-\lambda)C_i+\lambda\operatorname{tr}(C_i)I/d+\epsilon I\).
 However, invariant kNN does not provide a transport from a neighbour's output
 frame to the query's output frame.  Consequently the executable dielectric
 target is only the safe isotropic projection

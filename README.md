@@ -18,9 +18,11 @@ T(V) = Irreps(V + Sym^2(V))
 
 and compiles a target-directed Clebsch--Gordan graph whose final feature space
 covers every required angular momentum, parity, and irrep multiplicity. The
-same compilation result selects an execution basis, creates the mean/covariance
-head, covariance basis, SPD parameterization, and proper Gaussian or Student-t
-objective.
+same compilation result selects an execution basis, creates mean and
+uncertainty-operator representations, an SPD parameterization, and a proper
+Gaussian or Student-t objective. The compiler guarantees representation and
+probabilistic validity; calibration and the statistical interpretation of a
+learned distribution are separate, explicitly evaluated properties.
 
 The same representation layer can compile `Lambda^2(V)` for orientation
 calibration. `EquivariantIsospectralOrientationCalibrator` predicts a skew
@@ -53,7 +55,7 @@ server smoke run exercises the side/top OOD path; its artifacts are archived
 with the TPAMI manuscript. It is development evidence only, not a replacement
 for the final full-data benchmark.
 
-## Final dielectric artifact
+## Evidence and uncertainty semantics
 
 The current learned result is one single-seed, single-GPU Materials Project
 run on an RTX 4090. It uses the strict `mean -> covariance -> joint` state
@@ -76,6 +78,13 @@ test metrics are NLL `-2.6248`, physical MAE `2.0611`, log-Kelvin--Mandel MAE
 have rank 21, while the angular whitening defect is `10.4612` and the maximum
 condition number is `54.5975` (the certified `exp(4)` bound). All metrics and
 figures use the recorded inference-contract hash.
+
+This artifact demonstrates a valid, expressive full-scatter execution path;
+it does **not** identify a material's physical aleatoric covariance. With one
+fixed-protocol DFPT label per structure, a learned distribution mixes surrogate
+error, finite-data/model uncertainty, and any irreducible observation noise.
+It is reported as a predictive-distribution audit, including its undercoverage
+and angular-shape failure, rather than as recovered physical uncertainty.
 
 Validation-only scalar temperature calibration is intentionally **not applied**:
 it worsens held-out test NLL from `-2.6248` to `-2.4257` (block calibration:
@@ -125,7 +134,7 @@ target and whether backend lowering is algebraically exact. A budget-selected
 low-rank or graph family can therefore never be mislabeled as full covariance,
 and contraction truncation can never be mislabeled as checkpoint-equivalent.
 
-## Statistical identification protocol (implemented, not yet benchmarked)
+## Optional uncertainty-learning protocols
 
 The dielectric trainer now exposes `--faithful_joint`, which sends MSE-only
 gradients through the mean/shared trunk and uses detached residuals for the
@@ -135,17 +144,30 @@ out-of-fold residual caches from mean checkpoints, and
 `evaluation.ensemble` API and `scripts/evaluate_dielectric_ensemble.py` report
 the law-of-total-covariance decomposition, exact finite-mixture NLL, Energy
 Score, and dependence-sensitive variogram score. These extensions have not yet
-been used to claim improved dielectric performance; they require a controlled
-cross-fitted/ensemble rerun.
+been used to claim improved dielectric performance from an ensemble.
 
-The controlled order is fixed: first compare ordinary faithful Student-t with
-OOF-residual faithful Student-t; then evaluate a five-member probabilistic
-ensemble; finally retain isotropic pseudo-Wasserstein only if it improves a
-validation probabilistic criterion without degrading the others. The primary
-comparison reports proper mixture/NLL semantics, joint coverage, angular
-whitening defect, and variogram score. Moment covariance is
+The completed controlled ordinary-versus-OOF faithful comparison was a
+**No-Go**: OOF slightly worsened NLL, angular whitening defect, Energy Score,
+sliced CRPS, and risk--coverage while leaving coverage unchanged; its tiny
+variogram change was not decision-relevant. OOF and pseudo-Wasserstein are
+therefore not expanded. The next independent protocol is a finite deep
+ensemble, followed by split-conformal calibration of prediction regions.
+Moment covariance is
 `mean(Sigma_m) + Cov(mu_m)`, where each Student-t member contributes
 `Sigma_m = nu/(nu-2) * S_m`; it is not relabeled as a single Student-t density.
+
+The uncertainty wrappers are deliberately outside the compiler core:
+
+- Proper Gaussian/Student-t NLL trains a predictive distribution in the
+  compiler-selected output coordinates.
+- A finite ensemble is an equal-weight mixture with mixture NLL; member spread
+  is an epistemic diagnostic, not a single Student-t scale.
+- Split conformal uses a held-out calibration split and a compiler-produced SPD
+  shape `C(x)` to output equivariant ellipsoidal regions. It guarantees only
+  finite-sample marginal coverage under exchangeability, never pointwise
+  conditional coverage.
+- Repeated-protocol labels for the *same* structure are required before a full
+  directional covariance can be interpreted as DFPT protocol uncertainty.
 
 An optional, explicitly non-directional auxiliary is also available for
 audited ablations. `scripts/build_dielectric_pseudo_covariance.py` consumes a
