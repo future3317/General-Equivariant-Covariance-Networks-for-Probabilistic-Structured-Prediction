@@ -220,6 +220,13 @@ def _set_loader_epoch(loader, *, seed: int, epoch: int) -> None:
     generator.manual_seed(seed * 1_000_003 + epoch)
 
 
+def _test_loader_kwargs(loader_kwargs: dict) -> dict:
+    """Remove the train-only cache selector before loading either test view."""
+    test_kwargs = dict(loader_kwargs)
+    test_kwargs.pop("train_cache_sample_limit", None)
+    return test_kwargs
+
+
 def _require_finite_tensor(name: str, value: torch.Tensor) -> None:
     if not bool(torch.isfinite(value.detach()).all()):
         raise FloatingPointError(f"non-finite {name} detected")
@@ -796,7 +803,7 @@ def main() -> None:
             train_view="side", test_view="side", seed=args.seed, **loader_kwargs
         )
         top_loader = get_itop_split_loader(
-            view="top", split="test", **loader_kwargs
+            view="top", split="test", **_test_loader_kwargs(loader_kwargs)
         )
 
     if args.representation_metric == "block_auto":

@@ -15,6 +15,7 @@ from scripts.train_itop import (
     _restore_rng_state,
     _save_checkpoint,
     _set_loader_epoch,
+    _test_loader_kwargs,
     _update_early_stopping,
     train_epoch,
 )
@@ -175,6 +176,13 @@ def test_existing_run_directory_requires_resumable_state(tmp_path):
     )
     assert command[-1] == "--continue_run"
     assert command[command.index("--tp_backend") + 1] == "e3nn"
+
+
+def test_test_loader_kwargs_exclude_train_cache_limit():
+    kwargs = _test_loader_kwargs(
+        {"train_cache_sample_limit": 2487, "batch_size": 16}
+    )
+    assert kwargs == {"batch_size": 16}
 
 
 def test_rng_checkpoint_round_trip_is_exact(tmp_path):
