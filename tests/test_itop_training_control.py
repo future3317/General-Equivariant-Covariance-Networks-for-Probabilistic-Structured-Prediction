@@ -152,6 +152,7 @@ def test_existing_run_directory_requires_resumable_state(tmp_path):
         num_points=256,
         batch_size=4,
         num_workers=0,
+        train_cache_sample_limit=None,
     )
     with pytest.raises(FileExistsError, match="no resumable state"):
         _training_command(

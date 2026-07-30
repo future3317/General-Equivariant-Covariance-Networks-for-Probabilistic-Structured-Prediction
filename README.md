@@ -565,12 +565,14 @@ python -m scripts.precompute_modelnet40_graphs \
 # Download only ITOP depth/label files, compact labels, and skip point clouds.
 python -m scripts.download_itop --view side
 
-# Dry-run the complete one-seed/256-point development schedule. The runner
-# exposes exactly one physical GPU to all children and never launches DDP.
+# Dry-run the one-seed development schedule.  It exposes exactly one physical
+# GPU to all children and never launches DDP.  The 1/16 panel limits only
+# side-train (2,487 frames); side-test and top-test remain complete.
 python -m scripts.run_itop_study \
   --data_dir /home/workspace/lrh/DATA/Tpami/ITOP \
   --study_dir /home/workspace/lrh/RESULTS/Tpami/ITOP \
-  --profile development --gpu 3 --seeds 42 --dry_run
+  --profile development --gpu 3 --seeds 42 \
+  --train_cache_sample_limit 2487 --dry_run
 
 # Remove --dry_run to execute. The final protocol uses 512 points and one
 # explicitly recorded seed on the same single GPU. Completed stages are skipped, interrupted
@@ -589,8 +591,9 @@ features, then compares independent-joint Gaussian, graph Gaussian, and graph
 Student-t operators behind the same frozen backbone and deterministic mean
 readout. It reports side-view IID and side-to-top OOD accuracy, likelihood,
 calibration, risk--coverage, occlusion, and residual-correlation metrics. The
-development/final point budgets are 256/512; no ground-truth torso centering is
-used.
+development/final point budgets are 256/512; the development subset is only a
+configuration gate, while the final protocol uses all side-train frames. No
+ground-truth torso centering is used.
 
 Training writes an atomic `history.json` after every epoch with train/validation
 losses, proper-NLL components, learning rates, and gradient norms. Non-finite

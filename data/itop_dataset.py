@@ -379,16 +379,23 @@ def get_itop_loaders(
     pin_memory: bool = False,
     persistent_workers: bool = False,
     prefetch_factor: int | None = None,
-    cache_sample_limit: int | None = None,
+    train_cache_sample_limit: int | None = None,
 ) -> tuple[PyGDataLoader, PyGDataLoader, PyGDataLoader]:
     """Build loaders from required immutable ITOP geometry caches."""
     data_dir = dataset_dir(data_dir, "ITOP")
     test_view = test_view or train_view
     train_cache = itop_cache_dir(
-        data_dir, train_view, "train", num_points, num_neighbors, cache_sample_limit
+        data_dir,
+        train_view,
+        "train",
+        num_points,
+        num_neighbors,
+        train_cache_sample_limit,
     )
+    # Development panels may reduce only training exposure.  Test views always
+    # use their complete immutable cache so side/top decisions remain comparable.
     test_cache = itop_cache_dir(
-        data_dir, test_view, "test", num_points, num_neighbors, cache_sample_limit
+        data_dir, test_view, "test", num_points, num_neighbors
     )
     train_full = ITOPCachedDataset(
         train_cache,

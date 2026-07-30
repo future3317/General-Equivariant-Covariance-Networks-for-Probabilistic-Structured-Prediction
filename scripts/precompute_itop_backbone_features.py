@@ -53,6 +53,12 @@ def main() -> None:
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--num_workers", type=int, default=8)
     parser.add_argument(
+        "--train_cache_sample_limit",
+        type=int,
+        default=None,
+        help="read a limited side-train cache while retaining complete test views",
+    )
+    parser.add_argument(
         "--device", default="cuda" if torch.cuda.is_available() else "cpu"
     )
     args = parser.parse_args()
@@ -101,7 +107,14 @@ def main() -> None:
     counts = {}
     for name, (view, split) in splits.items():
         output_path = args.output_dir / f"{name}.pt"
-        loader = get_itop_split_loader(view=view, split=split, **loader_kwargs)
+        loader = get_itop_split_loader(
+            view=view,
+            split=split,
+            cache_sample_limit=(
+                args.train_cache_sample_limit if split == "train" else None
+            ),
+            **loader_kwargs,
+        )
         payload = _extract(
             backbone,
             loader,
@@ -122,6 +135,9 @@ def main() -> None:
         "backbone_precision": training_args.backbone_precision,
         "num_points": training_args.num_points,
         "num_neighbors": training_args.num_neighbors,
+        "train_cache_sample_limit": getattr(
+            training_args, "train_cache_sample_limit", None
+        ),
         "counts": counts,
     }
     (args.output_dir / "metadata.json").write_text(

@@ -3,7 +3,8 @@
 This is a development gate, not a benchmark result. It uses deterministic
 prefix-limited geometry caches solely to verify that the existing ITOP training
 route can fit signal and execute the same side/top evaluation path as a full
-run.
+run. The legacy 640-frame smoke cache is a functional test only. Method
+selection now uses the separate 1/16 side-train development panel below.
 
 ## Fixed scientific contract
 
@@ -26,5 +27,13 @@ run.
   SPD finite graph Student-t loss, and rotation/SPD regression tests. No speed
   claim is made until an eager profile is recorded on the same panel.
 
-The small cache changes only data volume and is never used for full-data
-metrics, model selection, or paper claims.
+## Controlled 1/16 development panel
+
+- Training exposure is the deterministic first 2,487 valid side-train frames
+  (approximately 1/16 of the official training split), with its limit encoded
+  in both the cache path and run manifest.
+- The validation split is drawn only from those 2,487 training frames using
+  the recorded seed. Side-test and top-test always use the complete immutable
+  test caches; they are never prefix-limited by the development flag.
+- This panel selects stable model/training choices only. It must not be cited
+  as a benchmark or substituted for the final full side-train experiment.

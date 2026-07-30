@@ -95,6 +95,11 @@ def _training_command(
         "--device",
         "cuda:0",
     ]
+    train_cache_sample_limit = getattr(args, "train_cache_sample_limit", None)
+    if train_cache_sample_limit is not None:
+        command.extend(
+            ("--train_cache_sample_limit", str(train_cache_sample_limit))
+        )
     if backbone_checkpoint is not None:
         command.extend(("--backbone_checkpoint", str(backbone_checkpoint)))
     if feature_cache is not None:
@@ -140,6 +145,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--num_workers", type=int, default=8)
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument(
+        "--train_cache_sample_limit",
+        type=int,
+        default=None,
+        help="limit only side-train exposure; side/top test views remain complete",
+    )
+    parser.add_argument(
         "--tp_backend", choices=("e3nn", "cueq"), default="e3nn",
         help="explicit tensor-product backend; no implicit kernel fallback",
     )
@@ -171,6 +182,8 @@ def main() -> None:
     else:
         args.num_points = 512
         deterministic_epochs, frozen_epochs, joint_epochs = 100, 60, 30
+    if args.train_cache_sample_limit is not None and args.train_cache_sample_limit < 2:
+        raise ValueError("--train_cache_sample_limit must be at least 2")
 
     environment = os.environ.copy()
     environment["CUDA_VISIBLE_DEVICES"] = args.gpu
@@ -184,6 +197,7 @@ def main() -> None:
             "single_gpu": True,
             "physical_gpu": args.gpu,
             "num_points": args.num_points,
+            "train_cache_sample_limit": args.train_cache_sample_limit,
             "seeds": list(seeds),
             "probabilistic_models": list(PROBABILISTIC_MODELS),
         }
@@ -193,13 +207,12 @@ def main() -> None:
 
     geometry_stages = (("side", "train"), ("side", "test"), ("top", "test"))
     for view, split in geometry_stages:
-        cache = (
-            args.data_dir
-            / "cache"
-            / f"{view}_{split}_n{args.num_points}_k16_centered_v1"
+        sample_limit = args.train_cache_sample_limit if split == "train" else None
+        suffix = "" if sample_limit is None else f"_m{sample_limit}"
+        cache = args.data_dir / "cache" / (
+            f"{view}_{split}_n{args.num_points}_k16_centered_v1{suffix}"
         )
-        _run(
-            [
+        command = [
                 sys.executable,
                 "-m",
                 "scripts.precompute_itop_geometry",
@@ -213,7 +226,11 @@ def main() -> None:
                 str(args.num_points),
                 "--num_neighbors",
                 "16",
-            ],
+            ]
+        if sample_limit is not None:
+            command.extend(("--max_samples", str(sample_limit)))
+        _run(
+            command,
             outputs=(cache / "metadata.json",),
             environment=environment,
             dry_run=args.dry_run,
@@ -261,7 +278,12 @@ def main() -> None:
                 str(args.num_workers),
                 "--device",
                 "cuda:0",
-            ],
+            ]
+            + (
+                ["--train_cache_sample_limit", str(args.train_cache_sample_limit)]
+                if args.train_cache_sample_limit is not None
+                else []
+            ),
             outputs=(
                 feature_cache / "metadata.json",
                 feature_cache / "side_train.pt",

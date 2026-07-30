@@ -713,8 +713,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--num_points", type=int, choices=(256, 512), default=512)
     parser.add_argument("--num_neighbors", type=int, default=16)
     parser.add_argument(
-        "--cache_sample_limit", type=int, default=None,
-        help="read a deterministic limited geometry cache; omit for the full cache",
+        "--train_cache_sample_limit", type=int, default=None,
+        help="limit only the immutable training geometry cache; tests remain full",
     )
     parser.add_argument("--max_radius", type=float, default=0.5)
     parser.add_argument("--batch_size", type=int, default=16)
@@ -771,7 +771,7 @@ def main() -> None:
         pin_memory=device.type == "cuda",
         persistent_workers=args.num_workers > 0,
         prefetch_factor=args.prefetch_factor,
-        cache_sample_limit=args.cache_sample_limit,
+        train_cache_sample_limit=args.train_cache_sample_limit,
     )
     feature_cache_metadata = None
     if args.feature_cache is not None:
