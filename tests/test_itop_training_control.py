@@ -19,7 +19,7 @@ from scripts.train_itop import (
     _update_early_stopping,
     train_epoch,
 )
-from scripts.run_itop_study import _training_command
+from scripts.run_itop_study import _geometry_cache_complete, _training_command
 from torch.utils.data import DataLoader, RandomSampler, TensorDataset
 
 
@@ -183,6 +183,15 @@ def test_test_loader_kwargs_exclude_train_cache_limit():
         {"train_cache_sample_limit": 2487, "batch_size": 16}
     )
     assert kwargs == {"batch_size": 16}
+
+
+def test_geometry_cache_requires_exact_sample_limit(tmp_path):
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    (cache / "metadata.json").write_text('{"sample_limit": 64}', encoding="utf-8")
+    with pytest.raises(RuntimeError, match="stale ITOP geometry cache"):
+        _geometry_cache_complete(cache, sample_limit=None)
+    assert _geometry_cache_complete(cache, sample_limit=64)
 
 
 def test_rng_checkpoint_round_trip_is_exact(tmp_path):

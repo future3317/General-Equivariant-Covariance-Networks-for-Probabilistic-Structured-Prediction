@@ -23,6 +23,22 @@ def _complete(paths: Iterable[Path]) -> bool:
     return all(path.is_file() for path in paths)
 
 
+def _geometry_cache_complete(cache: Path, *, sample_limit: int | None) -> bool:
+    """Accept only a cache with the exact requested exposure contract."""
+    metadata_path = cache / "metadata.json"
+    if not metadata_path.is_file():
+        return False
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    actual_limit = metadata.get("sample_limit")
+    if actual_limit != sample_limit:
+        raise RuntimeError(
+            f"stale ITOP geometry cache has sample_limit={actual_limit}, expected "
+            f"{sample_limit}: {cache}. Remove this incompatible cache explicitly "
+            "before rerunning."
+        )
+    return True
+
+
 def _run(
     command: list[str],
     *,
@@ -229,12 +245,15 @@ def main() -> None:
             ]
         if sample_limit is not None:
             command.extend(("--max_samples", str(sample_limit)))
-        _run(
-            command,
-            outputs=(cache / "metadata.json",),
-            environment=environment,
-            dry_run=args.dry_run,
-        )
+        if _geometry_cache_complete(cache, sample_limit=sample_limit):
+            print(f"[skip complete] {cache}")
+        else:
+            _run(
+                command,
+                outputs=(cache / "metadata.json",),
+                environment=environment,
+                dry_run=args.dry_run,
+            )
 
     deterministic_runs = []
     for seed in seeds:
