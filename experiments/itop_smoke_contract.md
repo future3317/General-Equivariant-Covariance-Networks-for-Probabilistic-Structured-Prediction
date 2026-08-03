@@ -37,3 +37,13 @@ selection now uses the separate 1/16 side-train development panel below.
   test caches; they are never prefix-limited by the development flag.
 - This panel selects stable model/training choices only. It must not be cited
   as a benchmark or substituted for the final full side-train experiment.
+
+## Completed development result
+
+The server run `RESULTS/Tpami/ITOP/dev_1of16_20260730/` completed with the
+complete 4,863-frame side-test and top-test caches. Graph Student-t was selected
+by validation NLL. Its side/top test MPJPE is 28.416/78.545 cm and its proper
+NLL is -45.944/75.700, versus 27.929/75.563 cm and -13.326/291.460 for the
+independent Gaussian comparison. Top MACE is 0.500 and side/top uncertainty
+AUROC is 0.197; these negative calibration diagnostics are retained as part
+of the decision record. The result is development evidence only.

@@ -50,10 +50,19 @@ can reject an unreachable or unsupported lowering with a certificate instead of
 silently changing the requested representation or probabilistic family.
 
 The repository contains the complete ITOP data interface, geometry/feature
-cache builders, single-GPU study runner, and metric/evaluation code. A bounded
-server smoke run exercises the side/top OOD path; its artifacts are archived
-with the TPAMI manuscript. It is development evidence only, not a replacement
-for the final full-data benchmark.
+cache builders, single-GPU study runner, and metric/evaluation code. A controlled
+one-seed 1/16 server development panel exercises the complete side/top OOD path
+on 2,487 side-train frames and all 4,863 frames in each test view. Its artifacts
+are archived with the TPAMI manuscript. It is development evidence for method
+selection and compiler execution, not a replacement for the final full-data
+benchmark.
+
+The panel selects graph Student-t by validation proper NLL. On side/top test it
+obtains MPJPE 28.416/78.545 cm and NLL -45.944/75.700, while independent
+Gaussian obtains 27.929/75.563 cm and -13.326/291.460. Top-view MACE remains
+0.500 and the uncertainty AUROC is 0.197, so no calibration or SOTA claim is
+made. See `results/itop_dev_1of16_20260730/` and
+`figures/itop_dev_1of16_20260730/` for the checked-in records and figures.
 
 ## Evidence and uncertainty semantics
 

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "profile": "development",
+  "single_gpu": true,
+  "physical_gpu": "2",
+  "num_points": 256,
+  "train_cache_sample_limit": 2487,
+  "seeds": [
+    42
+  ],
+  "probabilistic_models": [
+    "independent_gaussian",
+    "graph_gaussian",
+    "graph_student_t"
+  ]
+}

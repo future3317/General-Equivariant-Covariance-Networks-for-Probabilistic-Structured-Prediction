@@ -80,8 +80,11 @@ were `2.3e-6`, `1.9e-6`, and `1.1e-5`, respectively.  This is a causal
 orientation test, not a dielectric performance claim: it verifies that the
 module can improve the proper score without using spectral rescaling.
 
-The final staged dielectric run and quantitative ITOP benchmark remain
-separate experiments and are not represented by this synthetic result.
+The final staged dielectric run and the ITOP development panel remain separate
+experiments and are not represented by this synthetic result.  The completed
+ITOP panel is archived under `results/itop_dev_1of16_20260730/`; it is a
+one-seed 1/16 development result, while the full side-train/512-point study
+remains a separate final benchmark.
 
 ## Paper build
 

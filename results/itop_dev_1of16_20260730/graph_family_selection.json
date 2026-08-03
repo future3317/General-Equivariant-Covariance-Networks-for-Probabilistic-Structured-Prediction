@@ -1,0 +1,8 @@
+{
+  "criterion": "mean_seed_validation_nll",
+  "scores": {
+    "graph_gaussian": -51.55105541598412,
+    "graph_student_t": -52.906351274059666
+  },
+  "selected": "graph_student_t"
+}
