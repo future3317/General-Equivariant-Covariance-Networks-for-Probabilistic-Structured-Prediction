@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from matplotlib.colors import Normalize
-from scipy.stats import beta as beta_dist, t as student_t_dist
+from scipy.stats import chi2, f as f_dist, t as student_t_dist
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -239,11 +239,16 @@ def plot_uncertainty_alignment(
         ax.set_xticks(range(6), labels, rotation=45, ha="right", fontsize=7)
         ax.set_yticks(range(6), labels, fontsize=7)
         ax.set_title(title, loc="left", fontsize=9, fontweight="bold")
+        ax.axvline(2.5, color="white", linewidth=1.0)
+        ax.axhline(2.5, color="white", linewidth=1.0)
+        ax.text(0.25, 1.12, "Diagonal", transform=ax.transAxes, ha="center", fontsize=7)
+        ax.text(0.75, 1.12, "Shear", transform=ax.transAxes, ha="center", fontsize=7)
         for i in range(6):
             for j in range(6):
                 ax.text(j, i, f"{matrix[i, j]:.2f}", ha="center", va="center", fontsize=6)
     cbar_ax = fig.add_axes([0.635, 0.20, 0.012, 0.62])
     cbar = fig.colorbar(image, cax=cbar_ax)
+    cbar.set_label("Correlation", fontsize=8)
     cbar.ax.tick_params(labelsize=7)
 
     x = np.arange(6)
@@ -313,22 +318,21 @@ def plot_calibration(
     observed = np.asarray(
         [coverages[f"coverage_{int(level * 100):02d}"] for level in levels], dtype=float
     )
-    n_samples = int(mu.shape[0])
-    # A confidence band around the ideal binomial coverage makes sampling
-    # variability explicit without implying an additional learned quantity.
-    lower_ci, upper_ci = [], []
-    for level, empirical in zip(levels, observed):
-        k = int(round(empirical * n_samples))
-        lower_ci.append(
-            0.0
-            if k == 0
-            else float(beta_dist.ppf(0.025, k, n_samples - k + 1))
+    # Bootstrap the complete coverage curve at the sample level.  This keeps
+    # the dependence between confidence levels visible and avoids presenting
+    # ten unrelated binomial intervals as a calibration band.
+    maha2 = mahalanobis_distance_squared(y - mu, scale).detach().cpu().numpy()
+    thresholds = (
+        chi2.ppf(levels, df=float(mu.shape[-1]))
+        if distribution == "gaussian"
+        else float(mu.shape[-1]) * f_dist.ppf(
+            levels, dfn=float(mu.shape[-1]), dfd=float(student_t_dof)
         )
-        upper_ci.append(
-            1.0
-            if k == n_samples
-            else float(beta_dist.ppf(0.975, k + 1, n_samples - k))
-        )
+    )
+    rng = np.random.default_rng(42)
+    indices = rng.integers(0, len(maha2), size=(500, len(maha2)))
+    bootstrap_coverages = (maha2[indices, None] < thresholds[None, None, :]).mean(axis=1)
+    lower_ci, upper_ci = np.percentile(bootstrap_coverages, (2.5, 97.5), axis=0)
 
     ax_cov.plot(
         levels,
@@ -344,7 +348,7 @@ def plot_calibration(
         upper_ci,
         color=COLORS["champagne_light"],
         alpha=0.38,
-        label="95% binomial interval",
+        label="95% bootstrap band",
     )
     ax_cov.plot(
         levels,
@@ -361,12 +365,16 @@ def plot_calibration(
     ax_cov.legend(loc="lower right", fontsize=7)
     ax_cov.set_xlim(0.0, 1.0)
     ax_cov.set_ylim(0.0, 1.0)
+    ax_cov.set_aspect("equal", adjustable="box")
+    ax_cov.set_box_aspect(1)
 
     # Right: Q-Q plot.
     theoretical, empirical = qq_data(
         mu, y, scale, num_quantiles=100, reference=distribution,
         student_t_dof=student_t_dof,
     )
+    theoretical = np.maximum(np.asarray(theoretical, dtype=float), 1e-8)
+    empirical = np.maximum(np.asarray(empirical, dtype=float), 1e-8)
     ax_qq.plot(
         theoretical,
         empirical,
@@ -376,10 +384,11 @@ def plot_calibration(
         alpha=0.7,
         label="Empirical",
     )
+    min_val = min(theoretical.min(), empirical.min())
     max_val = max(theoretical.max(), empirical.max())
     ax_qq.plot(
-        [0, max_val],
-        [0, max_val],
+        [min_val, max_val],
+        [min_val, max_val],
         "--",
         color=COLORS["champagne_gold"],
         linewidth=1.2,
@@ -391,6 +400,8 @@ def plot_calibration(
     ax_qq.set_ylabel(r"Empirical Mahalanobis$^2$ quantile", fontsize=9)
     ax_qq.set_title(f"Q-Q Calibration ({distribution})", fontsize=10)
     ax_qq.legend(fontsize=7)
+    ax_qq.set_xscale("log")
+    ax_qq.set_yscale("log")
 
     for ax in axes:
         ax.tick_params(labelsize=8)
@@ -486,11 +497,24 @@ def plot_spectral_diagnostics(
             label="Spectral window",
         )
         ax_spectrum.axvline(upper, color=COLORS["champagne_gold"], linestyle="--")
-        ax_spectrum.set_xlim(lower - 0.35, upper + 0.35)
-    ax_spectrum.set_xlabel(r"$\log$ covariance eigenvalue", fontsize=9)
+        ax_spectrum.text(
+            0.98,
+            0.96,
+            f"Certified window [{lower:.2f}, {upper:.2f}]",
+            transform=ax_spectrum.transAxes,
+            ha="right",
+            va="top",
+            fontsize=7,
+            color=COLORS["dark_gray"],
+        )
+    spectrum_min = float(log_eigenvalues.min())
+    spectrum_max = float(log_eigenvalues.max())
+    spectrum_pad = max(0.05, 0.06 * (spectrum_max - spectrum_min))
+    ax_spectrum.set_xlim(spectrum_min - spectrum_pad, spectrum_max + spectrum_pad)
+    ax_spectrum.set_xlabel(r"$\log$ scatter eigenvalue", fontsize=9)
     ax_spectrum.set_ylabel("Density", fontsize=9)
     ax_spectrum.set_title("Spectral-Window Utilization", fontsize=10)
-    ax_spectrum.legend(loc="upper center", fontsize=7)
+    ax_spectrum.legend(loc="upper left", fontsize=7)
 
     sorted_condition = np.sort(condition_numbers)
     quantiles = np.linspace(0.0, 1.0, len(sorted_condition), endpoint=True)
@@ -510,12 +534,12 @@ def plot_spectral_diagnostics(
             color=COLORS["champagne_gold"],
             linestyle="--",
             linewidth=1.2,
-            label="Theoretical maximum",
+            label=rf"Certified bound $e^{{{condition_log_bound:g}}}={upper_condition:.1f}$",
         )
     ax_condition.set_xscale("log")
     ax_condition.set_xlabel("Condition number", fontsize=9)
     ax_condition.set_ylabel("Empirical CDF", fontsize=9)
-    ax_condition.set_title("Conditioning of Predicted Covariances", fontsize=10)
+    ax_condition.set_title("Conditioning of Predicted Scatters", fontsize=10)
     ax_condition.legend(loc="lower right", fontsize=7)
     for ax in axes:
         ax.tick_params(labelsize=8)
