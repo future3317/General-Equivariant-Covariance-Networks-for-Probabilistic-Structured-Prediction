@@ -58,6 +58,10 @@ def test_declarative_readout_api_builds_executable_and_full_report():
     assert record["execution_fidelity"]["exactness"] == "exact_for_active_family"
     assert record["probability"]["scale_semantics"] == "scatter"
     assert record["objective"]["proper"]
+    assert record["compiler_soundness"]["scope"].startswith("compositionally verified")
+    assert "formal verification of arbitrary user-defined primitives" in record[
+        "compiler_soundness"
+    ]["not_claimed"]
     assert record["complexity"]["parameter_counts"]["readout_trainable"] == sum(
         parameter.numel() for parameter in readout.parameters()
     )

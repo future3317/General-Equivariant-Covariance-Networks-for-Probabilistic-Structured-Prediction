@@ -95,6 +95,17 @@ class OperatorVerification:
     result_dimension: int | None = None
     result_irreps: str | None = None
     environment_typed: bool = False
+    proof_scope: str = "closed_typed_primitive_rule_set"
+    trusted_base: tuple[str, ...] = (
+        "registered primitive semantics",
+        "representation/decomposition oracles",
+        "registered lowering rules",
+    )
+    non_claims: tuple[str, ...] = (
+        "formal proof of arbitrary user-defined primitives",
+        "completeness for all equivariant SPD programs",
+        "calibration or physical uncertainty identification",
+    )
 
     @property
     def valid(self) -> bool:
@@ -121,6 +132,9 @@ class OperatorVerification:
             "result_irreps": self.result_irreps,
             "environment_typed": self.environment_typed,
             "derivation": "closed_typed_primitive_rule_set",
+            "proof_scope": self.proof_scope,
+            "trusted_base": list(self.trusted_base),
+            "non_claims": list(self.non_claims),
         }
 
 

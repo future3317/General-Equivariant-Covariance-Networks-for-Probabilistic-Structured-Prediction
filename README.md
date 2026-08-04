@@ -24,6 +24,14 @@ Gaussian or Student-t objective. The compiler guarantees representation and
 probabilistic validity; calibration and the statistical interpretation of a
 learned distribution are separate, explicitly evaluated properties.
 
+The certificate is deliberately scoped: it proves compositionally correct
+composition of registered typed primitives and lowerings. It is not a formal
+proof of arbitrary user-defined primitives, a completeness theorem for all
+equivariant SPD programs, or a calibration/physical-uncertainty guarantee.
+The machine-readable boundary is recorded in every compilation report under
+`compiler_soundness`; see
+[`docs/compiler_certificate_scope.md`](docs/compiler_certificate_scope.md).
+
 The same representation layer can compile `Lambda^2(V)` for orientation
 calibration. `EquivariantIsospectralOrientationCalibrator` predicts a skew
 generator `K` in an orthonormal basis and applies `exp(K) S exp(K)^T`. It is
@@ -645,6 +653,30 @@ python -m scripts.benchmark_stf_backend \
   --dtypes float32 --executions eager,compile \
   --warmup 20 --repeats 100 \
   --output results/stf_backend_sweep_cuda.json
+```
+
+The compiler-level system closure is measured separately from training. It
+records plan/materialization time, synchronized readout forward and
+forward/backward latency, peak CUDA memory, batch/multiplicity scaling, FP32
+or BF16, and eager/`torch.compile` status. Unsupported combinations are
+written as explicit errors and never silently fall back:
+
+```bash
+python -m scripts.benchmark_compiler_system \
+  --device cuda --warmup 10 --repeats 100 \
+  --output results/compiler_system_cuda.json
+```
+
+The statistical closure is a controlled ground-truth benchmark rather than a
+claim about physical aleatoric covariance. A compiler-produced teacher emits
+known Student-t scatter for full, low-rank, isotypic-block, and graph-precision
+families; repeated observations test recovery, Student-t radial coverage,
+equivariance, and arbitrary orthogonal coordinate-change invariance:
+
+```bash
+python -m experiments.synthetic_covariance_benchmark \
+  --device cuda --contexts 128 --replicates 32 --steps 500 --seeds 0,1,2 \
+  --output results/synthetic_covariance_benchmark_cuda.json
 ```
 
 An existing ModelNet40 compiler checkpoint can be audited without training:

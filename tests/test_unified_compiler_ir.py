@@ -413,6 +413,8 @@ def test_typed_leaf_is_not_a_semantic_operator_certificate():
     assert not certificate.valid
     assert certificate.positivity.value == "unknown"
     assert certificate.equivariance.value == "unknown"
+    assert certificate.proof_scope == "closed_typed_primitive_rule_set"
+    assert "calibration or physical uncertainty identification" in certificate.non_claims
     assert certificate.positivity.value == "unknown"
     assert certificate.equivariance.value == "unknown"
 

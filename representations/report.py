@@ -553,6 +553,19 @@ def build_compilation_report(
         "probability": probability,
         "output_scope": compilation.config.output_scope,
         "certificates": certificates,
+        "compiler_soundness": {
+            "scope": "compositionally verified relative to registered typed primitives and lowering rules",
+            "trusted_base": [
+                "registered primitive semantics",
+                "representation/decomposition oracles",
+                "registered lowering rules",
+            ],
+            "not_claimed": [
+                "formal verification of arbitrary user-defined primitives",
+                "completeness for all equivariant SPD programs",
+                "calibration or physical uncertainty identification",
+            ],
+        },
     }
     identity = {k: v for k, v in record.items() if k != "compatibility_hash"}
     payload = json.dumps(identity, sort_keys=True, separators=(",", ":"), default=str)
