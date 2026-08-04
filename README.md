@@ -217,6 +217,20 @@ coordinate change, coverage was unchanged and the threshold difference was
 `1.91e-6` in FP32. This is an implementation/invariance audit, not an ITOP or
 dielectric calibration result.
 
+For the completed ITOP graph Student-t artifact, the post-hoc diagnostic is:
+
+```bash
+python -m scripts.evaluate_itop_conformal \
+  --model-dir results/itop_final_single_seed_20260803/seed_42/frozen_graph_student_t \
+  --output results/itop_conformal_posthoc.json \
+  --calibration-fraction 0.5 --alpha 0.1
+```
+
+This intentionally consumes half of the official side-test predictions for
+calibration and therefore cannot replace the untouched benchmark. The side
+holdout is an IID diagnostic; the top-view result is a cross-view transfer
+diagnostic with no conformal guarantee.
+
 An optional, explicitly non-directional auxiliary is also available for
 audited ablations. `scripts/build_dielectric_pseudo_covariance.py` consumes a
 five-fold, train-only OOF cache and constructs an isotropic residual-covariance
