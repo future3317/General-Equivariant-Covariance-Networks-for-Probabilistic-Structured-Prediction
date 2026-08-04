@@ -1,16 +1,17 @@
-# Representation-Compiled Equivariant Probabilistic Networks
+# From Structured Output Types to Predictive Distributions
 
-TPAMI submission implementation for *A Basis-Agnostic Representation Compiler for Equivariant
-Probabilistic Structured Prediction*.
+TPAMI submission implementation for *From Structured Output Types to Predictive
+Distributions: A Verified Compiler for Equivariant Learning*.
 
 The normative mathematical and inference semantics are fixed in
 [`mathematical_contract.md`](mathematical_contract.md). Code, experiments, and
 the manuscript reference this contract rather than maintaining parallel
 implicit definitions.
 
-The main abstraction is a representation compiler. Given a finite-dimensional
-orthogonal `O(3)` output representation `V` (or a Cartesian tensor symmetry
-formula), it constructs
+The main abstraction is a verified compiler from structured output declarations
+to equivariant predictive distributions. Given a finite-dimensional orthogonal
+`O(3)` output representation `V` (or a Cartesian tensor symmetry formula), a
+distribution law, and an operator family, it constructs
 
 ```text
 T(V) = Irreps(V + Sym^2(V))
@@ -18,11 +19,13 @@ T(V) = Irreps(V + Sym^2(V))
 
 and compiles a target-directed Clebsch--Gordan graph whose final feature space
 covers every required angular momentum, parity, and irrep multiplicity. The
-same compilation result selects an execution basis, creates mean and
-uncertainty-operator representations, an SPD parameterization, and a proper
-Gaussian or Student-t objective. The compiler guarantees representation and
-probabilistic validity; calibration and the statistical interpretation of a
-learned distribution are separate, explicitly evaluated properties.
+compiler output is an executable probabilistic readout, a semantic certificate,
+and an execution plan. The same compilation result selects an execution basis,
+creates mean and uncertainty-operator representations, an SPD parameterization,
+and a proper Gaussian or Student-t objective. The compiler guarantees
+representation and probabilistic validity; calibration and the statistical
+interpretation of a learned distribution are separate, explicitly evaluated
+properties.
 
 The certificate is deliberately scoped: it proves compositionally correct
 composition of registered typed primitives and lowerings. It is not a formal

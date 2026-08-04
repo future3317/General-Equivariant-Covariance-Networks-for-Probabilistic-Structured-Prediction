@@ -1,10 +1,10 @@
 """Controlled covariance-recovery benchmark for the statistical closure.
 
-Each row uses a compiler-produced teacher and a learner with the same feature
-contract.  The teacher generates repeated observations from a known Student-t
-scale; the learner sees only the repeated observations and must recover the
-declared full, low-rank, isotypic-block, or graph-precision family.  The
-benchmark also checks group equivariance and invariance of the proper score
+Matching rows use a compiler-produced teacher and learner with the same
+feature and family contract.  Cross-family rows keep the output type fixed,
+change only the declared operator family, and test whether a misspecified
+family fails in the expected way.  All rows use repeated observations from a
+known Student-t scale and check equivariance plus proper-score invariance
 under an independent orthogonal coordinate change.
 """
 
@@ -72,9 +72,14 @@ def _cases() -> dict[str, tuple[str, object]]:
     }
 
 
-def _prepare_head(head, teacher, *, scale: float = 0.15) -> None:
+def _prepare_head(head, teacher, *, scale: float = 0.15) -> bool:
+    shared_lifting = (
+        head.compilation.active_target_irreps
+        == teacher.compilation.active_target_irreps
+    )
     with torch.no_grad():
-        head.lifting.load_state_dict(teacher.lifting.state_dict())
+        if shared_lifting:
+            head.lifting.load_state_dict(teacher.lifting.state_dict())
         for module_name in ("mean_projection", "covariance_projection", "scale_projection"):
             module = getattr(head, module_name, None)
             if module is None:
@@ -92,6 +97,7 @@ def _prepare_head(head, teacher, *, scale: float = 0.15) -> None:
         if module is not None:
             for parameter in module.parameters():
                 parameter.requires_grad_(True)
+    return shared_lifting
 
 
 def _basis_invariance(mu, target, scale, seed: FeatureSpec) -> float:
@@ -130,10 +136,12 @@ def _equivariance_error(head, x, batch, scale, output: str) -> float:
     return float(torch.maximum(mu_error, scale_error))
 
 
-def run_case(
-    name: str,
+def run_pair(
+    teacher_name: str,
+    learner_name: str,
     output: str,
-    family,
+    teacher_family,
+    learner_family,
     *,
     contexts: int,
     replicates: int,
@@ -145,20 +153,27 @@ def run_case(
     torch.manual_seed(seed)
     dev = torch.device(device)
     feature = FeatureSpec.from_irreps(output, scope="global")
-    plan = plan_readout(
+    teacher_plan = plan_readout(
         feature,
         output=output,
-        covariance=family,
+        covariance=teacher_family,
         distribution="student_t",
         student_t_dof=NU,
     )
-    teacher = plan.compilation.build_head().to(dev)
-    learner = plan.compilation.build_head().to(dev)
+    learner_plan = plan_readout(
+        feature,
+        output=output,
+        covariance=learner_family,
+        distribution="student_t",
+        student_t_dof=NU,
+    )
+    teacher = teacher_plan.compilation.build_head().to(dev)
+    learner = learner_plan.compilation.build_head().to(dev)
     # Keep the known teacher inside a numerically comfortable SPD regime on
     # both CPU and CUDA. This is a declared synthetic-data scale, not a
     # runtime fallback for a failed SPD map.
     _prepare_head(teacher, teacher)
-    _prepare_head(learner, teacher)
+    shared_lifting = _prepare_head(learner, teacher)
     teacher.eval()
     learner.train()
 
@@ -168,25 +183,26 @@ def run_case(
     train_batch = torch.arange(train_x.shape[0], device=dev)
     context_batch = torch.arange(contexts, device=dev)
     test_batch = torch.arange(test_contexts, device=dev)
-    spd_map = plan.compilation.build_spd_map().to(dev)
+    teacher_spd_map = teacher_plan.compilation.build_spd_map().to(dev)
+    learner_spd_map = learner_plan.compilation.build_spd_map().to(dev)
     loss_fn = StudentTNLL(NU)
     with torch.no_grad():
         train_mu, train_params = teacher(x_context, context_batch)
-        train_scale = spd_map(train_params)
+        train_scale = teacher_spd_map(train_params)
         y_train = _sample_student(
             train_mu.repeat_interleave(replicates, dim=0),
             train_scale.repeat_interleave(replicates, dim=0),
             NU,
         )
         true_mu, true_params = teacher(x_test, test_batch)
-        true_scale = spd_map(true_params)
+        true_scale = teacher_spd_map(true_params)
 
     trainable = [parameter for parameter in learner.parameters() if parameter.requires_grad]
     optimizer = torch.optim.AdamW(trainable, lr=3e-3)
     for _ in range(steps):
         optimizer.zero_grad(set_to_none=True)
         mu, params = learner(train_x, train_batch)
-        loss, _ = loss_fn(mu.detach(), params, y_train, spd_map)
+        loss, _ = loss_fn(mu.detach(), params, y_train, learner_spd_map)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(trainable, max_norm=1.0)
         optimizer.step()
@@ -194,8 +210,13 @@ def run_case(
     learner.eval()
     with torch.no_grad():
         pred_mu, pred_params = learner(x_test, test_batch)
-        pred_scale = spd_map(pred_params)
-        test_loss, _ = loss_fn(pred_mu, pred_params, _sample_student(true_mu, true_scale, NU), spd_map)
+        pred_scale = learner_spd_map(pred_params)
+        test_loss, _ = loss_fn(
+            pred_mu,
+            pred_params,
+            _sample_student(true_mu, true_scale, NU),
+            learner_spd_map,
+        )
 
     coverage = empirical_coverage(
         pred_mu,
@@ -218,17 +239,25 @@ def run_case(
         basis_nll_error = _basis_invariance(pred_mu, residual + pred_mu, pred_scale, feature)
 
     return {
-        "family": name,
+        "family": learner_name,
+        "teacher_family": teacher_name,
+        "learner_family": learner_name,
+        "family_match": teacher_name == learner_name,
+        "shared_lifting": shared_lifting,
         "seed": seed,
         "output_irreps": output,
-        "output_dimension": int(plan.compilation.output_spec.dim),
-        "parameter_count": int(plan.compilation.covariance_parameter_count),
-        "relation_to_full": plan.report.family["relation_to_full"],
+        "output_dimension": int(learner_plan.compilation.output_spec.dim),
+        "parameter_count": int(learner_plan.compilation.covariance_parameter_count),
+        "teacher_parameter_count": int(
+            teacher_plan.compilation.covariance_parameter_count
+        ),
+        "relation_to_full": learner_plan.report.family["relation_to_full"],
+        "teacher_relation_to_full": teacher_plan.report.family["relation_to_full"],
         "canonical_reachable": bool(
-            plan.report.representation_reachability["canonical"]["reachable"]
+            learner_plan.report.representation_reachability["canonical"]["reachable"]
         ),
         "active_reachable": bool(
-            plan.report.representation_reachability["active"]["reachable"]
+            learner_plan.report.representation_reachability["active"]["reachable"]
         ),
         "contexts": contexts,
         "replicates": replicates,
@@ -245,9 +274,42 @@ def run_case(
     }
 
 
+def run_case(
+    name: str,
+    output: str,
+    family,
+    *,
+    contexts: int,
+    replicates: int,
+    test_contexts: int,
+    steps: int,
+    seed: int,
+    device: str,
+) -> dict:
+    """Run one matching-family positive control."""
+    return run_pair(
+        name,
+        name,
+        output,
+        family,
+        family,
+        contexts=contexts,
+        replicates=replicates,
+        test_contexts=test_contexts,
+        steps=steps,
+        seed=seed,
+        device=device,
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--families", default=",".join(_cases()))
+    parser.add_argument(
+        "--cross-family-matrix",
+        action="store_true",
+        help="run all teacher/learner pairs for the selected same-output families",
+    )
     parser.add_argument("--contexts", type=int, default=128)
     parser.add_argument("--replicates", type=int, default=32)
     parser.add_argument("--test-contexts", type=int, default=64)
@@ -263,24 +325,55 @@ def main() -> None:
         parser.error(f"unknown families: {unknown}")
     seeds = [int(item) for item in args.seeds.split(",") if item.strip()]
     rows = []
-    for seed in seeds:
-        for family in selected:
-            output, spec = cases[family]
-            rows.append(
-                run_case(
-                    family,
-                    output,
-                    spec,
-                    contexts=args.contexts,
-                    replicates=args.replicates,
-                    test_contexts=args.test_contexts,
-                    steps=args.steps,
-                    seed=seed,
-                    device=args.device,
-                )
+    if args.cross_family_matrix:
+        dimensions = {cases[name][0] for name in selected}
+        if len(dimensions) != 1:
+            parser.error(
+                "cross-family matrix requires families with the same output representation"
             )
+        for seed in seeds:
+            for teacher_name in selected:
+                output, teacher_spec = cases[teacher_name]
+                for learner_name in selected:
+                    _, learner_spec = cases[learner_name]
+                    rows.append(
+                        run_pair(
+                            teacher_name,
+                            learner_name,
+                            output,
+                            teacher_spec,
+                            learner_spec,
+                            contexts=args.contexts,
+                            replicates=args.replicates,
+                            test_contexts=args.test_contexts,
+                            steps=args.steps,
+                            seed=seed,
+                            device=args.device,
+                        )
+                    )
+    else:
+        for seed in seeds:
+            for family in selected:
+                output, spec = cases[family]
+                rows.append(
+                    run_case(
+                        family,
+                        output,
+                        spec,
+                        contexts=args.contexts,
+                        replicates=args.replicates,
+                        test_contexts=args.test_contexts,
+                        steps=args.steps,
+                        seed=seed,
+                        device=args.device,
+                    )
+                )
     result = {
-        "kind": "synthetic_ground_truth_covariance_recovery",
+        "kind": (
+            "synthetic_cross_family_covariance_recovery"
+            if args.cross_family_matrix
+            else "synthetic_ground_truth_covariance_recovery"
+        ),
         "contract": {
             "input_action": "O(3)",
             "true_distribution": "Student-t",
@@ -289,6 +382,7 @@ def main() -> None:
             "basis_check": "independent random orthogonal coordinate change",
         },
         "protocol": {**vars(args), "output": str(args.output)},
+        "matrix_families": selected if args.cross_family_matrix else None,
         "rows": rows,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
