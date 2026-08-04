@@ -16,7 +16,9 @@ import numpy as np
 import torch
 from matplotlib.colors import Normalize
 from matplotlib.ticker import LogFormatterMathtext, LogLocator, NullFormatter
-from scipy.stats import chi2, f as f_dist, t as student_t_dist
+from scipy.stats import chi2
+from scipy.stats import f as f_dist
+from scipy.stats import t as student_t_dist
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -39,14 +41,19 @@ from scripts.dielectric_runtime import (
     configure_inference_contract,
     inference_contract_from_args,
     inference_contract_hash,
-    load_run_record,
     load_dielectric_checkpoint,
     load_dielectric_data_args,
+    load_run_record,
 )
 
 
 def plot_training_curves(history: list[dict], save_path: Path) -> None:
-    """Plot train/val loss and validation MAEs over epochs."""
+    """Plot train/val loss and validation MAEs over epochs.
+
+    Stage markers are read from the history when a staged run records them.
+    A single-stage history is labeled as such rather than assigning
+    unrecorded mean/scatter/joint boundaries.
+    """
     setup_tpami_style()
 
     epochs = [h["epoch"] for h in history]
@@ -71,13 +78,16 @@ def plot_training_curves(history: list[dict], save_path: Path) -> None:
     ax_loss.set_title("Training and Validation Loss", fontsize=10)
     ax_loss.legend(fontsize=7)
 
-    ax_mae.plot(
+    physical_line = ax_mae.plot(
         epochs,
         val_phys_mae,
         label="Physical MAE",
         color=COLORS["midnight_blue"],
     )
-    ax_mae.plot(
+    ax_mae.set_ylabel("Physical MAE", fontsize=9, color=COLORS["midnight_blue"])
+    ax_mae.tick_params(axis="y", labelcolor=COLORS["midnight_blue"])
+    ax_log = ax_mae.twinx()
+    log_line = ax_log.plot(
         epochs,
         val_log_mae,
         label="Log-KM MAE",
@@ -85,11 +95,53 @@ def plot_training_curves(history: list[dict], save_path: Path) -> None:
         linestyle="--",
     )
     ax_mae.set_xlabel("Epoch", fontsize=9)
-    ax_mae.set_ylabel("MAE", fontsize=9)
     ax_mae.set_title("Validation MAE", fontsize=10)
-    ax_mae.legend(fontsize=7)
+    ax_log.set_ylabel("Log-KM MAE", fontsize=9, color=COLORS["champagne_gold"])
+    ax_log.tick_params(axis="y", labelcolor=COLORS["champagne_gold"])
+    ax_mae.legend(physical_line + log_line, ["Physical MAE", "Log-KM MAE"], fontsize=7)
 
-    for ax in axes:
+    stage_names = [
+        item.get("training_stage", item.get("stage"))
+        for item in history
+    ]
+    if any(name is not None for name in stage_names):
+        previous = stage_names[0]
+        start_epoch = epochs[0]
+        for epoch, name in zip(epochs[1:], stage_names[1:]):
+            if name != previous:
+                ax_loss.axvline(epoch - 0.5, color=COLORS["gray"], linestyle=":")
+                ax_mae.axvline(epoch - 0.5, color=COLORS["gray"], linestyle=":")
+                ax_mae.text(
+                    start_epoch,
+                    1.03,
+                    str(previous),
+                    transform=ax_mae.get_xaxis_transform(),
+                    fontsize=7,
+                    color=COLORS["dark_gray"],
+                )
+                start_epoch = epoch
+                previous = name
+        ax_mae.text(
+            start_epoch,
+            1.03,
+            str(previous),
+            transform=ax_mae.get_xaxis_transform(),
+            fontsize=7,
+            color=COLORS["dark_gray"],
+        )
+    else:
+        ax_mae.text(
+            0.02,
+            0.97,
+            "single recorded run",
+            transform=ax_mae.transAxes,
+            ha="left",
+            va="top",
+            fontsize=7,
+            color=COLORS["dark_gray"],
+        )
+
+    for ax in (ax_loss, ax_mae, ax_log):
         ax.tick_params(labelsize=8)
     label_panels(axes, x=-0.10, y=1.02, fontsize=9)
     fig.tight_layout()
@@ -147,7 +199,7 @@ def plot_parity(pred_km: np.ndarray, target_km: np.ndarray, save_path: Path) -> 
             va="top",
             fontsize=7,
             color=COLORS["dark_gray"],
-            bbox=dict(boxstyle="round,pad=0.22", facecolor="white", alpha=0.82, edgecolor="none"),
+            bbox={"boxstyle": "round,pad=0.22", "facecolor": "white", "alpha": 0.82, "edgecolor": "none"},
         )
         ax.set_xlim(lo, hi)
         ax.set_ylim(lo, hi)

@@ -11,14 +11,14 @@ frontier width, instruction count, FLOPs, or parameters.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import importlib.util
-from typing import Iterable
+from collections.abc import Iterable
+from dataclasses import dataclass
 
 import torch
+
 from compatibility.cuequivariance import load_cuequivariance
 from compatibility.e3nn import o3
-
 from representations.dense_projector import MultiplicityFirstDenseTensorProduct
 from representations.diagnostics import (
     CompilationCertificate,
@@ -122,6 +122,25 @@ class O3LiftingPlan:
             ],
             "paths": self.paths,
         }
+
+
+def cg_instruction_multiset(plan: O3LiftingPlan) -> tuple[str, ...]:
+    """Return retained type-level CG instructions for a lifting plan.
+
+    The count is a compiler-plan diagnostic: multiplicity contraction is
+    represented separately in the stage layouts, so this records distinct
+    irrep-type instructions rather than kernel FLOPs.
+    """
+    instructions: list[str] = []
+    seed_terms = [(multiplicity, irrep) for multiplicity, irrep in plan.seed_irreps]
+    for stage in plan.stages:
+        for _, left in stage.irreps_in:
+            for _, right in seed_terms:
+                products = set(left * right)
+                for _, output in stage.irreps_out:
+                    if output in products:
+                        instructions.append(f"cg:{left}x{right}->{output}")
+    return tuple(instructions)
 
 
 @dataclass(frozen=True)

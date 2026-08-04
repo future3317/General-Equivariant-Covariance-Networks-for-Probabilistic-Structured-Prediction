@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import json
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import torch
-from compatibility.e3nn import o3
 
-from representations.adaptive_lifting import coverage_deficit, irrep_multiplicities
+from compatibility.e3nn import o3
+from representations.adaptive_lifting import (
+    cg_instruction_multiset,
+    coverage_deficit,
+    irrep_multiplicities,
+)
 from representations.diagnostics import CompilationCertificate
 
 if TYPE_CHECKING:
@@ -78,7 +82,7 @@ def _tensor_product_parameter_count(
     return count
 
 
-def _readout_parameter_count(compilation: "O3Compilation") -> int:
+def _readout_parameter_count(compilation: O3Compilation) -> int:
     plan = compilation.active_plan
     count = 0
     if plan.depth == 0:
@@ -105,7 +109,7 @@ def _readout_parameter_count(compilation: "O3Compilation") -> int:
     return count
 
 
-def _lifting_parameter_count(compilation: "O3Compilation") -> int:
+def _lifting_parameter_count(compilation: O3Compilation) -> int:
     plan = compilation.active_plan
     if plan.depth == 0:
         return _linear_parameter_count(plan.seed_irreps, plan.target_irreps)
@@ -123,20 +127,20 @@ def _lifting_parameter_count(compilation: "O3Compilation") -> int:
     )
 
 
-def _mean_parameter_count(compilation: "O3Compilation") -> int:
+def _mean_parameter_count(compilation: O3Compilation) -> int:
     return _linear_parameter_count(
         compilation.active_target_irreps, compilation.mean_irreps
     )
 
 
-def _uncertainty_parameter_count(compilation: "O3Compilation") -> int:
+def _uncertainty_parameter_count(compilation: O3Compilation) -> int:
     return sum(
         _linear_parameter_count(compilation.active_target_irreps, binding.irreps)
         for binding in compilation.operator_family.parameter_bindings
     )
 
 
-def _covariance_complexity(compilation: "O3Compilation") -> dict[str, Any]:
+def _covariance_complexity(compilation: O3Compilation) -> dict[str, Any]:
     dimension = compilation.output_spec.dim
     mode = compilation.covariance_mode
     if mode == "full":
@@ -192,7 +196,7 @@ def _covariance_complexity(compilation: "O3Compilation") -> dict[str, Any]:
     }
 
 
-def _probability_semantics(compilation: "O3Compilation") -> dict[str, Any]:
+def _probability_semantics(compilation: O3Compilation) -> dict[str, Any]:
     specification = compilation.distribution_spec
     objective = specification.objective_name()
     if objective == "gaussian":
@@ -252,7 +256,7 @@ class CompilationReport:
     _json: str
 
     @classmethod
-    def from_dict(cls, record: dict[str, Any]) -> "CompilationReport":
+    def from_dict(cls, record: dict[str, Any]) -> CompilationReport:
         return cls(json.dumps(record, sort_keys=True, separators=(",", ":")))
 
     def as_dict(self) -> dict[str, Any]:
@@ -261,7 +265,7 @@ class CompilationReport:
     def __getitem__(self, key: str) -> Any:
         return self.as_dict()[key]
 
-    def with_updates(self, **updates: Any) -> "CompilationReport":
+    def with_updates(self, **updates: Any) -> CompilationReport:
         record = self.as_dict()
         record.update(updates)
         return self.from_dict(record)
@@ -315,7 +319,7 @@ class CompilationReport:
 
 
 def build_compilation_report(
-    compilation: "O3Compilation",
+    compilation: O3Compilation,
     executable: torch.nn.Module | None = None,
 ) -> CompilationReport:
     from representations.operator_lowering import match_optimized_program
@@ -542,6 +546,14 @@ def build_compilation_report(
             "lifting_edges": compilation.active_plan.depth,
             "canonical_lifting_edges": (
                 canonical_plan.depth if canonical_plan is not None else None
+            ),
+            "retained_cg_instructions": len(
+                cg_instruction_multiset(compilation.active_plan)
+            ),
+            "canonical_cg_instructions": (
+                len(cg_instruction_multiset(canonical_plan))
+                if canonical_plan is not None
+                else None
             ),
             "parameter_counts": parameter_counts,
         },

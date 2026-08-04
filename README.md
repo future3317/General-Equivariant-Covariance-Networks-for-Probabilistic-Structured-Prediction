@@ -778,6 +778,7 @@ equiv-compiler convert-checkpoint \
 | `equivcompiler/planning.py` | Immutable dry-run planning and compatibility hashes |
 | `equivcompiler/modules.py` | Deferred executable readout materialization |
 | `equivcompiler/checkpoint.py` | Strict exact checkpoint migration and audit |
+| `scripts/audit_compiler_evidence.py` | No-training reference/active compiler complexity audit |
 | `models/` | Equivariant backbone and structured predictor |
 | `scripts/` | Reproducible task training entry points |
 | `tests/` | Representation, equivariance, SPD, objective, and integration tests |
@@ -798,6 +799,11 @@ CUDA_VISIBLE_DEVICES=0 python -m pytest tests -q
 # Reproduce the tensor-product measurement recorded above.
 CUDA_VISIBLE_DEVICES=0 python scripts/benchmark_tp_backends.py \
   --output audit_results/cuequivariance_tp_benchmark_4090.json
+
+# Reproduce the CPU-side compiler expansion audit.  CG instruction counts are
+# retained type-level diagnostics, not FLOP or GPU-latency measurements.
+python -m scripts.audit_compiler_evidence --repeats 3 \
+  --output results/compiler_evidence_audit_local.json
 ```
 
 The compiler tests cover rank-2 and rank-4 outputs, highest angular momentum,

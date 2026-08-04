@@ -149,10 +149,10 @@ skew generator lives in \(\Lambda^2(V)\). For \(V=0e\oplus2e\),
 
 The planner performs breadth-first CG reachability with nodes identified by
 the complete `(l, parity)` type and separately checks multiplicity coverage.
-It computes the shortest tensor-product depth for the canonical full target
+It computes the shortest tensor-product depth for the reference target
 \(V\oplus\operatorname{Sym}^2(V)\) and for the active target selected by a
 structured covariance family. A restricted family may have an unreachable
-canonical reference, but its active target must be reachable. For ITOP
+reference target, but its active target must be reachable. For ITOP
 \(V=15(1o)\), the full target needs one lifting from a seed without `1e`,
 whereas the 29 local `0e+2e` graph potentials have active depth zero.
 

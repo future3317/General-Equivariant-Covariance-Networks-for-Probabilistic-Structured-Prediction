@@ -2,20 +2,19 @@
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
 import hashlib
 import json
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Literal
 
 from equivcompiler.policies import ExactOnly, FidelityPolicy, TruncatedMultiplicityRank
 from equivcompiler.specs import FeatureSpec
 from representations import O3IrrepsSpec
-from representations.adaptive_lifting import O3LiftingPlan
+from representations.adaptive_lifting import O3LiftingPlan, cg_instruction_multiset
 from representations.cartesian_stf import is_rank2_stf_output
 from representations.operator_ir import Equivariance, OperatorFamilyPlan
 from representations.operator_lowering import DEFAULT_PRIMITIVE_LOWERINGS
-
 
 ExecutorName = Literal["spherical_cg", "cartesian_stf"]
 
@@ -113,19 +112,6 @@ class ExecutorDecision:
             )
 
 
-def _cg_instruction_multiset(plan: O3LiftingPlan) -> tuple[str, ...]:
-    instructions: list[str] = []
-    seed_terms = [(mul, irrep) for mul, irrep in plan.seed_irreps]
-    for stage in plan.stages:
-        for _, left in stage.irreps_in:
-            for _, right in seed_terms:
-                products = set(left * right)
-                for _, output in stage.irreps_out:
-                    if output in products:
-                        instructions.append(f"cg:{left}x{right}->{output}")
-    return tuple(instructions)
-
-
 def _hash(record: dict) -> str:
     encoded = json.dumps(record, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -203,7 +189,7 @@ class ExecutorAnalyzer(ABC):
             f"operator:{item}"
             for item in DEFAULT_PRIMITIVE_LOWERINGS.analyze(context.operator_family)
         )
-        return _cg_instruction_multiset(context.active_plan) + operator
+        return cg_instruction_multiset(context.active_plan) + operator
 
 
 class SphericalCGAnalyzer(ExecutorAnalyzer):
