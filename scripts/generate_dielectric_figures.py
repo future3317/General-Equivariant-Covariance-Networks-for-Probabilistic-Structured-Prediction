@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from matplotlib.colors import Normalize
+from matplotlib.ticker import LogFormatterMathtext, LogLocator, NullFormatter
 from scipy.stats import chi2, f as f_dist, t as student_t_dist
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -238,11 +239,15 @@ def plot_uncertainty_alignment(
         image = ax.imshow(matrix, cmap=DIVERGING_CMAP, norm=norm)
         ax.set_xticks(range(6), labels, rotation=45, ha="right", fontsize=7)
         ax.set_yticks(range(6), labels, fontsize=7)
-        ax.set_title(title, loc="left", fontsize=9, fontweight="bold")
+        ax.set_title(
+            f"{title}\nDiagonal | shear",
+            loc="left",
+            fontsize=9,
+            fontweight="bold",
+            pad=4,
+        )
         ax.axvline(2.5, color="white", linewidth=1.0)
         ax.axhline(2.5, color="white", linewidth=1.0)
-        ax.text(0.25, 1.12, "Diagonal", transform=ax.transAxes, ha="center", fontsize=7)
-        ax.text(0.75, 1.12, "Shear", transform=ax.transAxes, ha="center", fontsize=7)
         for i in range(6):
             for j in range(6):
                 ax.text(j, i, f"{matrix[i, j]:.2f}", ha="center", va="center", fontsize=6)
@@ -494,19 +499,9 @@ def plot_spectral_diagnostics(
             lower,
             color=COLORS["champagne_gold"],
             linestyle="--",
-            label="Spectral window",
+            label=f"Spectral window [{lower:.2f}, {upper:.2f}]",
         )
         ax_spectrum.axvline(upper, color=COLORS["champagne_gold"], linestyle="--")
-        ax_spectrum.text(
-            0.98,
-            0.96,
-            f"Certified window [{lower:.2f}, {upper:.2f}]",
-            transform=ax_spectrum.transAxes,
-            ha="right",
-            va="top",
-            fontsize=7,
-            color=COLORS["dark_gray"],
-        )
     spectrum_min = float(log_eigenvalues.min())
     spectrum_max = float(log_eigenvalues.max())
     spectrum_pad = max(0.05, 0.06 * (spectrum_max - spectrum_min))
@@ -537,6 +532,10 @@ def plot_spectral_diagnostics(
             label=rf"Certified bound $e^{{{condition_log_bound:g}}}={upper_condition:.1f}$",
         )
     ax_condition.set_xscale("log")
+    ax_condition.xaxis.set_major_locator(LogLocator(base=10))
+    ax_condition.xaxis.set_major_formatter(LogFormatterMathtext(base=10))
+    ax_condition.xaxis.set_minor_locator(LogLocator(base=10, subs=np.arange(2, 10)))
+    ax_condition.xaxis.set_minor_formatter(NullFormatter())
     ax_condition.set_xlabel("Condition number", fontsize=9)
     ax_condition.set_ylabel("Empirical CDF", fontsize=9)
     ax_condition.set_title("Conditioning of Predicted Scatters", fontsize=10)
