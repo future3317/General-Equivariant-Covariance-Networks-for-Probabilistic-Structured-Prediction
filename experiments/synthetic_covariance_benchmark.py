@@ -154,6 +154,10 @@ def run_case(
     )
     teacher = plan.compilation.build_head().to(dev)
     learner = plan.compilation.build_head().to(dev)
+    # Keep the known teacher inside a numerically comfortable SPD regime on
+    # both CPU and CUDA. This is a declared synthetic-data scale, not a
+    # runtime fallback for a failed SPD map.
+    _prepare_head(teacher, teacher)
     _prepare_head(learner, teacher)
     teacher.eval()
     learner.train()
