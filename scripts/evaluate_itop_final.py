@@ -516,7 +516,7 @@ def _plot_structure(results: Path, output: Path, audit_record: dict[str, Any]) -
             color=PALETTE[index],
             label=f"{view.capitalize()} {'IID' if view == 'side' else 'OOD'}",
         )
-    axes[0].set_title(f"{audit_record['models'][model]['label']} residual dependence", loc="left", fontweight="bold")
+    axes[0].set_title("Residual dependence", loc="left", fontweight="bold")
     axes[0].set_xlabel("Skeleton graph distance")
     axes[0].set_ylabel("Residual correlation")
     axes[0].legend(fontsize=8)
@@ -525,7 +525,7 @@ def _plot_structure(results: Path, output: Path, audit_record: dict[str, Any]) -
     top = _load_metrics(audit_record, model)["top"]
     axes[1].bar(x - 0.17, [side["visible_mpjpe_cm"], top["visible_mpjpe_cm"]], 0.34, color=COLORS["midnight_blue"], label="Visible")
     axes[1].bar(x + 0.17, [side["occluded_mpjpe_cm"], top["occluded_mpjpe_cm"]], 0.34, color=COLORS["champagne_gold"], label="Occluded")
-    axes[1].set_title(f"{audit_record['models'][model]['label']} visibility error", loc="left", fontweight="bold")
+    axes[1].set_title("Visibility error", loc="left", fontweight="bold")
     axes[1].set_xticks(x, ["Side IID", "Top OOD"])
     axes[1].set_ylabel("MPJPE (cm)")
     axes[1].legend(fontsize=8)
