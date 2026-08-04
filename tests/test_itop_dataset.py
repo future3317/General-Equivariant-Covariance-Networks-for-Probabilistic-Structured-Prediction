@@ -9,6 +9,7 @@ import torch
 from data.itop_dataset import (
     ITOPCachedDataset,
     ITOPDepthDataset,
+    ITOPData,
     ITOP_OUTPUT_GRAPH,
     compact_itop_labels,
     depth_to_point_cloud,
@@ -22,6 +23,7 @@ from equivcompiler import FeatureSpec, GraphPrecision, plan_readout
 from models import ControlledMeanOperatorHead, DeterministicHead, EquivariantBackbone
 from representations import O3IrrepsSpec
 from scripts.precompute_itop_geometry import write_itop_geometry_cache
+from compatibility.torch_geometric import PyGDataLoader
 
 
 def test_limited_geometry_cache_has_a_distinct_contract_path(tmp_path):
@@ -108,6 +110,24 @@ def test_itop_skeleton_has_tree_complexity():
     assert ITOP_OUTPUT_GRAPH.num_nodes == 15
     assert ITOP_OUTPUT_GRAPH.num_edges == 14
     assert ITOP_OUTPUT_GRAPH.num_potentials * 6 == 174
+
+
+def test_itop_frame_metadata_is_not_node_offset_during_batching():
+    samples = [
+        ITOPData(
+            pos=torch.zeros(8, 3),
+            frame_index=torch.tensor([7]),
+            view_id=torch.tensor([0]),
+        ),
+        ITOPData(
+            pos=torch.zeros(8, 3),
+            frame_index=torch.tensor([11]),
+            view_id=torch.tensor([0]),
+        ),
+    ]
+    batch = next(iter(PyGDataLoader(samples, batch_size=2, shuffle=False)))
+    assert batch.frame_index.tolist() == [7, 11]
+    assert batch.view_id.tolist() == [0, 0]
 
 
 def test_itop_sample_runs_through_compiled_graph_precision_model(tmp_path):

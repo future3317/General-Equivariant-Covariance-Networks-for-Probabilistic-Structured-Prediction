@@ -73,6 +73,21 @@ ITOP_COMPACT_LABEL_FIELDS = (
 )
 
 
+class ITOPData(Data):
+    """PyG data object with scalar metadata that must not be node-offset.
+
+    PyG treats attributes whose names end in ``_index`` as index tensors and
+    increments them by the number of nodes during batching.  ITOP's
+    ``frame_index`` is an identifier, not a node index; offsetting it silently
+    corrupts saved prediction provenance while leaving model tensors unchanged.
+    """
+
+    def __inc__(self, key, value, *args, **kwargs):
+        if key in {"frame_index", "view_id"}:
+            return 0
+        return super().__inc__(key, value, *args, **kwargs)
+
+
 def itop_train_validation_indices(
     length: int,
     *,
@@ -220,7 +235,7 @@ class ITOPDepthDataset(Dataset):
         record = self.sample_record(item)
         pos = torch.from_numpy(record["points"]).float()
         edge_index = knn_graph(pos, self.num_neighbors)
-        return Data(
+        return ITOPData(
             pos=pos,
             z=torch.zeros(self.num_points, dtype=torch.long),
             edge_index=edge_index,
@@ -340,7 +355,7 @@ class ITOPCachedDataset(Dataset):
             np.array(self.neighbors[item], dtype=np.int64, copy=True).reshape(-1)
         )
         sources = torch.arange(self.num_points).repeat_interleave(self.num_neighbors)
-        return Data(
+        return ITOPData(
             pos=pos,
             z=torch.zeros(self.num_points, dtype=torch.long),
             edge_index=torch.stack((sources, targets)),
