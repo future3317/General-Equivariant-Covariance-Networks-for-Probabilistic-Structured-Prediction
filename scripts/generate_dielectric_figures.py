@@ -230,6 +230,7 @@ def plot_uncertainty_alignment(
         )
 
     labels = [r"$c_{11}$", r"$c_{22}$", r"$c_{33}$", r"$c_{23}$", r"$c_{13}$", r"$c_{12}$"]
+    distribution_label = r"Student-$t$" if distribution == "student_t" else "Gaussian"
     fig, axes = plt.subplots(1, 3, figsize=cm2inch(16.5, 5.4))
     norm = Normalize(vmin=-1.0, vmax=1.0)
     for ax, matrix, title in (
@@ -278,7 +279,10 @@ def plot_uncertainty_alignment(
     axes[2].set_ylim(0, 1.05)
     axes[2].set_ylabel("Empirical coverage", fontsize=8)
     axes[2].set_title(
-        f"(c) Marginal calibration ({distribution})", loc="left", fontsize=9, fontweight="bold"
+        f"(c) Marginal calibration ({distribution_label})",
+        loc="left",
+        fontsize=9,
+        fontweight="bold",
     )
     axes[2].legend(fontsize=7, loc="lower left")
     for ax in axes:
@@ -310,6 +314,7 @@ def plot_calibration(
 ) -> None:
     """Coverage calibration and Q-Q plot for Mahalanobis distances."""
     setup_tpami_style()
+    distribution_label = r"Student-$t$" if distribution == "student_t" else "Gaussian"
 
     fig, axes = plt.subplots(1, 2, figsize=cm2inch(16.5, 6.8))
     ax_cov, ax_qq = axes
@@ -403,7 +408,7 @@ def plot_calibration(
                 else rf"Theoretical $dF_{{d,\nu}}$ quantile ($\nu={student_t_dof:g}$)")
     ax_qq.set_xlabel(qq_label, fontsize=9)
     ax_qq.set_ylabel(r"Empirical Mahalanobis$^2$ quantile", fontsize=9)
-    ax_qq.set_title(f"Q-Q Calibration ({distribution})", fontsize=10)
+    ax_qq.set_title(f"Q-Q Calibration ({distribution_label})", fontsize=10)
     ax_qq.legend(fontsize=7)
     ax_qq.set_xscale("log")
     ax_qq.set_yscale("log")
