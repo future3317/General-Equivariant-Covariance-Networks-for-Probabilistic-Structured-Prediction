@@ -15,7 +15,6 @@ from tqdm import tqdm
 from data.itop_dataset import compact_itop_labels
 from data.paths import dataset_dir
 
-
 ZENODO_RECORD_API = "https://zenodo.org/api/records/3932973"
 
 
@@ -51,10 +50,13 @@ def _md5(path: Path) -> str:
 def _download(entry: dict, destination: Path) -> None:
     expected_size = int(entry["size"])
     expected_md5 = entry["checksum"].split(":", 1)[-1]
-    if destination.exists() and destination.stat().st_size == expected_size:
-        if _md5(destination) == expected_md5:
-            print(f"verified existing {destination.name}")
-            return
+    if (
+        destination.exists()
+        and destination.stat().st_size == expected_size
+        and _md5(destination) == expected_md5
+    ):
+        print(f"verified existing {destination.name}")
+        return
     temporary = destination.with_suffix(destination.suffix + ".part")
     with urllib.request.urlopen(entry["links"]["self"]) as response:
         reader = _ProgressReader(response, expected_size, destination.name)
@@ -77,19 +79,22 @@ def _decompress(source: Path, destination: Path) -> None:
             f"ITOP destination must be a direct file, not a directory: {destination}"
         )
     temporary = destination.with_suffix(destination.suffix + ".part")
-    with gzip.open(source, "rb") as compressed, temporary.open("wb") as target:
-        with tqdm(
+    with (
+        gzip.open(source, "rb") as compressed,
+        temporary.open("wb") as target,
+        tqdm(
             total=source.stat().st_size,
             unit="B",
             unit_scale=True,
             desc=f"decompress {source.name}",
-        ) as progress:
-            while True:
-                chunk = compressed.read(8 * 1024 * 1024)
-                if not chunk:
-                    break
-                target.write(chunk)
-                progress.update(min(len(chunk), source.stat().st_size - progress.n))
+        ) as progress,
+    ):
+        while True:
+            chunk = compressed.read(8 * 1024 * 1024)
+            if not chunk:
+                break
+            target.write(chunk)
+            progress.update(min(len(chunk), source.stat().st_size - progress.n))
     temporary.replace(destination)
 
 

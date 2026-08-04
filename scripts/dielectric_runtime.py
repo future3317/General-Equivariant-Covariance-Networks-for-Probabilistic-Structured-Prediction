@@ -7,9 +7,10 @@ import hashlib
 import json
 import subprocess
 import sys
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 import torch
 
@@ -30,7 +31,6 @@ from equivcompiler import (
 )
 from models import EquivariantBackbone
 from spd_maps import RepresentationMetricMap
-
 
 RUN_SPEC_FILE = "run_spec.json"
 RUN_SPEC_VERSION = 1
@@ -205,7 +205,7 @@ class DielectricRunSpec:
     metric_l2: float | None = None
 
     @classmethod
-    def from_namespace(cls, args: argparse.Namespace) -> "DielectricRunSpec":
+    def from_namespace(cls, args: argparse.Namespace) -> DielectricRunSpec:
         values = vars(args)
         required = {
             field
@@ -218,7 +218,7 @@ class DielectricRunSpec:
         return cls(**{field: values.get(field) for field in cls.__dataclass_fields__})
 
     @classmethod
-    def from_dict(cls, values: Mapping[str, Any]) -> "DielectricRunSpec":
+    def from_dict(cls, values: Mapping[str, Any]) -> DielectricRunSpec:
         return cls(**{field: values.get(field) for field in cls.__dataclass_fields__})
 
     def as_dict(self) -> dict[str, Any]:
@@ -327,7 +327,7 @@ def load_run_record(checkpoint_dir: str | Path) -> dict[str, Any]:
     if payload.get("version") != RUN_SPEC_VERSION:
         raise ValueError(f"unsupported run spec version: {payload.get('version')}")
     if not isinstance(payload.get("model"), dict):
-        raise ValueError(f"invalid model record in {path}")
+        raise TypeError(f"invalid model record in {path}")
     return payload
 
 
@@ -355,7 +355,7 @@ def load_dielectric_data_args(checkpoint_dir: str | Path) -> argparse.Namespace:
         raise FileNotFoundError(f"missing runtime data settings: {path}")
     values = json.loads(path.read_text())
     if not isinstance(values, dict):
-        raise ValueError(f"invalid runtime data settings: {path}")
+        raise TypeError(f"invalid runtime data settings: {path}")
     return argparse.Namespace(**values)
 
 

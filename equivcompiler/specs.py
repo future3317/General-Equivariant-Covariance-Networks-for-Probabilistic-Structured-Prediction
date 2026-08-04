@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import json
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from compatibility.e3nn import o3
-
 from representations import O3IrrepsSpec, irrep_multiplicities
 from representations.representation_ir import (
     CoordinateSpec,
@@ -19,7 +18,6 @@ from representations.representation_ir import (
     RepExpr,
     SymmetricSquareExpr,
 )
-
 
 FeatureScope = Literal["global", "node", "edge"]
 FeatureLayout = Literal["e3nn", "compiler_native"]
@@ -83,7 +81,7 @@ class FeatureSpec:
         allow_pooling: bool = True,
         metric_kind: str = "orthonormal_identity",
         gram_matrix_id: str | None = None,
-    ) -> "FeatureSpec":
+    ) -> FeatureSpec:
         return cls(
             o3.Irreps(irreps),
             group=group,
@@ -102,7 +100,7 @@ class FeatureSpec:
         backbone,
         *,
         scope: FeatureScope | None = None,
-    ) -> "FeatureSpec":
+    ) -> FeatureSpec:
         declared = getattr(backbone, "feature_spec", None)
         if isinstance(declared, cls):
             if scope is not None and scope != declared.scope:

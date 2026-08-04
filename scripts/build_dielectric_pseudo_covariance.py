@@ -1,4 +1,3 @@
-# ruff: noqa: E402
 """Construct audited, train-only isotropic pseudo-covariance targets.
 
 No directional covariance cache can be built by this entry point: invariant
@@ -19,15 +18,19 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from data.dielectric_dataset import DielectricIrrepsDataset  # noqa: E402
-from data.paths import dataset_dir  # noqa: E402
+from data.dielectric_dataset import DielectricIrrepsDataset
+from data.paths import dataset_dir
 from data.pseudo_covariance import (
     PSEUDO_CACHE_VERSION,
     build_isotropic_pseudo_covariance,
     invariant_structure_embedding,
     validate_oof_residual_payload,
-)  # noqa: E402
-from scripts.dielectric_runtime import dataset_provenance, sha256_file, source_provenance  # noqa: E402
+)
+from scripts.dielectric_runtime import (
+    dataset_provenance,
+    sha256_file,
+    source_provenance,
+)
 
 
 def build_pseudo_covariance(
@@ -45,7 +48,7 @@ def build_pseudo_covariance(
     source = Path(oof_residuals_path)
     oof = torch.load(source, map_location="cpu", weights_only=False)
     if not isinstance(oof, dict):
-        raise ValueError("OOF residual cache must be a dictionary")
+        raise TypeError("OOF residual cache must be a dictionary")
     validate_oof_residual_payload(oof)
     root = dataset_dir(data_dir, "mp_dielectric")
     dataset = DielectricIrrepsDataset(root, "train", lmax=lmax, storage=storage, shard_cache_size=shard_cache_size)

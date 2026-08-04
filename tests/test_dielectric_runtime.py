@@ -14,27 +14,27 @@ from tests.test_equivariance import _build_graph, _rotate_data
 
 
 def _spec(**overrides):
-    values = dict(
-        hidden_dim=8,
-        lmax=2,
-        num_layers=1,
-        num_basis=4,
-        atom_features="manual",
-        tp_backend="e3nn",
-        cueq_method="naive",
-        covariance_parameterization="centered_spectral_window",
-        log_variance_min=-4.0,
-        log_variance_max=4.0,
-        shape_min=-2.0,
-        shape_max=2.0,
-        volume_min=-8.0,
-        volume_max=8.0,
-        distribution="student_t",
-        student_t_dof=5.0,
-        representation_metric="block_auto",
-        metric_scalar=2.0,
-        metric_l2=3.0,
-    )
+    values = {
+        "hidden_dim": 8,
+        "lmax": 2,
+        "num_layers": 1,
+        "num_basis": 4,
+        "atom_features": "manual",
+        "tp_backend": "e3nn",
+        "cueq_method": "naive",
+        "covariance_parameterization": "centered_spectral_window",
+        "log_variance_min": -4.0,
+        "log_variance_max": 4.0,
+        "shape_min": -2.0,
+        "shape_max": 2.0,
+        "volume_min": -8.0,
+        "volume_max": 8.0,
+        "distribution": "student_t",
+        "student_t_dof": 5.0,
+        "representation_metric": "block_auto",
+        "metric_scalar": 2.0,
+        "metric_l2": 3.0,
+    }
     values.update(overrides)
     return DielectricRunSpec(**values)
 

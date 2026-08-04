@@ -3,8 +3,8 @@
 import torch
 from torch.distributions import MultivariateNormal
 
-from spd_maps import MatrixExponentialMap
 from distributions import GaussianNLL, StudentTNLL
+from spd_maps import MatrixExponentialMap
 
 
 def _make_test_tensors(batch=8, d=6, dtype=torch.float32):

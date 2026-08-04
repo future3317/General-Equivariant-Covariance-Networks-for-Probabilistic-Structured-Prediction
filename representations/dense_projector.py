@@ -12,6 +12,7 @@ from __future__ import annotations
 import math
 
 import torch
+
 from compatibility.e3nn import o3
 
 

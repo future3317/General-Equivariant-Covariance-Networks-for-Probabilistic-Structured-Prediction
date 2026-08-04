@@ -7,8 +7,8 @@ This module provides functions to create atom features based on Magpie descripto
 using sklearn's OneHotEncoder for categorical encoding.
 """
 
-import torch
 import numpy as np
+import torch
 
 # Element feature array - will be populated by initialize_features()
 ELEMENT_FEATURES = None
@@ -59,8 +59,7 @@ def initialize_features():
 
         # Valence electrons follow periodic pattern
         valence = (Z % 8) + 1
-        if valence > 8:
-            valence = 8
+        valence = min(valence, 8)
 
         # 1. Basic atomic properties (7 dimensions)
         desc = [
@@ -154,8 +153,6 @@ def get_magpie_features(atomic_numbers: torch.Tensor) -> torch.Tensor:
     Returns:
         [N, 49] tensor of atom features
     """
-    global ELEMENT_FEATURES
-
     if ELEMENT_FEATURES is None:
         initialize_features()
 
@@ -266,8 +263,8 @@ def create_encoded_atom_features(atomic_numbers: torch.Tensor) -> torch.Tensor:
 
                 # Power transformations for first few features
                 if j < 5 and len(expanded_feat) < 119:
-                    expanded_feat.append((val**2))
-                    expanded_feat.append((val**0.5))
+                    expanded_feat.append(val**2)
+                    expanded_feat.append(val**0.5)
                     expanded_feat.append(np.log(val + 1.0))
 
         # Ensure exactly 119 dimensions

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 from typing import Any
 
-import torch
 import numpy as np
+import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -137,7 +137,7 @@ def _view_shift(
             np.ptp(top_frame, axis=0) / (np.ptp(aligned_side, axis=0) + 1e-9)
         )
     result["centered_point_cloud_shift"] = {
-        "sampled_frames": int(len(sample_indices)),
+        "sampled_frames": len(sample_indices),
         "chamfer_cm": {
             "mean": float(np.mean(chamfer) * 100.0),
             "median": float(np.median(chamfer) * 100.0),
@@ -251,8 +251,10 @@ def _write_markdown(record: dict[str, Any], path: Path) -> None:
         "",
         f"1. **High-confidence data distribution shift, not a broken cache.** The deterministic mean error rises from {side['deterministic']['metrics']['mpjpe_cm']:.3f} cm on side IID to {top['deterministic']['metrics']['mpjpe_cm']:.3f} cm on top OOD ({c['deterministic_top_to_side_mpjpe_ratio']:.2f}x). The immutable caches report 17,991 side-train samples and 4,863 samples in each test view, with 512 points, k=16, and `sample_limit=null`.",
         "2. **The side/top labels are aligned, but the observations are not IID.** The two test label files share all frame IDs and their best rigid camera transform leaves sub-millimeter residuals. However, the visible-joint fraction changes from 89.6% to 25.0%, and the centered point-cloud shift is large; this is a real view/occlusion covariate shift rather than label corruption.",
-        "3. **High-confidence algorithmic OOD likelihood failure for Gaussian heads.** Frozen independent Gaussian and graph Gaussian have top NLL 772.924 and 819.485. Their top logdet changes are respectively "
-        f"{c['frozen_independent_top_logdet_change']:.3f} and {c['frozen_graph_gaussian_top_logdet_change']:.3f}, so the predicted distribution becomes sharper on the shifted view even while the mean error becomes much larger.",
+        (
+            "3. **High-confidence algorithmic OOD likelihood failure for Gaussian heads.** Frozen independent Gaussian and graph Gaussian have top NLL 772.924 and 819.485. Their top logdet changes are respectively "
+            f"{c['frozen_independent_top_logdet_change']:.3f} and {c['frozen_graph_gaussian_top_logdet_change']:.3f}, so the predicted distribution becomes sharper on the shifted view even while the mean error becomes much larger."
+        ),
         f"4. **Joint independent fine-tuning is harmful for OOD probability quality.** Its top MPJPE improves to 67.407 cm, but top NLL worsens to 4,988.677 and the top logdet change is {c['joint_independent_top_logdet_change']:.3f}; this is side-validation overfitting/scale collapse, not evidence that the data labels are corrupt.",
         f"5. **Student-t plus graph structure is the only completed head with useful OOD behavior.** Frozen graph Student-t gives top NLL 2.330 and side/top uncertainty AUROC 0.803, while retaining side NLL -55.955. Its top logdet change is {c['frozen_graph_student_t_top_logdet_change']:.3f}, consistent with widening uncertainty under the view shift.",
         "6. **No evidence that compiler lowering caused the failure.** The active graph family is an exact 174-coordinate SPD precision subfamily, the reference test suite passed, and all saved prediction-level metrics recompute from finite 45-dimensional outputs. The discovered frame-index problem affected provenance metadata only; raw prediction order and numeric tensors were unchanged and the repair is recorded separately.",

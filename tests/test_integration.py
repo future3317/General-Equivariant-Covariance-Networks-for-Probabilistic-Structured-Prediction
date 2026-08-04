@@ -5,16 +5,16 @@ from e3nn import o3
 from e3nn.math import soft_one_hot_linspace
 from torch_geometric.data import Data
 
-from representations import O3IrrepsSpec
-from spd_maps import MatrixExponentialMap, LowRankPlusIsotropicMap
 from distributions import GaussianNLL
 from models import (
     EquivariantBackbone,
     EquivariantMeanHead,
-    O3EquivariantSymmetricOperatorHead,
     O3EquivariantLowRankCovarianceHead,
+    O3EquivariantSymmetricOperatorHead,
     StructuredProbabilisticPredictor,
 )
+from representations import O3IrrepsSpec
+from spd_maps import LowRankPlusIsotropicMap, MatrixExponentialMap
 
 
 def _make_data(num_graphs=2, num_nodes=6):

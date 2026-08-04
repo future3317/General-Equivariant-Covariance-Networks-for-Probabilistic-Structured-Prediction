@@ -3,22 +3,22 @@
 from __future__ import annotations
 
 import argparse
-import os
 import json
 import logging
-from datetime import datetime
+import os
+from datetime import datetime, timezone
 
 import torch
-import torch.optim as optim
+from torch import optim
 from tqdm import tqdm
 
-from equivcompiler import FeatureSpec, plan_readout
-from representations import rank4_elasticity_irreps
-from models import EquivariantBackbone
 from data.elasticity_dataset import get_elasticity_irreps_loaders
-from data.representation_metrics import infer_representation_block_metric
 from data.paths import dataset_dir
+from data.representation_metrics import infer_representation_block_metric
 from data.tensor_conversions import elasticity_21d_to_irreps, irreps_to_elasticity_21d
+from equivcompiler import FeatureSpec, plan_readout
+from models import EquivariantBackbone
+from representations import rank4_elasticity_irreps
 from scripts._common import (
     add_tensor_product_arguments,
     covariance_policy_from_cli,
@@ -29,7 +29,7 @@ from spd_maps import RepresentationMetricMap
 
 def setup_logger(save_dir: str, experiment_name: str | None = None):
     if experiment_name is None:
-        experiment_name = f"elasticity_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        experiment_name = f"elasticity_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
     os.makedirs(save_dir, exist_ok=True)
     log_file = os.path.join(save_dir, f"{experiment_name}.log")
 
@@ -166,7 +166,7 @@ def main():
     args = parser.parse_args()
     args.data_dir = str(dataset_dir(args.data_dir, "mp_elastic"))
 
-    logger, experiment_name = setup_logger(args.save_dir)
+    logger, _experiment_name = setup_logger(args.save_dir)
     logger.info("=" * 60)
     logger.info("Representation-compiled elasticity training")
     logger.info("=" * 60)

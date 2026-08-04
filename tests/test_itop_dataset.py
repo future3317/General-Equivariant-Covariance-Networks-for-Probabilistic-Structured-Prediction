@@ -1,21 +1,23 @@
 """Tests for the lightweight ITOP depth-map pipeline."""
 
-import h5py
 import json
+
+import h5py
 import numpy as np
 import pytest
 import torch
 
+from compatibility.torch_geometric import PyGDataLoader
 from data.itop_dataset import (
-    ITOPCachedDataset,
-    ITOPDepthDataset,
-    ITOPData,
     ITOP_OUTPUT_GRAPH,
+    ITOPCachedDataset,
+    ITOPData,
+    ITOPDepthDataset,
     compact_itop_labels,
     depth_to_point_cloud,
     get_itop_split_loader,
-    itop_train_validation_indices,
     itop_cache_dir,
+    itop_train_validation_indices,
     require_itop_file,
 )
 from data.itop_features import get_itop_feature_loaders
@@ -23,7 +25,6 @@ from equivcompiler import FeatureSpec, GraphPrecision, plan_readout
 from models import ControlledMeanOperatorHead, DeterministicHead, EquivariantBackbone
 from representations import O3IrrepsSpec
 from scripts.precompute_itop_geometry import write_itop_geometry_cache
-from compatibility.torch_geometric import PyGDataLoader
 
 
 def test_limited_geometry_cache_has_a_distinct_contract_path(tmp_path):

@@ -2,12 +2,12 @@
 
 from distributions.base import StructuredDistributionLoss
 from distributions.gaussian import GaussianNLL
-from distributions.student_t import StudentTNLL
 from distributions.robust_surrogate import RobustSurrogateLoss
+from distributions.student_t import StudentTNLL
 
 __all__ = [
-    "StructuredDistributionLoss",
     "GaussianNLL",
-    "StudentTNLL",
     "RobustSurrogateLoss",
+    "StructuredDistributionLoss",
+    "StudentTNLL",
 ]

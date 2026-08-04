@@ -7,15 +7,15 @@ from scripts.profile_dielectric import count_tp_instructions
 
 def test_count_tp_instructions_runs():
     """count_tp_instructions should run without error on a simple model."""
-    from representations import O3IrrepsSpec
+    from distributions import GaussianNLL
     from models import (
         EquivariantBackbone,
         EquivariantMeanHead,
         O3QuadraticSymmetricOperatorHead,
         StructuredProbabilisticPredictor,
     )
+    from representations import O3IrrepsSpec
     from spd_maps import MatrixExponentialMap
-    from distributions import GaussianNLL
 
     output_spec = O3IrrepsSpec("0e + 2e")
     backbone = EquivariantBackbone(

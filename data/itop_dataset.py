@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from functools import lru_cache
 import json
+from functools import lru_cache
 from pathlib import Path
 
 import h5py
@@ -12,10 +12,9 @@ import torch
 from torch.utils.data import Dataset, RandomSampler, Subset
 
 from compatibility.torch_geometric import Data, PyGDataLoader
-from data.point_cloud_graph import knn_graph
 from data.paths import dataset_dir
+from data.point_cloud_graph import knn_graph
 from representations import EquivariantOutputGraph
-
 
 ITOP_CAMERA_C = 0.0035
 ITOP_IMAGE_HEIGHT = 240

@@ -4,8 +4,8 @@ voigt_utils.py
 Utilities for Voigt representation and E(3)-equivariant transformations.
 """
 
-import torch
 import numpy as np
+import torch
 
 
 def get_voigt_index_map():

@@ -5,13 +5,15 @@ Data loader for PRECOMPUTED graphs only.
 This is the ONLY way to load data for training - no on-the-fly computation.
 """
 
-import os
-import json
 import copy
+import json
+import os
 from bisect import bisect_right
 from collections import OrderedDict
+
 import torch
 from torch.utils.data import Dataset, Sampler
+
 from compatibility.torch_geometric import Data
 
 

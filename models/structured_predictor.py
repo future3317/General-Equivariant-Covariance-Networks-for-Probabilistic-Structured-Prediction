@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+
 import torch
 
 from distributions.base import StructuredDistributionLoss
@@ -41,7 +42,7 @@ class StructuredProbabilisticPredictor(torch.nn.Module):
         distribution: StructuredDistributionLoss | None = None,
         *,
         joint_head: torch.nn.Module | None = None,
-        compilation: "O3Compilation | None" = None,
+        compilation: O3Compilation | None = None,
     ):
         super().__init__()
         self.backbone = backbone

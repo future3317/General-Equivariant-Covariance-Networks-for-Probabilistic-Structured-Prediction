@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import torch
-from compatibility.e3nn import o3
 
+from compatibility.e3nn import o3
 from models.pooling import GraphOutputHead
 from representations import O3IrrepsSpec
 from representations.cartesian_stf import (
@@ -14,7 +14,6 @@ from representations.cartesian_stf import (
     supports_cartesian_stf_seed,
 )
 from representations.irrep_layout import RepeatedIrrepLayout
-
 
 QUADRATIC_HEAD_BACKENDS = ("auto", "spherical_cg", "cartesian_stf")
 
@@ -98,7 +97,7 @@ class O3QuadraticSymmetricOperatorHead(GraphOutputHead):
         return self.backend == "spherical_cg" or bool(self.square.is_exact)
 
     def load_spherical_head(
-        self, spherical_head: "O3QuadraticSymmetricOperatorHead"
+        self, spherical_head: O3QuadraticSymmetricOperatorHead
     ) -> None:
         """Map a spherical-CG head to the exact dense-projector backend."""
         if self.backend != "cartesian_stf" or not self.square.is_exact:

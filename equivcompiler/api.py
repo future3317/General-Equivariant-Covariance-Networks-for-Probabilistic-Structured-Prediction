@@ -6,6 +6,7 @@ from typing import Literal
 
 import torch
 
+from equivcompiler.distributions import DistributionSpec
 from equivcompiler.planning import CompilationPlan, plan_readout
 from equivcompiler.policies import (
     CostPolicy,
@@ -16,7 +17,6 @@ from equivcompiler.policies import (
     FullCovariance,
     PreferExecutor,
 )
-from equivcompiler.distributions import DistributionSpec
 from equivcompiler.specs import FeatureSpec
 from representations import CompilationReport
 
@@ -51,11 +51,11 @@ def compile_readout(
     seed: FeatureSpec,
     *,
     output,
-    covariance: CovariancePolicy = FullCovariance(),
+    covariance: CovariancePolicy | None = None,
     distribution: DistributionSpec | Literal["gaussian", "student_t"] = "gaussian",
     fidelity: FidelityPolicy | None = None,
-    executor: ExecutorPolicy = ExactExecutorCandidates(),
-    cost: CostPolicy = PreferExecutor(),
+    executor: ExecutorPolicy | None = None,
+    cost: CostPolicy | None = None,
     student_t_dof: float = 5.0,
     output_scope: Literal["global", "node", "edge"] = "global",
     lifting_backend: Literal["e3nn", "cueq"] = "e3nn",
@@ -64,6 +64,9 @@ def compile_readout(
     dtype: torch.dtype | None = None,
 ) -> tuple[torch.nn.Module, CompilationReport]:
     """Compile a standalone probabilistic readout from a feature contract."""
+    covariance = FullCovariance() if covariance is None else covariance
+    executor = ExactExecutorCandidates() if executor is None else executor
+    cost = PreferExecutor() if cost is None else cost
     plan = plan_readout(
         seed,
         output=output,
@@ -85,17 +88,20 @@ def compile_predictor(
     backbone: torch.nn.Module,
     *,
     output,
-    covariance: CovariancePolicy = FullCovariance(),
+    covariance: CovariancePolicy | None = None,
     distribution: DistributionSpec | Literal["gaussian", "student_t"] = "gaussian",
     fidelity: FidelityPolicy | None = None,
-    executor: ExecutorPolicy = ExactExecutorCandidates(),
-    cost: CostPolicy = PreferExecutor(),
+    executor: ExecutorPolicy | None = None,
+    cost: CostPolicy | None = None,
     student_t_dof: float = 5.0,
     output_scope: Literal["global", "node", "edge"] = "global",
     lifting_backend: Literal["e3nn", "cueq"] = "e3nn",
     cueq_method: Literal["naive", "fused_tp"] = "naive",
 ) -> tuple[torch.nn.Module, CompilationReport]:
     """Compile and bind a complete predictor to a concrete backbone."""
+    covariance = FullCovariance() if covariance is None else covariance
+    executor = ExactExecutorCandidates() if executor is None else executor
+    cost = PreferExecutor() if cost is None else cost
     seed = FeatureSpec.from_backbone(backbone)
     plan = plan_readout(
         seed,

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import argparse
-from collections import defaultdict
 import json
 import logging
 import math
 import platform
 import random
-from datetime import datetime
+from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +25,7 @@ from data.itop_dataset import (
 )
 from data.itop_features import get_itop_feature_loaders
 from data.paths import dataset_dir
+from data.representation_metrics import infer_representation_block_metric
 from equivcompiler import FeatureSpec, GraphPrecision, plan_readout
 from evaluation import (
     binary_auroc,
@@ -47,9 +48,7 @@ from models import (
 )
 from representations import O3IrrepsSpec
 from scripts._common import add_tensor_product_arguments, tensor_product_kwargs
-from data.representation_metrics import infer_representation_block_metric
 from spd_maps import RepresentationMetricMap
-
 
 MODEL_KINDS = (
     "deterministic",
@@ -62,7 +61,7 @@ PHASES = ("deterministic", "frozen_head", "joint_finetune")
 
 def _logger(run_dir: Path, *, continuing: bool) -> logging.Logger:
     run_dir.mkdir(parents=True, exist_ok=continuing)
-    name = f"itop_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    name = f"itop_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
     logger = logging.getLogger(name)
     logger.setLevel(logging.INFO)
     formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
@@ -769,17 +768,17 @@ def main() -> None:
         model.backbone.compile_tensor_products(dynamic=True)
     use_bf16 = args.backbone_precision == "bf16"
 
-    loader_kwargs = dict(
-        data_dir=args.data_dir,
-        batch_size=args.batch_size,
-        num_points=args.num_points,
-        num_neighbors=args.num_neighbors,
-        num_workers=args.num_workers,
-        pin_memory=device.type == "cuda",
-        persistent_workers=args.num_workers > 0,
-        prefetch_factor=args.prefetch_factor,
-        train_cache_sample_limit=args.train_cache_sample_limit,
-    )
+    loader_kwargs = {
+        "data_dir": args.data_dir,
+        "batch_size": args.batch_size,
+        "num_points": args.num_points,
+        "num_neighbors": args.num_neighbors,
+        "num_workers": args.num_workers,
+        "pin_memory": device.type == "cuda",
+        "persistent_workers": args.num_workers > 0,
+        "prefetch_factor": args.prefetch_factor,
+        "train_cache_sample_limit": args.train_cache_sample_limit,
+    }
     feature_cache_metadata = None
     if args.feature_cache is not None:
         if args.phase != "frozen_head":

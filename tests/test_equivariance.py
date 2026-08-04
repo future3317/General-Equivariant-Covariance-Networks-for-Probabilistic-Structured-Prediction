@@ -6,8 +6,6 @@ from e3nn import o3
 from e3nn.math import soft_one_hot_linspace
 from torch_geometric.data import Data
 
-from representations import O3IrrepsSpec
-from spd_maps import MatrixExponentialMap
 from distributions import GaussianNLL
 from models import (
     EquivariantBackbone,
@@ -15,6 +13,8 @@ from models import (
     O3EquivariantSymmetricOperatorHead,
     StructuredProbabilisticPredictor,
 )
+from representations import O3IrrepsSpec
+from spd_maps import MatrixExponentialMap
 
 
 def _random_rotation():

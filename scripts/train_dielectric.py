@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import argparse
-import os
 import json
 import logging
+import os
 import random
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -16,19 +16,17 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 import torch
-import torch.optim as optim
+from torch import optim
 from tqdm import tqdm
 
 from data.dielectric_dataset import get_dielectric_irreps_loaders
+from data.paths import dataset_dir
+from data.pseudo_covariance import validate_pseudo_cache
 from data.representation_metrics import (
     infer_rank2_block_metric,
     transformed_spectral_bounds,
 )
-from data.paths import dataset_dir
-from data.pseudo_covariance import validate_pseudo_cache
 from data.tensor_conversions import irreps_to_km, irreps_to_matrix_exp_voigt
-from voigt_utils import kelvin_mandel_to_voigt
-from matrix_log_transform import matrix_exponential_transform
 from evaluation import (
     calibration_error,
     covariance_spectrum_diagnostics,
@@ -37,22 +35,24 @@ from evaluation import (
     sharpness,
     whitened_residual_covariance,
 )
+from matrix_log_transform import matrix_exponential_transform
 from scripts._common import add_tensor_product_arguments
 from scripts.dielectric_runtime import (
     DielectricRunSpec,
     build_dielectric_model,
-    configure_inference_contract,
     compilation_record_with_hash,
+    configure_inference_contract,
+    dataset_provenance,
     forward_dielectric,
     inference_contract_from_args,
-    dataset_provenance,
     load_dielectric_checkpoint,
     load_run_record,
     load_run_spec,
-    source_provenance,
     sha256_file,
+    source_provenance,
     write_run_spec,
 )
+from voigt_utils import kelvin_mandel_to_voigt
 
 
 def _set_seed(seed: int) -> None:
@@ -91,7 +91,7 @@ def _forward(
 
 def setup_logger(save_dir: str, experiment_name: str | None = None):
     if experiment_name is None:
-        experiment_name = f"dielectric_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        experiment_name = f"dielectric_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
     os.makedirs(save_dir, exist_ok=True)
     log_file = os.path.join(save_dir, f"{experiment_name}.log")
 
@@ -475,7 +475,8 @@ def main():
             # Reconstruct the exact training semantics before creating the
             # model.  Only the runtime device and requested output directory
             # are allowed to come from the evaluate-only invocation.
-            saved_args = json.loads(open(checkpoint_args_path, encoding="utf-8").read())
+            with open(checkpoint_args_path, encoding="utf-8") as handle:
+                saved_args = json.load(handle)
             runtime_device = args.device
             runtime_save_dir = args.save_dir
             merged_args = vars(args).copy()
@@ -558,7 +559,7 @@ def main():
     inference_contract = inference_contract_from_args(args, device)
     configure_inference_contract(inference_contract)
 
-    logger, experiment_name = setup_logger(args.save_dir)
+    logger, _experiment_name = setup_logger(args.save_dir)
     logger.info("=" * 60)
     logger.info("GECN dielectric training")
     logger.info("=" * 60)
@@ -584,7 +585,7 @@ def main():
     )
 
     if args.representation_metric == "block_auto" and not args.evaluate_only:
-        metric, metric_stats = infer_rank2_block_metric(
+        _metric, metric_stats = infer_rank2_block_metric(
             train_loader.dataset, max_samples=args.metric_sample_limit
         )
         args.metric_scalar = metric_stats["metric_scalar"]

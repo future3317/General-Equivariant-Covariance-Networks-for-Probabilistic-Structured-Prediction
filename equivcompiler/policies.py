@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-import math
 from typing import Any, Literal
 
 from representations import EquivariantOutputGraph, O3IrrepsSpec, irrep_multiplicities
@@ -20,7 +20,6 @@ from representations.representation_ir import (
     SymmetricSquareExpr,
     TrivialScalarsExpr,
 )
-
 
 ExecutorName = Literal["spherical_cg", "cartesian_stf"]
 

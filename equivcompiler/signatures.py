@@ -77,7 +77,7 @@ def plan_fingerprints(
 
 
 def execution_signature_for_plan(
-    plan: "CompilationPlan",
+    plan: CompilationPlan,
     *,
     batch_shape: tuple[int, ...],
     dtype: str,

@@ -24,8 +24,8 @@ from data.tensor_conversions import irreps_to_km
 from evaluation import (
     irrep_resolved_whitening_defect,
     student_t_radial_pit,
-    whitened_angular_defect,
     symmetric_whitened_residuals,
+    whitened_angular_defect,
 )
 from evaluation.calibration import marginal_interval_quantile
 from scripts.dielectric_runtime import (

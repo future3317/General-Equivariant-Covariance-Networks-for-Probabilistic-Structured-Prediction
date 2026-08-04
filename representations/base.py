@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
+
 import torch
 
 
@@ -31,7 +32,7 @@ class OrthogonalRepresentationSpec(Protocol):
         """
         ...
 
-    def symmetric_square(self) -> "SymmetricSquareSpec":
+    def symmetric_square(self) -> SymmetricSquareSpec:
         """Return the specification of :math:`\\operatorname{Sym}^2(V)`."""
         ...
 

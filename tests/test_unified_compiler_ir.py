@@ -7,6 +7,7 @@ import torch
 
 from equivcompiler import (
     AutoBudget,
+    CenteredSpectralWindowCovariance,
     EllipticalDistribution,
     ExactExecutorCandidates,
     ExactOnly,
@@ -19,39 +20,37 @@ from equivcompiler import (
     LowRankCovariance,
     MinimizeLatency,
     PreferExecutor,
-    execution_signature_for_plan,
     RadialLaw,
     SpecificExecutor,
     SpectralWindowCovariance,
-    CenteredSpectralWindowCovariance,
     TruncatedMultiplicityRank,
+    execution_signature_for_plan,
     plan_readout,
 )
+from equivcompiler.policies import OperatorFamilySpec
 from representations import (
     CompilationCertificate,
     CompilationError,
     EquivariantOutputGraph,
     O3IrrepsSpec,
-    O3ReachabilityAnalysis,
     O3ProgramCompiler,
+    O3ReachabilityAnalysis,
     UnreachableActiveTargetError,
     analyze_lifting_graph,
 )
-from representations.operator_lowering import RecursiveOperatorMap
-from equivcompiler.policies import OperatorFamilySpec
 from representations.operator_ir import (
     FamilyRelation,
     OperatorFamilyPlan,
     OperatorIR,
     ParameterBinding,
 )
+from representations.operator_lowering import RecursiveOperatorMap
 from representations.representation_ir import (
     IrrepsExpr,
     RepeatedExpr,
     SymmetricSquareExpr,
     TrivialScalarsExpr,
 )
-
 
 SEED = FeatureSpec.from_irreps("4x0e + 2x1o + 2x2e", scope="global")
 

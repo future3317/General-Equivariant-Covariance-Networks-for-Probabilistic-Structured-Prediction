@@ -158,7 +158,7 @@ def energy_score(
     Returns:
         Mean Energy Score over the batch.
     """
-    *batch, d = pred.shape
+    *_batch, d = pred.shape
     pred_flat = pred.reshape(-1, d)
     scale_flat = scale.reshape(-1, d, d)
     target_flat = target.reshape(-1, d)
@@ -216,7 +216,7 @@ def isotropic_sliced_crps(
         raise ValueError("distribution must be 'gaussian' or 'student_t'")
     if distribution == "student_t" and student_t_dof <= 0:
         raise ValueError("student_t_dof must be positive")
-    *batch, d = pred.shape
+    *_batch, d = pred.shape
     pred_flat = pred.reshape(-1, d)
     target_flat = target.reshape(-1, d)
     scale_flat = scale.reshape(-1, d, d)

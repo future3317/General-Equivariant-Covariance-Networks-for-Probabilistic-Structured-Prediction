@@ -7,8 +7,8 @@ all result figures in the repository share the same publication-ready look.
 from __future__ import annotations
 
 import string
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 import matplotlib.pyplot as plt
 from matplotlib import rcParams

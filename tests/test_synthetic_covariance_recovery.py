@@ -4,6 +4,7 @@ import pytest
 import torch
 from e3nn import o3
 
+from distributions import GaussianNLL
 from experiments.synthetic_covariance_recovery import (
     DEFAULT_INPUT_IRREPS,
     EquivariantTeacher,
@@ -12,15 +13,14 @@ from experiments.synthetic_covariance_recovery import (
     _make_data_object,
     evaluate,
 )
-from representations import O3IrrepsSpec
-from representations.symmetric_square import O3SymmetricOperatorBasis
-from spd_maps import MatrixExponentialMap
-from distributions import GaussianNLL
 from models import (
     EquivariantMeanHead,
     O3QuadraticSymmetricOperatorHead,
     StructuredProbabilisticPredictor,
 )
+from representations import O3IrrepsSpec
+from representations.symmetric_square import O3SymmetricOperatorBasis
+from spd_maps import MatrixExponentialMap
 
 
 def _get_l4_slice(operator_basis: O3SymmetricOperatorBasis):
@@ -76,7 +76,7 @@ def test_synthetic_model_forward_backward(output_irreps):
 
     teacher = EquivariantTeacher(input_irreps, output_spec)
     ds = SyntheticDataset(output_irreps, num_samples=16, teacher=teacher, seed=1)
-    x, y, mu_true, A_true, S_true = ds.generate()
+    x, y, _mu_true, _A_true, _S_true = ds.generate()
     data = _make_data_object(x)
 
     result = model(data, target=y, return_scale=True)
@@ -99,7 +99,7 @@ def test_evaluate_metrics_finite(output_irreps):
     output_spec = O3IrrepsSpec(output_irreps)
     teacher = EquivariantTeacher(DEFAULT_INPUT_IRREPS, output_spec)
     ds = SyntheticDataset(output_irreps, num_samples=16, teacher=teacher, seed=2)
-    x, y, mu_true, A_true, S_true = ds.generate()
+    _x, y, mu_true, A_true, S_true = ds.generate()
 
     # Use the ground truth as predictions for a sanity check.
     metrics = evaluate(mu_true, A_true, y, mu_true, A_true, S_true)
@@ -146,8 +146,8 @@ def test_synthetic_shared_teacher():
 
     assert ds_train.teacher is ds_test.teacher
 
-    x_train, y_train, mu_train, A_train, S_train = ds_train.generate()
-    x_test, y_test, mu_test, A_test, S_test = ds_test.generate()
+    x_train, _y_train, _mu_train, _A_train, _S_train = ds_train.generate()
+    x_test, _y_test, _mu_test, _A_test, _S_test = ds_test.generate()
 
     # Different seeds -> different input samples.
     assert not torch.allclose(x_train, x_test)

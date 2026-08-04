@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 
 import torch
-import torch.optim as optim
+from torch import optim
 from torch.profiler import (
     ProfilerActivity,
     profile,
@@ -31,8 +31,8 @@ from models import (
     StructuredProbabilisticPredictor,
 )
 from representations import O3IrrepsSpec
-from spd_maps import MatrixExponentialMap
 from scripts._common import add_tensor_product_arguments, tensor_product_kwargs
+from spd_maps import MatrixExponentialMap
 
 
 def count_tp_instructions(model):

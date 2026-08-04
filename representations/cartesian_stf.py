@@ -13,12 +13,12 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from typing import ClassVar
 
 import torch
+
 from compatibility.e3nn import CartesianTensor, o3
-
 from representations.symmetric_square import O3SymmetricOperatorBasis
-
 
 RANK2_OUTPUT_IRREPS = o3.Irreps("1x0e + 1x2e")
 RANK2_OPERATOR_IRREPS = o3.Irreps("2x0e + 2x2e + 1x4e")
@@ -62,7 +62,7 @@ class Rank2CartesianSTFOperatorBasis(torch.nn.Module):
     No dense fourth-order Cartesian tensor is stored.
     """
 
-    component_slices = {
+    component_slices: ClassVar[dict[str, slice]] = {
         "a": slice(0, 1),
         "b": slice(1, 2),
         "P": slice(2, 7),

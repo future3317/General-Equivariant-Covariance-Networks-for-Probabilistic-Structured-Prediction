@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import json
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 import torch
-from compatibility.e3nn import o3
 
+from compatibility.e3nn import o3
 from representations.adaptive_lifting import (
     O3AdaptiveLifting,
     O3LiftingPlan,
@@ -18,13 +18,13 @@ from representations.adaptive_lifting import (
     direct_sum_irreps,
     irrep_multiplicities,
 )
-from representations.o3_irreps import O3IrrepsSpec
-from representations.graph_structure import EquivariantOutputGraph
 from representations.diagnostics import (
     CompilationCertificate,
     CompilationError,
     UnreachableActiveTargetError,
 )
+from representations.graph_structure import EquivariantOutputGraph
+from representations.o3_irreps import O3IrrepsSpec
 from representations.operator_ir import OperatorFamilyPlan
 from representations.operator_lowering import (
     install_parameter_projections,
@@ -81,7 +81,7 @@ class O3Compilation:
     active_target_irreps: o3.Irreps
     canonical_reachability: O3ReachabilityAnalysis
     active_reachability: O3ReachabilityAnalysis
-    executor_decision: "ExecutorDecision"
+    executor_decision: ExecutorDecision
     distribution_spec: Any
     backend: Literal["spherical_cg", "cartesian_stf"]
     backend_exact: bool
@@ -134,7 +134,7 @@ class O3Compilation:
 
         return build_compilation_report(self, executable)
 
-    def build_head(self) -> "O3CompiledOutputHead":
+    def build_head(self) -> O3CompiledOutputHead:
         return O3CompiledOutputHead(self)
 
     def build_spd_map(self):
@@ -190,7 +190,7 @@ class O3ProgramCompiler:
     @classmethod
     def from_cartesian(
         cls, formula: str, config: LoweringConfig | None = None
-    ) -> "O3ProgramCompiler":
+    ) -> O3ProgramCompiler:
         return cls(o3.Irreps("0e"), config, cartesian_formula=formula)
 
     def _output_expression(self):
@@ -226,7 +226,7 @@ class O3ProgramCompiler:
         feature_contract: Any,
         *,
         operator_family: OperatorFamilyPlan,
-        executor_decision: "ExecutorDecision | None",
+        executor_decision: ExecutorDecision | None,
         distribution_spec: Any,
         canonical_reachability: O3ReachabilityAnalysis | None = None,
         active_reachability: O3ReachabilityAnalysis | None = None,

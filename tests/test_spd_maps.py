@@ -5,14 +5,13 @@ import torch
 
 from spd_maps import (
     CenteredSpectralWindowMap,
+    LowRankPlusIsotropicMap,
     MatrixExponentialMap,
+    PrecisionExponentialMap,
     SpectralSoftplusMap,
     SpectralWindowMap,
     SquarePlusIdentityMap,
-    PrecisionExponentialMap,
-    LowRankPlusIsotropicMap,
 )
-
 
 MAP_CLASSES = [
     MatrixExponentialMap,

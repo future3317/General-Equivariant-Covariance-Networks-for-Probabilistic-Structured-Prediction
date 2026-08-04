@@ -12,7 +12,6 @@ from equivcompiler import (
     LowRankCovariance,
     plan_readout,
 )
-
 from representations import (
     O3AdaptiveLifting,
     O3IrrepsSpec,
@@ -24,11 +23,11 @@ from representations import (
 )
 from spd_maps import IsotypicBlockMap
 
-
 SEED = o3.Irreps("4x0e + 2x1o + 2x2e")
 
 
-def _compile(output, covariance=FullCovariance(), *, output_scope="global"):
+def _compile(output, covariance=None, *, output_scope="global"):
+    covariance = FullCovariance() if covariance is None else covariance
     seed = FeatureSpec.from_irreps(SEED, scope="node")
     return plan_readout(
         seed,

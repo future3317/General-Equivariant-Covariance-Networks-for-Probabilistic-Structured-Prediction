@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import json
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 import torch
-from compatibility.e3nn import o3
 
+from compatibility.e3nn import o3
 from representations.cartesian_stf import Rank2CartesianSTFOperatorBasis
 from representations.irrep_layout import RepeatedIrrepLayout
 from representations.operator_ir import OperatorFamilyPlan, OperatorIR
@@ -39,7 +40,7 @@ def _batched_block_diag(blocks: tuple[torch.Tensor, ...]) -> torch.Tensor:
 class RecursiveOperatorMap(SPDMap):
     """Generic interpreter for any verified composition of registered primitives."""
 
-    def __init__(self, compilation: "O3Compilation"):
+    def __init__(self, compilation: O3Compilation):
         super().__init__()
         self.program = compilation.operator_family.assembly
         self.domain = compilation.operator_family.domain
@@ -268,10 +269,10 @@ class OptimizedProgramMap(SPDMap):
 
     def __init__(
         self,
-        compilation: "O3Compilation",
+        compilation: O3Compilation,
         delegate: SPDMap,
         transform: Callable[[torch.Tensor], torch.Tensor],
-        certificate: "OptimizationCertificate",
+        certificate: OptimizationCertificate,
     ):
         super().__init__()
         self.delegate = delegate
@@ -511,11 +512,11 @@ def match_optimized_program(
     return None
 
 
-def _try_optimized_map(compilation: "O3Compilation") -> OptimizedProgramMap | None:
+def _try_optimized_map(compilation: O3Compilation) -> OptimizedProgramMap | None:
     from spd_maps import (
         GraphStructuredPrecisionMap,
-        IsotypicBlockMap,
         IsotropicMap,
+        IsotypicBlockMap,
         LowRankPlusIsotropicMap,
         MatrixExponentialMap,
         SpectralWindowMap,
@@ -669,7 +670,7 @@ class PrimitiveLoweringRegistry:
         visit(family.assembly)
         return tuple(covered)
 
-    def materialize(self, compilation: "O3Compilation") -> RecursiveOperatorMap:
+    def materialize(self, compilation: O3Compilation) -> RecursiveOperatorMap:
         self.analyze(compilation.operator_family)
         optimized = _try_optimized_map(compilation)
         return optimized if optimized is not None else RecursiveOperatorMap(compilation)
@@ -707,7 +708,7 @@ for _op in (
     DEFAULT_PRIMITIVE_LOWERINGS.register(_op, _registered_runtime_node)
 
 
-def install_parameter_projections(head: "O3CompiledOutputHead") -> None:
+def install_parameter_projections(head: O3CompiledOutputHead) -> None:
     compilation = head.compilation
     for binding in compilation.operator_family.parameter_bindings:
         if hasattr(head, binding.projection_name):
@@ -732,7 +733,7 @@ def install_parameter_projections(head: "O3CompiledOutputHead") -> None:
 
 
 def project_parameter_bindings(
-    head: "O3CompiledOutputHead", compiled: torch.Tensor
+    head: O3CompiledOutputHead, compiled: torch.Tensor
 ) -> torch.Tensor:
     return torch.cat(
         [
@@ -743,6 +744,6 @@ def project_parameter_bindings(
     )
 
 
-def lower_operator_program(compilation: "O3Compilation") -> SPDMap:
+def lower_operator_program(compilation: O3Compilation) -> SPDMap:
     """Recursively verify and materialize a family-independent operator program."""
     return DEFAULT_PRIMITIVE_LOWERINGS.materialize(compilation)

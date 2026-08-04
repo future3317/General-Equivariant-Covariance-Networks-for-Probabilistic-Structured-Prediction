@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import torch
+
 from compatibility.e3nn import o3
 
 
@@ -88,9 +89,10 @@ class EquivariantOutputGraph:
     def incidence_matrix(
         self,
         *,
-        dtype: torch.dtype = torch.get_default_dtype(),
+        dtype: torch.dtype | None = None,
         device: torch.device | str | None = None,
     ) -> torch.Tensor:
+        dtype = torch.get_default_dtype() if dtype is None else dtype
         incidence = torch.zeros(
             self.num_edges,
             self.num_nodes,

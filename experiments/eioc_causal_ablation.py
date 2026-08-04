@@ -13,8 +13,8 @@ import json
 from pathlib import Path
 
 import torch
-from compatibility.e3nn import o3
 
+from compatibility.e3nn import o3
 from models import EquivariantIsospectralOrientationCalibrator
 
 

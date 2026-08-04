@@ -9,7 +9,14 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 import torch
+from torch.utils.data import DataLoader, RandomSampler, TensorDataset
 
+from scripts.evaluate_itop_final import _available_models
+from scripts.run_itop_study import (
+    _geometry_cache_complete,
+    _parse_args,
+    _training_command,
+)
 from scripts.train_itop import (
     _capture_rng_state,
     _load_checkpoint,
@@ -20,13 +27,6 @@ from scripts.train_itop import (
     _update_early_stopping,
     train_epoch,
 )
-from scripts.evaluate_itop_final import _available_models
-from scripts.run_itop_study import (
-    _geometry_cache_complete,
-    _parse_args,
-    _training_command,
-)
-from torch.utils.data import DataLoader, RandomSampler, TensorDataset
 
 
 class _NonFiniteGradient(torch.autograd.Function):

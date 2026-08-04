@@ -14,7 +14,6 @@ import numpy as np
 
 from data.paths import dataset_dir
 
-
 RAW_CACHE_NAME = "modelnet40_inertia_dataset.pkl"
 CLEAN_CACHE_NAME = "modelnet40_inertia_dataset_clean.pkl"
 MAD_NORMAL_SCALE = 1.4826

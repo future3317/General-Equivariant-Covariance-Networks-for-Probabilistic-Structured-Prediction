@@ -11,9 +11,9 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 from collections import OrderedDict
 from pathlib import Path
-import sys
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -23,10 +23,15 @@ import torch
 # Allow direct execution as ``python scripts/evaluate_itop_final.py``.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from data.itop_dataset import ITOP_JOINT_NAMES, ITOP_SKELETON_EDGES
-from evaluation import binary_auroc, risk_coverage_auc
-from plotting import COLORS, PALETTE, cm2inch, label_panels, save_figure, setup_tpami_style
-
+from evaluation import risk_coverage_auc
+from plotting import (
+    COLORS,
+    PALETTE,
+    cm2inch,
+    label_panels,
+    save_figure,
+    setup_tpami_style,
+)
 
 MODEL_INFO = OrderedDict(
     (
@@ -222,7 +227,7 @@ def _fmt(value: Any, digits: int = 3) -> str:
 
 def _write_tables(audit_record: dict[str, Any], output: Path) -> None:
     rows: list[dict[str, Any]] = []
-    for model, record in audit_record["models"].items():
+    for record in audit_record["models"].values():
         metrics = record["metrics"]
         row = {
             "model": record["label"],

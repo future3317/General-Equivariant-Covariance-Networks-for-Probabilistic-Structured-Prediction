@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import copy
+from pathlib import Path
 
 import torch
-from compatibility.e3nn import o3
 from torch.utils.data import Dataset
-from compatibility.torch_geometric import PyGDataLoader
 
-from dielectric_data_loader import DielectricDataset, ShardBatchSampler
-from data.paths import dataset_dir
+from compatibility.e3nn import o3
+from compatibility.torch_geometric import PyGDataLoader
 from data.oof import fold_assignments
+from data.paths import dataset_dir
 from data.tensor_conversions import irreps_to_km, km_to_irreps
+from dielectric_data_loader import DielectricDataset, ShardBatchSampler
 
 
 class DielectricIrrepsDataset(Dataset):

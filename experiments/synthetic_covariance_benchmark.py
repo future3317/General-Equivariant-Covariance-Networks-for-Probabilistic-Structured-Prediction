@@ -16,8 +16,8 @@ import math
 from pathlib import Path
 
 import torch
-from scipy.stats import f
 
+from compatibility.e3nn import o3
 from distributions import StudentTNLL
 from equivcompiler import (
     FeatureSpec,
@@ -29,8 +29,6 @@ from equivcompiler import (
 )
 from evaluation import covariance_relative_error, empirical_coverage
 from representations import EquivariantOutputGraph, O3IrrepsSpec
-from compatibility.e3nn import o3
-
 
 NU = 5.0
 

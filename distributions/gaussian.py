@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+
 import torch
 
 from distributions.base import StructuredDistributionLoss, diagnostic_components

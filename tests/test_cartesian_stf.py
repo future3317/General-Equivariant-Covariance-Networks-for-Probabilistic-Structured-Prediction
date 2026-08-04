@@ -7,7 +7,6 @@ import torch
 from e3nn import o3
 
 from equivcompiler import (
-    ExactOnly,
     FeatureSpec,
     FullCovariance,
     PreferExecutor,
@@ -25,7 +24,6 @@ from representations import (
     rank4_elasticity_irreps,
 )
 
-
 SEED = o3.Irreps("4x0e + 2x1o + 2x2e")
 MIXED_PARITY_SEED = o3.Irreps("4x0e + 2x1e + 2x1o + 2x2e + 2x2o")
 OPERATOR_IRREPS = o3.Irreps("2x0e + 2x2e + 1x4e")
@@ -35,7 +33,7 @@ def _compile(
     output,
     *,
     executor="auto",
-    fidelity=ExactOnly(),
+    fidelity=None,
     output_scope="global",
 ):
     executor_policy = (
@@ -81,7 +79,7 @@ def test_frozen_stf_projectors_are_complete_orthonormal_symmetric_basis():
         atol=1e-6,
         rtol=1e-6,
     )
-    assert not any(name in basis.state_dict() for name in {"P0", "P2", "P4"})
+    assert not any(name in basis.state_dict() for name in ("P0", "P2", "P4"))
 
 
 def test_cartesian_abpqh_formula_is_bijective_and_matches_spherical_basis():

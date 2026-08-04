@@ -7,15 +7,14 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from torch.utils.data import Dataset
-from compatibility.torch_geometric import Data, PyGDataLoader
 from pymatgen.core import Structure
-from compatibility.e3nn import o3, soft_one_hot_linspace
+from torch.utils.data import Dataset
 
 from atom_features import create_composite_atom_features
+from compatibility.e3nn import o3, soft_one_hot_linspace
+from compatibility.torch_geometric import Data, PyGDataLoader
 from data.paths import dataset_dir
 from data.tensor_conversions import elasticity_21d_to_irreps
-
 
 # 21D vector indices as upper-triangular positions in a 6x6 Voigt matrix.
 _ELASTICITY_21_INDICES = [

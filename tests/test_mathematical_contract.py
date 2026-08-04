@@ -3,15 +3,15 @@ import math
 import torch
 
 from compatibility.e3nn import o3
-from evaluation.calibration import marginal_interval_quantile
 from distributions import GaussianNLL, StudentTNLL
+from evaluation.calibration import marginal_interval_quantile
+from representations.graph_structure import EquivariantOutputGraph
 from representations.symmetric_square import O3SymmetricOperatorBasis
 from spd_maps.centered_spectral_window import CenteredSpectralWindowMap
 from spd_maps.graph_precision import GraphStructuredPrecisionMap
 from spd_maps.isotypic_block import IsotypicBlockMap
 from spd_maps.low_rank import LowRankPlusIsotropicMap
 from spd_maps.matrix_exp import MatrixExponentialMap
-from representations.graph_structure import EquivariantOutputGraph
 
 
 def test_student_t_marginal_uses_scale_and_t_quantile():

@@ -14,13 +14,10 @@ import json
 import os
 
 import torch
-import torch.nn as nn
-import torch.optim as optim
-from compatibility.e3nn import o3
 from scipy.stats import chi2
+from torch import nn, optim
 
-from representations import O3IrrepsSpec
-from spd_maps import MatrixExponentialMap
+from compatibility.e3nn import o3
 from distributions import GaussianNLL
 from models import (
     EquivariantMeanHead,
@@ -28,7 +25,8 @@ from models import (
     StructuredProbabilisticPredictor,
 )
 from models.backbone import EquivariantActivation
-
+from representations import O3IrrepsSpec
+from spd_maps import MatrixExponentialMap
 
 # Input representation for the synthetic teacher.
 # Includes scalars, vectors, and rank-2 tensors so the teacher can produce

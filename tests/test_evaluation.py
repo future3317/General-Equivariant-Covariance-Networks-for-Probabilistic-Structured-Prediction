@@ -5,26 +5,26 @@ import math
 import pytest
 import torch
 
+from data.representation_metrics import transformed_spectral_bounds
 from evaluation import (
-    mean_absolute_error,
-    root_mean_squared_error,
-    r2_score,
+    calibration_error,
+    covariance_relative_error,
+    covariance_spectrum_diagnostics,
+    eigenvalue_error,
     empirical_coverage,
-    negative_log_likelihood_gaussian,
     energy_score,
     isotropic_sliced_crps,
-    covariance_relative_error,
     log_euclidean_error,
-    eigenvalue_error,
-    whitened_residual_covariance,
-    symmetric_whitened_residuals,
-    student_t_radial_pit,
-    whitened_angular_defect,
-    covariance_spectrum_diagnostics,
-    calibration_error,
+    mean_absolute_error,
+    negative_log_likelihood_gaussian,
+    r2_score,
+    root_mean_squared_error,
     sharpness,
+    student_t_radial_pit,
+    symmetric_whitened_residuals,
+    whitened_angular_defect,
+    whitened_residual_covariance,
 )
-from data.representation_metrics import transformed_spectral_bounds
 
 
 def _make_gaussian_data(batch=16, d=6, seed=0, well_specified: bool = False):

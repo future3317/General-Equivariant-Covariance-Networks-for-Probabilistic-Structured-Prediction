@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import torch
+
 from compatibility.e3nn import o3
 
 
@@ -37,7 +38,7 @@ def symmetric_square_irreps(output_irreps: o3.Irreps) -> o3.Irreps:
     for multiplicity, angular_momentum, parity in groups:
         symmetric_copies = multiplicity * (multiplicity + 1) // 2
         antisymmetric_copies = multiplicity * (multiplicity - 1) // 2
-        for output_l in range(0, 2 * angular_momentum + 1):
+        for output_l in range(2 * angular_momentum + 1):
             if (2 * angular_momentum - output_l) % 2 == 0:
                 add(output_l, 1, symmetric_copies)
             else:

@@ -7,21 +7,21 @@ from a closed rule set; callers cannot attach their own certificates.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import Enum
 import hashlib
 import json
-from typing import Any, Literal, Mapping
+from collections.abc import Mapping
+from dataclasses import dataclass
+from enum import Enum
+from typing import Any, Literal
 
 from compatibility.e3nn import o3
-
 from representations.graph_structure import EquivariantOutputGraph
 from representations.irrep_layout import RepeatedIrrepLayout
 from representations.representation_ir import (
     DirectSumExpr,
     IrrepsExpr,
-    RepExpr,
     RepeatedExpr,
+    RepExpr,
     SymmetricSquareExpr,
 )
 
@@ -143,11 +143,11 @@ class OperatorIR:
     """Composable semantic operator program with verifier-derived properties."""
 
     kind: str
-    inputs: tuple["OperatorIR", ...] = ()
+    inputs: tuple[OperatorIR, ...] = ()
     attributes: tuple[tuple[str, Any], ...] = ()
 
     @classmethod
-    def node(cls, kind: str, *inputs: "OperatorIR", **attributes: Any) -> "OperatorIR":
+    def node(cls, kind: str, *inputs: OperatorIR, **attributes: Any) -> OperatorIR:
         """Build a node without accepting claimed proof conclusions."""
         forbidden = {"positivity", "equivariance"}.intersection(attributes)
         if forbidden:
@@ -160,7 +160,7 @@ class OperatorIR:
         )
 
     @classmethod
-    def symmetric_operator(cls, **attributes: Any) -> "OperatorIR":
+    def symmetric_operator(cls, **attributes: Any) -> OperatorIR:
         parameter = attributes.pop("parameter", None)
         inputs = () if parameter is None else (parameter,)
         return cls.node("symmetric_operator", *inputs, **attributes)
@@ -175,7 +175,7 @@ class OperatorIR:
         coordinate_layout: str = "native",
         unit_irreps: str | None = None,
         copies: int | None = None,
-    ) -> "OperatorIR":
+    ) -> OperatorIR:
         attributes: dict[str, Any] = {"binding": binding, "start": start}
         if stop is not None:
             attributes["stop"] = stop
@@ -187,14 +187,14 @@ class OperatorIR:
 
     @classmethod
     def spectral_positive(
-        cls, operator: "OperatorIR", *, map: str, **attributes: Any
-    ) -> "OperatorIR":
+        cls, operator: OperatorIR, *, map: str, **attributes: Any
+    ) -> OperatorIR:
         return cls.node("spectral_positive", operator, map=map, **attributes)
 
     @classmethod
     def equivariant_factor(
-        cls, parameter: "OperatorIR", *, rank: int, output_irreps: str
-    ) -> "OperatorIR":
+        cls, parameter: OperatorIR, *, rank: int, output_irreps: str
+    ) -> OperatorIR:
         return cls.node(
             "equivariant_factor",
             parameter,
@@ -203,13 +203,13 @@ class OperatorIR:
         )
 
     @classmethod
-    def gram(cls, factor: "OperatorIR") -> "OperatorIR":
+    def gram(cls, factor: OperatorIR) -> OperatorIR:
         return cls.node("gram", factor)
 
     @classmethod
     def positive_scalar_identity(
-        cls, parameter: "OperatorIR", *, dimension: int, minimum: float = 1e-4
-    ) -> "OperatorIR":
+        cls, parameter: OperatorIR, *, dimension: int, minimum: float = 1e-4
+    ) -> OperatorIR:
         return cls.node(
             "positive_scalar_identity",
             parameter,
@@ -219,8 +219,8 @@ class OperatorIR:
 
     @classmethod
     def cholesky_positive(
-        cls, parameter: "OperatorIR", *, dimension: int, minimum: float = 1e-4
-    ) -> "OperatorIR":
+        cls, parameter: OperatorIR, *, dimension: int, minimum: float = 1e-4
+    ) -> OperatorIR:
         return cls.node(
             "cholesky_positive",
             parameter,
@@ -229,21 +229,21 @@ class OperatorIR:
         )
 
     @classmethod
-    def add(cls, *operators: "OperatorIR") -> "OperatorIR":
+    def add(cls, *operators: OperatorIR) -> OperatorIR:
         return cls.node("add", *operators)
 
     @classmethod
-    def direct_sum(cls, *operators: "OperatorIR", **attributes: Any) -> "OperatorIR":
+    def direct_sum(cls, *operators: OperatorIR, **attributes: Any) -> OperatorIR:
         return cls.node("direct_sum", *operators, **attributes)
 
     @classmethod
     def kronecker_identity(
-        cls, operator: "OperatorIR", **attributes: Any
-    ) -> "OperatorIR":
+        cls, operator: OperatorIR, **attributes: Any
+    ) -> OperatorIR:
         return cls.node("kronecker_identity", operator, **attributes)
 
     @classmethod
-    def pullback(cls, operator: "OperatorIR", *, intertwiner: str) -> "OperatorIR":
+    def pullback(cls, operator: OperatorIR, *, intertwiner: str) -> OperatorIR:
         return cls.node("pullback", operator, intertwiner=intertwiner)
 
     def attribute_dict(self) -> dict[str, Any]:
@@ -902,7 +902,7 @@ class OperatorFamilyPlan:
     def active_expression(self, location: RepExpr) -> RepExpr:
         return DirectSumExpr((location, self.parameter_expression))
 
-    def relation_to(self, other: "OperatorFamilyPlan") -> FamilyRelationCertificate:
+    def relation_to(self, other: OperatorFamilyPlan) -> FamilyRelationCertificate:
         if self.assembly.fingerprint == other.assembly.fingerprint and (
             self.parameter_expression.as_dict() == other.parameter_expression.as_dict()
         ):

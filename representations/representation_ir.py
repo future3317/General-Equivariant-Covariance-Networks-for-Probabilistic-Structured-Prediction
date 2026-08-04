@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from compatibility.e3nn import o3
-
 from representations.adaptive_lifting import direct_sum_irreps
 from representations.irrep_layout import RepeatedIrrepLayout
 from representations.o3_irreps import O3IrrepsSpec
@@ -17,7 +16,7 @@ class RepExpr(ABC):
     """Symbolic representation expression before backend decomposition."""
 
     @abstractmethod
-    def decompose_o3(self) -> "DecomposedRep":
+    def decompose_o3(self) -> DecomposedRep:
         """Decompose this expression with the released O(3) backend."""
 
     @abstractmethod

@@ -15,6 +15,7 @@ from equivcompiler import (
     EllipticalDistribution,
     ExactExecutorCandidates,
     ExactOnly,
+    FeatureSpec,
     FirstFeasible,
     FullCovariance,
     GraphPrecision,
@@ -23,7 +24,6 @@ from equivcompiler import (
     MinimizeLatency,
     PreferExecutor,
     SpecificExecutor,
-    FeatureSpec,
     execution_signature_for_plan,
     plan_readout,
 )
@@ -186,12 +186,12 @@ def _recursive_oracle_validation(
 
 
 def _build_exact_pair(seed: FeatureSpec, device: torch.device, dtype: torch.dtype):
-    common = dict(
-        output="ij=ji",
-        covariance=FullCovariance(),
-        fidelity=ExactOnly(),
-        output_scope="global",
-    )
+    common = {
+        "output": "ij=ji",
+        "covariance": FullCovariance(),
+        "fidelity": ExactOnly(),
+        "output_scope": "global",
+    }
     spherical_plan = plan_readout(
         seed,
         executor=SpecificExecutor("spherical_cg"),

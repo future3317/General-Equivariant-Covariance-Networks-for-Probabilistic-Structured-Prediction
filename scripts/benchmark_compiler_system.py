@@ -158,7 +158,7 @@ def _run_one(args: argparse.Namespace, mode: str, backend: str, dtype_name: str,
                 "timings": timings,
             }
         )
-    except Exception as error:  # explicit capability/protocol record
+    except Exception as error:  # noqa: BLE001 - record every unsupported benchmark case
         row.update({"error_type": type(error).__name__, "error": str(error)})
     return row
 

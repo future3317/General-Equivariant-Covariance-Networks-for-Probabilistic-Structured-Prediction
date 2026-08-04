@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import warnings
 
-
 _TORCHSCRIPT_DEPRECATION = (
     r"`torch\.jit\.script` is deprecated\. "
     r"Please switch to `torch\.compile` or `torch\.export`\."

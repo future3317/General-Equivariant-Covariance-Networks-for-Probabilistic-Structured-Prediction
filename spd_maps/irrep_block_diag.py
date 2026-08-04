@@ -8,8 +8,8 @@ representation matrices.
 from __future__ import annotations
 
 import torch
-from compatibility.e3nn import o3
 
+from compatibility.e3nn import o3
 from spd_maps.base import SPDMap
 
 

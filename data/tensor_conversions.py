@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import itertools
-import torch
-from compatibility.e3nn import CartesianTensor
 
+import torch
+
+from compatibility.e3nn import CartesianTensor
 from voigt_utils import (
-    voigt_to_tensor,
+    kelvin_mandel_to_voigt,
     tensor_to_voigt,
     voigt_to_kelvin_mandel,
-    kelvin_mandel_to_voigt,
+    voigt_to_tensor,
 )
-
 
 # Cartesian tensors for common symmetries.
 _CARTESIAN_RANK2 = CartesianTensor("ij=ji")

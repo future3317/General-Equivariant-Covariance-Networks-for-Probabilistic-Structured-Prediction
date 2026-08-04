@@ -4,6 +4,7 @@ import pytest
 import torch
 
 from compatibility.torch_geometric import Data, PyGDataLoader
+from data.oof import fold_assignments
 from data.pseudo_covariance import (
     PSEUDO_CACHE_VERSION,
     build_isotropic_pseudo_covariance,
@@ -11,7 +12,6 @@ from data.pseudo_covariance import (
     validate_oof_residual_payload,
     validate_pseudo_cache,
 )
-from data.oof import fold_assignments
 
 
 class _Graph:

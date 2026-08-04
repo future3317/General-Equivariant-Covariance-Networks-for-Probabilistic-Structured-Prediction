@@ -1,33 +1,33 @@
 """Model components: backbones, heads, and structured predictors."""
 
 from models.backbone import EquivariantBackbone
-from models.pooling import GraphOutputHead
-from models.mean_head import EquivariantMeanHead
-from models.covariance_head import (
-    O3EquivariantSymmetricOperatorHead,
-    O3QuadraticSymmetricOperatorHead,
-    O3EquivariantLowRankCovarianceHead,
-)
-from models.orientation_calibrator import EquivariantIsospectralOrientationCalibrator
-from models.structured_predictor import StructuredProbabilisticPredictor
 from models.baselines import (
     DeterministicHead,
-    IsotropicCovarianceHead,
     IrrepBlockDiagonalCovarianceHead,
+    IsotropicCovarianceHead,
 )
 from models.controlled_readout import ControlledMeanOperatorHead
+from models.covariance_head import (
+    O3EquivariantLowRankCovarianceHead,
+    O3EquivariantSymmetricOperatorHead,
+    O3QuadraticSymmetricOperatorHead,
+)
+from models.mean_head import EquivariantMeanHead
+from models.orientation_calibrator import EquivariantIsospectralOrientationCalibrator
+from models.pooling import GraphOutputHead
+from models.structured_predictor import StructuredProbabilisticPredictor
 
 __all__ = [
+    "ControlledMeanOperatorHead",
+    "DeterministicHead",
     "EquivariantBackbone",
-    "GraphOutputHead",
+    "EquivariantIsospectralOrientationCalibrator",
     "EquivariantMeanHead",
+    "GraphOutputHead",
+    "IrrepBlockDiagonalCovarianceHead",
+    "IsotropicCovarianceHead",
+    "O3EquivariantLowRankCovarianceHead",
     "O3EquivariantSymmetricOperatorHead",
     "O3QuadraticSymmetricOperatorHead",
-    "EquivariantIsospectralOrientationCalibrator",
-    "O3EquivariantLowRankCovarianceHead",
     "StructuredProbabilisticPredictor",
-    "DeterministicHead",
-    "IsotropicCovarianceHead",
-    "IrrepBlockDiagonalCovarianceHead",
-    "ControlledMeanOperatorHead",
 ]

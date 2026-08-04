@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 import torch
-
 
 PSEUDO_CACHE_VERSION = 1
 
@@ -63,7 +63,7 @@ def validate_oof_residual_payload(payload: Mapping[str, Any]) -> None:
     residuals = payload.get("residuals")
     assignments = payload.get("fold_assignments")
     if not isinstance(residuals, torch.Tensor) or not isinstance(assignments, torch.Tensor):
-        raise ValueError("invalid OOF cache: residuals and fold_assignments tensors are required")
+        raise TypeError("invalid OOF cache: residuals and fold_assignments tensors are required")
     if residuals.ndim != 2 or assignments.shape != (residuals.shape[0],):
         raise ValueError("invalid OOF residual dimensions")
     if not torch.isfinite(residuals).all() or not torch.isfinite(assignments).all():
@@ -135,7 +135,7 @@ def validate_pseudo_cache(payload: Mapping[str, Any], *, expected_size: int | No
         raise ValueError("isotropic-only cache must not claim a directional transport certificate")
     for key in ("covariance", "sqrt_covariance", "isotropic_variance", "neighbours", "weights"):
         if not isinstance(payload.get(key), torch.Tensor):
-            raise ValueError(f"pseudo-label cache is missing tensor {key!r}")
+            raise TypeError(f"pseudo-label cache is missing tensor {key!r}")
     covariance = payload["covariance"]
     if expected_size is not None and covariance.shape[0] != expected_size:
         raise ValueError("pseudo-label cache does not cover exactly the train split")

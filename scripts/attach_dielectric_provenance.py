@@ -12,8 +12,8 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts.dielectric_runtime import (
-    compilation_record_with_hash,
     checkpoint_chain_provenance,
+    compilation_record_with_hash,
     dataset_provenance,
     inference_contract_from_args,
     inference_contract_hash,

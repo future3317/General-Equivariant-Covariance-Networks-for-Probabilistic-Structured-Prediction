@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections import deque
 from pathlib import Path
-import sys
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -16,7 +16,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from data.itop_dataset import ITOP_SKELETON_EDGES
 from plotting import COLORS, cm2inch, label_panels, save_figure, setup_tpami_style
-
 
 MODEL_LABELS = {
     "deterministic": "Det.",

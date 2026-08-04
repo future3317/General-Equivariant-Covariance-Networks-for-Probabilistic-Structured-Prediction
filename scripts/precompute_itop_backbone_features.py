@@ -89,16 +89,16 @@ def main() -> None:
     backbone = build_itop_backbone(training_args)
     backbone.load_state_dict(checkpoint["backbone_state"], strict=True)
     backbone = backbone.to(device)
-    loader_kwargs = dict(
-        data_dir=training_args.data_dir,
-        batch_size=args.batch_size,
-        num_points=training_args.num_points,
-        num_neighbors=training_args.num_neighbors,
-        num_workers=args.num_workers,
-        pin_memory=device.type == "cuda",
-        persistent_workers=args.num_workers > 0,
-        prefetch_factor=2,
-    )
+    loader_kwargs = {
+        "data_dir": training_args.data_dir,
+        "batch_size": args.batch_size,
+        "num_points": training_args.num_points,
+        "num_neighbors": training_args.num_neighbors,
+        "num_workers": args.num_workers,
+        "pin_memory": device.type == "cuda",
+        "persistent_workers": args.num_workers > 0,
+        "prefetch_factor": 2,
+    }
     splits = {
         "side_train": ("side", "train"),
         "side_test": ("side", "test"),

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import json
+from dataclasses import dataclass
 from typing import Any, Literal
 
 import torch
@@ -14,10 +14,10 @@ from equivcompiler.distributions import (
     normalize_distribution,
 )
 from equivcompiler.executors import (
-    CandidateEnumerator,
     DEFAULT_EXACT_LOWERINGS,
-    ExecutorDecision,
+    CandidateEnumerator,
     ExecutionContext,
+    ExecutorDecision,
 )
 from equivcompiler.modules import CompiledProbabilisticReadout
 from equivcompiler.policies import (
@@ -35,8 +35,8 @@ from equivcompiler.policies import (
     SpecificExecutor,
     TruncatedMultiplicityRank,
 )
-from equivcompiler.specs import FeatureSpec, OutputSemantics, describe_output
 from equivcompiler.signatures import plan_fingerprints
+from equivcompiler.specs import FeatureSpec, OutputSemantics, describe_output
 from representations import (
     CompilationCertificate,
     CompilationError,
@@ -47,7 +47,6 @@ from representations import (
     analyze_lifting_graph,
 )
 from representations.operator_ir import OperatorFamilyPlan
-
 
 OutputScope = Literal["global", "node", "edge"]
 COMPILER_VERSION = "0.4"
@@ -522,14 +521,16 @@ def plan_readout(
     covariance: CovariancePolicy,
     distribution: DistributionSpec | Literal["gaussian", "student_t"] = "gaussian",
     fidelity: FidelityPolicy | None = None,
-    executor: ExecutorPolicy = ExactExecutorCandidates(),
-    cost: CostPolicy = PreferExecutor(),
+    executor: ExecutorPolicy | None = None,
+    cost: CostPolicy | None = None,
     student_t_dof: float = 5.0,
     output_scope: OutputScope = "global",
     lifting_backend: str = "e3nn",
     cueq_method: str = "naive",
 ) -> CompilationPlan:
     """Analyze semantics/reachability and select an independently costed lowering."""
+    executor = ExactExecutorCandidates() if executor is None else executor
+    cost = PreferExecutor() if cost is None else cost
     fidelity_policy = fidelity or ExactOnly()
     distribution_spec = normalize_distribution(
         distribution, student_t_dof=student_t_dof

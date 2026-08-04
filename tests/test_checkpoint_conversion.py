@@ -15,7 +15,6 @@ from equivcompiler import (
 )
 from representations import CompilationError
 
-
 SEED = "4x0e + 2x1o + 2x2e"
 
 

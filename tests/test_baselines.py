@@ -4,16 +4,16 @@ import pytest
 import torch
 from torch_geometric.data import Data
 
-from representations import O3IrrepsSpec
-from spd_maps import IsotropicMap, IrrepBlockDiagonalMap
+from distributions import GaussianNLL
 from models import (
-    EquivariantBackbone,
     DeterministicHead,
-    IsotropicCovarianceHead,
+    EquivariantBackbone,
     IrrepBlockDiagonalCovarianceHead,
+    IsotropicCovarianceHead,
     StructuredProbabilisticPredictor,
 )
-from distributions import GaussianNLL
+from representations import O3IrrepsSpec
+from spd_maps import IrrepBlockDiagonalMap, IsotropicMap
 
 
 def _make_graph_data(num_graphs=2, num_nodes=6):

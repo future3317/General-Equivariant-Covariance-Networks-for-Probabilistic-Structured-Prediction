@@ -2,6 +2,7 @@
 
 import pytest
 import torch
+
 from representations import (
     O3IrrepsSpec,
     O3SymmetricOperatorBasis,

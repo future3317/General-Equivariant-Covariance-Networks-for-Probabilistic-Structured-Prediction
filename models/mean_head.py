@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import torch
-from compatibility.e3nn import o3
 
+from compatibility.e3nn import o3
 from models.pooling import GraphOutputHead
 
 

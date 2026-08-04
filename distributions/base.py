@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import abc
+
 import torch
 
 from spd_maps.base import SPDMap

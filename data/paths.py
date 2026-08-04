@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-
 DATA_ROOT_ENV = "EQUIVCOMPILER_DATA_ROOT"
 
 

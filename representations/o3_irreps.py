@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import torch
-from compatibility.e3nn import CartesianTensor, o3
 
+from compatibility.e3nn import CartesianTensor, o3
 from representations.base import OrthogonalRepresentationSpec
 from representations.symmetric_square import (
     O3SymmetricOperatorBasis,
@@ -46,7 +46,7 @@ class O3IrrepsSpec(OrthogonalRepresentationSpec):
         self._symmetric_square: O3SymmetricOperatorBasis | None = None
 
     @classmethod
-    def from_cartesian(cls, formula: str) -> "O3IrrepsSpec":
+    def from_cartesian(cls, formula: str) -> O3IrrepsSpec:
         """Compile a Cartesian permutation-symmetry formula to O(3) irreps."""
         cartesian = CartesianTensor(formula)
         return cls(o3.Irreps(cartesian), cartesian_formula=formula)

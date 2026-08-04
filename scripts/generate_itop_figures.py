@@ -19,8 +19,14 @@ import torch
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from data.itop_dataset import ITOP_JOINT_NAMES, ITOP_SKELETON_EDGES
-from plotting import COLORS, PALETTE, cm2inch, label_panels, save_figure, setup_tpami_style
-
+from plotting import (
+    COLORS,
+    PALETTE,
+    cm2inch,
+    label_panels,
+    save_figure,
+    setup_tpami_style,
+)
 
 METHODS = {
     "deterministic": "Deterministic",

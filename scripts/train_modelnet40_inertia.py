@@ -6,27 +6,27 @@ import argparse
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 import torch
-import torch.optim as optim
+from torch import optim
 from tqdm import tqdm
 
-from equivcompiler import FeatureSpec, FullCovariance, plan_readout
-from models import EquivariantBackbone
 from data.modelnet40_inertia_dataset import (
     default_modelnet40_cache_path,
     default_modelnet40_graph_cache_path,
     get_modelnet40_inertia_loaders,
 )
 from data.tensor_conversions import irreps_to_voigt
+from equivcompiler import FeatureSpec, FullCovariance, plan_readout
+from models import EquivariantBackbone
 from scripts._common import add_tensor_product_arguments, tensor_product_kwargs
 
 
 def setup_logger(save_dir: str, experiment_name: str | None = None):
     if experiment_name is None:
         experiment_name = (
-            f"modelnet40_inertia_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            f"modelnet40_inertia_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
         )
     os.makedirs(save_dir, exist_ok=True)
     log_file = os.path.join(save_dir, f"{experiment_name}.log")
@@ -166,7 +166,7 @@ def main():
     if args.save_dir is None:
         args.save_dir = f"checkpoints_modelnet40_{args.target_type}"
 
-    logger, experiment_name = setup_logger(args.save_dir)
+    logger, _experiment_name = setup_logger(args.save_dir)
     logger.info("=" * 60)
     logger.info(f"GECN ModelNet40 {args.target_type} training")
     logger.info("=" * 60)

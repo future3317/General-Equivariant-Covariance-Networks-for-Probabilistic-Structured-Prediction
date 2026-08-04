@@ -7,10 +7,10 @@ import math
 from typing import Literal
 
 import torch
+
 from compatibility.cuequivariance import load_cuequivariance
 from compatibility.e3nn import FullyConnectedNet, Gate, o3
 from data.point_cloud_graph import compute_edge_features
-
 
 TENSOR_PRODUCT_BACKENDS = ("e3nn", "cueq")
 CUEQ_METHODS = ("naive", "fused_tp")

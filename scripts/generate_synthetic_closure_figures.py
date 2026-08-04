@@ -4,16 +4,22 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from plotting import COLORS, PALETTE, cm2inch, label_panels, save_figure, setup_tpami_style
-
+from plotting import (
+    COLORS,
+    PALETTE,
+    cm2inch,
+    label_panels,
+    save_figure,
+    setup_tpami_style,
+)
 
 LABELS = {
     "full": "Full",

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import math
-from functools import lru_cache
+from functools import cache
+
 import torch
 
 from distributions.base import StructuredDistributionLoss, diagnostic_components
@@ -42,7 +43,7 @@ class StudentTNLL(StructuredDistributionLoss):
         self.nu = nu
 
     @staticmethod
-    @lru_cache(maxsize=None)
+    @cache
     def _normalization_constant(nu: float, dimension: int) -> float:
         """Cache the fixed scalar term without launching device kernels."""
         return (

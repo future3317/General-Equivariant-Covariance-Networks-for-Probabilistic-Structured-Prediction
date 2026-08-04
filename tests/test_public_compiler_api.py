@@ -17,7 +17,6 @@ from equivcompiler import (
 )
 from representations import CompilationError, EquivariantOutputGraph
 
-
 SEED = "4x0e + 2x1o + 2x2e"
 
 
@@ -194,7 +193,7 @@ def test_truncated_execution_has_separate_approximation_certificate():
 
 
 def test_compatibility_hash_covers_scope_and_layout():
-    common = dict(output="ij=ji", covariance=FullCovariance())
+    common = {"output": "ij=ji", "covariance": FullCovariance()}
     global_plan = plan_readout(FeatureSpec.from_irreps(SEED, scope="global"), **common)
     node_plan = plan_readout(FeatureSpec.from_irreps(SEED, scope="node"), **common)
     assert global_plan.compatibility_hash != node_plan.compatibility_hash

@@ -22,7 +22,6 @@ from representations import (
 )
 from spd_maps import GraphStructuredPrecisionMap
 
-
 EDGES = ((0, 1), (1, 2), (1, 3))
 
 

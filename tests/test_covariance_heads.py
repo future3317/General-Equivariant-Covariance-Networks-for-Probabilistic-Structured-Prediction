@@ -5,17 +5,17 @@ from unittest import mock
 import torch
 from e3nn import o3
 
+from distributions import GaussianNLL
 from models import (
     EquivariantBackbone,
     EquivariantMeanHead,
-    O3QuadraticSymmetricOperatorHead,
     O3EquivariantLowRankCovarianceHead,
+    O3QuadraticSymmetricOperatorHead,
     StructuredProbabilisticPredictor,
 )
-from representations import O3IrrepsSpec, rank4_elasticity_irreps
-from spd_maps import MatrixExponentialMap, LowRankPlusIsotropicMap
-from distributions import GaussianNLL
 from models.pooling import mean_pool
+from representations import O3IrrepsSpec, rank4_elasticity_irreps
+from spd_maps import LowRankPlusIsotropicMap, MatrixExponentialMap
 
 
 def _make_graph_data(batch_size=2, num_nodes=5):

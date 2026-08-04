@@ -7,13 +7,13 @@ from e3nn import o3
 from torch_geometric.loader import DataLoader
 
 import data.modelnet40_inertia_dataset as modelnet40_dataset
-
 from data.modelnet40_inertia_dataset import (
     ModelNet40InertiaDataset,
     _compute_edge_features,
     _shape_covariance_voigt,
     default_modelnet40_cache_path,
 )
+from distributions import GaussianNLL
 from models import (
     EquivariantBackbone,
     EquivariantMeanHead,
@@ -22,8 +22,6 @@ from models import (
 )
 from representations import O3IrrepsSpec
 from spd_maps import MatrixExponentialMap
-from distributions import GaussianNLL
-
 
 try:
     _CACHE_PATH = default_modelnet40_cache_path()
@@ -249,6 +247,7 @@ def test_shape_covariance_computation():
 def _rotate_data(data, R):
     """Rotate a point-cloud Data object and recompute edge features."""
     from e3nn.math import soft_one_hot_linspace
+
     from data.modelnet40_inertia_dataset import _knn_graph
 
     data_rot = data.clone()

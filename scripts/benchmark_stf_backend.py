@@ -12,8 +12,8 @@ import json
 from pathlib import Path
 
 import torch
-from compatibility.e3nn import o3
 
+from compatibility.e3nn import o3
 from equivcompiler import (
     FeatureSpec,
     FullCovariance,
@@ -114,17 +114,17 @@ def _benchmark_one(
     for name, head in (("spherical_cg", spherical), ("dense_projector", lowered)):
         latest: tuple[torch.Tensor, torch.Tensor] | None = None
 
-        def forward() -> None:
+        def forward(head=head) -> None:
             nonlocal latest
             latest = head(features)
 
-        def forward_backward() -> None:
+        def forward_backward(head=head) -> None:
             nonlocal latest
             latest = head(features)
             mean, operator = latest
             (mean.square().mean() + operator.square().mean()).backward()
 
-        def prepare() -> None:
+        def prepare(head=head) -> None:
             head.zero_grad(set_to_none=True)
             features.grad = None
 
@@ -181,7 +181,7 @@ def benchmark(args: argparse.Namespace) -> dict:
                             repeats=args.repeats,
                         )
                         record["status"] = "ok"
-                    except Exception as error:
+                    except Exception as error:  # noqa: BLE001 - record every unsupported benchmark case
                         record = {
                             "batch_size": batch_size,
                             "multiplicity_2e": multiplicity,

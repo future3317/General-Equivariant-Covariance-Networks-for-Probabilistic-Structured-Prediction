@@ -5,8 +5,8 @@ import importlib.util
 import pytest
 import torch
 
-from models.backbone import EquivariantMessagePassing
 from compatibility.e3nn import o3
+from models.backbone import EquivariantMessagePassing
 
 
 def _reference_layer_forward(

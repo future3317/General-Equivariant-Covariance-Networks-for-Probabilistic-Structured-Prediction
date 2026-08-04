@@ -28,11 +28,11 @@ import joblib
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-from compatibility.torch_geometric import Data, PyGDataLoader
 
-from data.tensor_conversions import voigt_to_irreps
-from data.point_cloud_graph import compute_edge_features, knn_graph
+from compatibility.torch_geometric import Data, PyGDataLoader
 from data.paths import dataset_dir
+from data.point_cloud_graph import compute_edge_features, knn_graph
+from data.tensor_conversions import voigt_to_irreps
 
 # Backward-compatible names for existing experiment utilities and tests. The
 # implementations live in one shared module and are not duplicated here.
@@ -279,7 +279,15 @@ class ModelNet40InertiaDataset(Dataset):
     def _load_cache(cache_path: str | Path) -> dict[str, Any]:
         try:
             return joblib.load(cache_path)
-        except Exception:
+        except (
+            AttributeError,
+            EOFError,
+            ImportError,
+            KeyError,
+            ModuleNotFoundError,
+            ValueError,
+            pickle.UnpicklingError,
+        ):
             with open(cache_path, "rb") as f:
                 return pickle.load(f)
 

@@ -87,7 +87,7 @@ def run(
     with torch.no_grad():
         teacher_mu, teacher_params = teacher(contexts_x, batch_context)
         teacher_scale = spd_map(teacher_params)
-        test_mu, test_params = teacher(test_x, batch_test)
+        _test_mu, test_params = teacher(test_x, batch_test)
         test_scale = spd_map(test_params)
     x_train = contexts_x.repeat_interleave(replicates, dim=0)
     batch_train = torch.arange(x_train.shape[0], device=dev)

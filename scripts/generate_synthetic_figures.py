@@ -27,7 +27,6 @@ from plotting import (
     setup_tpami_style,
 )
 
-
 # Configurations used in the main synthetic benchmark figure.
 SYNTHETIC_CONFIGS = [
     {"output_irreps": "1o", "name": r"$V = \ell=1$ (vector)"},

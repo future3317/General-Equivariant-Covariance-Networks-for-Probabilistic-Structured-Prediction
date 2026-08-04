@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 import torch
-from compatibility.e3nn import o3
 
+from compatibility.e3nn import o3
 from equivcompiler.api import normalize_backend
 from equivcompiler.planning import plan_readout
 from equivcompiler.policies import (
