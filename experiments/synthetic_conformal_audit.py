@@ -73,6 +73,10 @@ def run_audit(
     return {
         "audit": "split_conformal_student_t_shape",
         "source_commit": source_commit,
+        "torch_version": torch.__version__,
+        "cuda_available": bool(torch.cuda.is_available()),
+        "device": "cpu",
+        "dtype": str(means_cal.dtype),
         "seed": seed,
         "dimension": dimension,
         "calibration_size": calibration_size,
