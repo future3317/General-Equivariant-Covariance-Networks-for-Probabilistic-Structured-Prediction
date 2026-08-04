@@ -210,6 +210,13 @@ python -m experiments.synthetic_conformal_audit \
   --calibration-size 255 --test-size 10000 --alpha 0.1
 ```
 
+The server audit at `results/conformal_audit_d9fbf42/` used a Student-t teacher
+with `nu=5`, 255 calibration examples, and 10,000 evaluation examples. It
+reported coverage `0.896` at nominal `0.90`; after an independent orthogonal
+coordinate change, coverage was unchanged and the threshold difference was
+`1.91e-6` in FP32. This is an implementation/invariance audit, not an ITOP or
+dielectric calibration result.
+
 An optional, explicitly non-directional auxiliary is also available for
 audited ablations. `scripts/build_dielectric_pseudo_covariance.py` consumes a
 five-fold, train-only OOF cache and constructs an isotropic residual-covariance
