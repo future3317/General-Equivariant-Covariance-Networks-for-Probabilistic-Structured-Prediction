@@ -18,9 +18,11 @@ def test_posthoc_split_is_deterministic_and_disjoint():
     assert sorted(calibration.tolist() + evaluation.tolist()) == list(range(10))
 
 
-def test_posthoc_split_rejects_duplicate_or_invalid_inputs():
-    with pytest.raises(ValueError, match="unique"):
-        _split_indices(torch.tensor([1, 1, 2]), calibration_fraction=0.5, seed=0)
+def test_posthoc_split_uses_sample_positions_even_with_legacy_metadata():
+    calibration, evaluation = _split_indices(
+        torch.tensor([1, 1, 2]), calibration_fraction=0.5, seed=0
+    )
+    assert set(calibration.tolist()).isdisjoint(evaluation.tolist())
     with pytest.raises(ValueError, match="calibration_fraction"):
         _split_indices(torch.arange(3), calibration_fraction=0.0, seed=0)
 

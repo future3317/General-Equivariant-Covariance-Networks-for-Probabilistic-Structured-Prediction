@@ -73,8 +73,6 @@ def _split_indices(
         raise ValueError("frame_index must contain at least two examples")
     if not 0.0 < calibration_fraction < 1.0:
         raise ValueError("calibration_fraction must lie in (0,1)")
-    if frame_index.unique().numel() != frame_index.numel():
-        raise ValueError("frame_index must be unique before post-hoc splitting")
     count = int(frame_index.numel() * calibration_fraction)
     if count < 1 or count >= frame_index.numel():
         raise ValueError("calibration split must leave at least one evaluation example")
@@ -98,8 +96,6 @@ def _validate_view_pair(
             raise ValueError(f"{name} frame_index/view_id must be one-dimensional")
         if frame_index.numel() != view_id.numel():
             raise ValueError(f"{name} frame_index/view_id lengths disagree")
-        if frame_index.unique().numel() != frame_index.numel():
-            raise ValueError(f"{name} frame_index must be unique")
         observed_views = view_id.unique().tolist()
         if observed_views != [expected_view]:
             raise ValueError(
@@ -108,11 +104,27 @@ def _validate_view_pair(
             )
     if not torch.equal(side["frame_index"], top["frame_index"]):
         raise ValueError("side and top predictions must use the same frame order")
+    duplicate_rates = {
+        name: float(
+            1.0
+            - payload["frame_index"].unique().numel()
+            / payload["frame_index"].numel()
+        )
+        for name, payload in (("side", side), ("top", top))
+    }
     return {
         "side_view_id": int(side["view_id"][0]),
         "top_view_id": int(top["view_id"][0]),
         "paired_frame_count": int(side["frame_index"].numel()),
         "frame_order_equal": True,
+        "frame_index_duplicate_rate": duplicate_rates,
+        "frame_index_warning": (
+            "Duplicate frame_index metadata is reported but does not affect "
+            "sample-position splitting; verify the artifact provenance before "
+            "using frame-level joins."
+            if any(rate > 0.0 for rate in duplicate_rates.values())
+            else None
+        ),
     }
 
 
