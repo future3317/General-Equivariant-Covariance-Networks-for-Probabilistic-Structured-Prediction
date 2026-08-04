@@ -222,6 +222,9 @@ def test_precomputed_itop_geometry_is_exact_and_gpu_featurizable(tmp_path):
     )
     sample = dataset[0]
     assert sample.edge_index.shape == (2, 16)
+    torch.testing.assert_close(
+        sample.edge_index[0], torch.arange(8).repeat_interleave(2)
+    )
     assert not hasattr(sample, "edge_sh")
     sample.batch = torch.zeros(8, dtype=torch.long)
     backbone = EquivariantBackbone(

@@ -319,6 +319,9 @@ class ITOPCachedDataset(Dataset):
         self.view = view
         self.num_points = num_points
         self.num_neighbors = num_neighbors
+        self._edge_sources = torch.arange(num_points).repeat_interleave(
+            num_neighbors
+        )
         self.points = np.load(self.cache_dir / "points.npy", mmap_mode="r")
         self.neighbors = np.load(self.cache_dir / "neighbors.npy", mmap_mode="r")
         self.joints = np.load(self.cache_dir / "joints.npy", mmap_mode="r")
@@ -354,11 +357,10 @@ class ITOPCachedDataset(Dataset):
         targets = torch.from_numpy(
             np.array(self.neighbors[item], dtype=np.int64, copy=True).reshape(-1)
         )
-        sources = torch.arange(self.num_points).repeat_interleave(self.num_neighbors)
         return ITOPData(
             pos=pos,
             z=torch.zeros(self.num_points, dtype=torch.long),
-            edge_index=torch.stack((sources, targets)),
+            edge_index=torch.stack((self._edge_sources, targets)),
             y_pose=torch.from_numpy(
                 np.array(self.joints[item], copy=True).reshape(1, -1)
             ).float(),
@@ -378,6 +380,23 @@ def itop_paths(data_dir: Path, view: str, split: str) -> tuple[Path, Path]:
         require_itop_file(data_dir / f"ITOP_{view}_{split}_depth_map.h5"),
         require_itop_file(data_dir / f"ITOP_{view}_{split}_labels_compact.npz"),
     )
+
+
+def _loader_kwargs(
+    *,
+    num_workers: int,
+    pin_memory: bool,
+    persistent_workers: bool,
+    prefetch_factor: int | None,
+) -> dict[str, object]:
+    kwargs: dict[str, object] = {
+        "num_workers": num_workers,
+        "pin_memory": pin_memory,
+        "persistent_workers": persistent_workers and num_workers > 0,
+    }
+    if num_workers > 0 and prefetch_factor is not None:
+        kwargs["prefetch_factor"] = prefetch_factor
+    return kwargs
 
 
 def get_itop_loaders(
@@ -437,13 +456,12 @@ def get_itop_loaders(
     train_dataset = Subset(train_full, train_indices)
     validation_dataset = Subset(validation_full, validation_indices)
 
-    loader_kwargs = {
-        "num_workers": num_workers,
-        "pin_memory": pin_memory,
-        "persistent_workers": persistent_workers and num_workers > 0,
-    }
-    if num_workers > 0 and prefetch_factor is not None:
-        loader_kwargs["prefetch_factor"] = prefetch_factor
+    loader_kwargs = _loader_kwargs(
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=persistent_workers,
+        prefetch_factor=prefetch_factor,
+    )
     train_sampler = RandomSampler(
         train_dataset,
         generator=torch.Generator().manual_seed(seed),
@@ -492,11 +510,10 @@ def get_itop_split_loader(
         num_points=num_points,
         num_neighbors=num_neighbors,
     )
-    loader_kwargs = {
-        "num_workers": num_workers,
-        "pin_memory": pin_memory,
-        "persistent_workers": persistent_workers and num_workers > 0,
-    }
-    if num_workers > 0 and prefetch_factor is not None:
-        loader_kwargs["prefetch_factor"] = prefetch_factor
+    loader_kwargs = _loader_kwargs(
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=persistent_workers,
+        prefetch_factor=prefetch_factor,
+    )
     return PyGDataLoader(dataset, batch_size=batch_size, shuffle=False, **loader_kwargs)
