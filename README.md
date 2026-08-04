@@ -682,6 +682,18 @@ python -m experiments.synthetic_covariance_benchmark \
   --output results/synthetic_covariance_benchmark_cuda.json
 ```
 
+For the same rank-2 output type, the cross-family mode varies only the declared
+teacher/learner operator family and writes a $3\times3$ recovery matrix.  It
+records whether active-target compilation selected a shared lifting trunk; a
+non-shared cross-family row is not silently treated as a head-only ablation:
+
+```bash
+python -m experiments.synthetic_covariance_benchmark \
+  --cross-family-matrix --families full,low_rank,isotypic_block \
+  --device cuda --contexts 128 --replicates 32 --steps 500 --seeds 0,1,2 \
+  --output results/synthetic_cross_family_covariance_recovery_cuda.json
+```
+
 An existing ModelNet40 compiler checkpoint can be audited without training:
 
 ```bash
