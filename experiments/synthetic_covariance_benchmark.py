@@ -107,14 +107,16 @@ def _basis_invariance(mu, target, scale, seed: FeatureSpec) -> float:
 def _equivariance_error(head, x, batch, scale, output: str) -> float:
     rotation = torch.tensor(
         [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
-        dtype=x.dtype,
-        device=x.device,
+        dtype=torch.float64,
     )
     input_rep = head.irreps_in if hasattr(head, "irreps_in") else None
     if input_rep is None:
         input_rep = o3.Irreps(head.compilation.seed_irreps)
-    rho_in = input_rep.D_from_matrix(rotation)
+    # e3nn's Wigner tables are CPU-backed in the server environment; construct
+    # the representation matrices on CPU and move the finished matrices once.
+    rho_in = input_rep.D_from_matrix(rotation).to(x)
     rho_out = O3IrrepsSpec(output).representation_matrix(rotation).to(x)
+    rotation = rotation.to(x)
     x_rot = (rho_in @ x.unsqueeze(-1)).squeeze(-1)
     with torch.no_grad():
         mu, _ = head(x, batch)
