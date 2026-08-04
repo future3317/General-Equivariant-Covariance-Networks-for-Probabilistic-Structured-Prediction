@@ -198,6 +198,18 @@ The uncertainty wrappers are deliberately outside the compiler core:
 - Repeated-protocol labels for the *same* structure are required before a full
   directional covariance can be interpreted as DFPT protocol uncertainty.
 
+The executable wrapper is `evaluation.conformal.fit_split_conformal`. It takes
+calibration means, SPD shapes, and targets, returns the finite-sample order
+statistic and threshold, and evaluates membership and region log-volume without
+changing the probabilistic meaning of the compiler output. A reproducible
+Student-t shape audit is available with:
+
+```bash
+python -m experiments.synthetic_conformal_audit \
+  --output results/synthetic_conformal_audit.json \
+  --calibration-size 255 --test-size 10000 --alpha 0.1
+```
+
 An optional, explicitly non-directional auxiliary is also available for
 audited ablations. `scripts/build_dielectric_pseudo_covariance.py` consumes a
 five-fold, train-only OOF cache and constructs an isotropic residual-covariance

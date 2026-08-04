@@ -33,6 +33,11 @@ from evaluation.ensemble import (
     sample_ensemble,
     variogram_score,
 )
+from evaluation.conformal import (
+    SplitConformalRegion,
+    evaluate_region,
+    fit_split_conformal,
+)
 from evaluation.equivariance import (
     mean_equivariance_error,
     scale_equivariance_error,
@@ -86,6 +91,9 @@ __all__ = [
     "ensemble_nll",
     "sample_ensemble",
     "variogram_score",
+    "SplitConformalRegion",
+    "evaluate_region",
+    "fit_split_conformal",
     "mean_equivariance_error",
     "scale_equivariance_error",
     "average_equivariance_error",
