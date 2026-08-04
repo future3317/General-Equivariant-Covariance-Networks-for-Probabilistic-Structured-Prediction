@@ -64,6 +64,15 @@ Gaussian obtains 27.929/75.563 cm and -13.326/291.460. Top-view MACE remains
 made. See `results/itop_dev_1of16_20260730/` and
 `figures/itop_dev_1of16_20260730/` for the checked-in records and figures.
 
+The completed full-data single-seed audit uses all 17,991 valid side-train
+frames and 512 points. Frozen graph Student-t is selected as the main head:
+side/top MPJPE is 22.406/70.277 cm, side/top NLL is -55.955/2.330, and the
+side-versus-top uncertainty AUROC is 0.803. Frozen Gaussian heads become
+overconfident on the top-view shift, while side-only joint fine-tuning improves
+top MPJPE slightly but collapses top NLL to 4,988.677. These results support a
+cross-view OOD diagnostic, not a calibration or SOTA claim. The full root-cause
+record is [`docs/itop_final_root_cause_diagnosis.md`](docs/itop_final_root_cause_diagnosis.md).
+
 ## Evidence and uncertainty semantics
 
 The current learned result is one single-seed, single-GPU Materials Project
@@ -584,12 +593,14 @@ python -m scripts.run_itop_study \
   --train_cache_sample_limit 2487 --dry_run
 
 # Remove --dry_run to execute. The final protocol uses 512 points and one
-# explicitly recorded seed on the same single GPU. Completed stages are skipped, interrupted
-# training resumes from last_state.pt, and patience is five validation epochs.
+# explicitly recorded seed on the same single GPU. Completed stages are skipped,
+# interrupted non-joint stages resume from last_state.pt, and patience is five
+# validation epochs. Joint uncertainty-head fine-tuning is an optional ablation;
+# skip it for the selected final protocol.
 python -m scripts.run_itop_study \
   --data_dir /home/workspace/lrh/DATA/Tpami/ITOP \
   --study_dir /home/workspace/lrh/RESULTS/Tpami/ITOP \
-  --profile final --gpu 3
+  --profile final --gpu 3 --skip_joint_finetune
 ```
 
 The ITOP loader reconstructs XYZ points from the documented depth calibration,
@@ -600,6 +611,9 @@ features, then compares independent-joint Gaussian, graph Gaussian, and graph
 Student-t operators behind the same frozen backbone and deterministic mean
 readout. It reports side-view IID and side-to-top OOD accuracy, likelihood,
 calibration, risk--coverage, occlusion, and residual-correlation metrics. The
+default final decision uses the frozen-head comparison; joint fine-tuning is an
+optional ablation because the completed side-only joint run harmed cross-view
+OOD likelihood. The
 development/final point budgets are 256/512; the development subset is only a
 configuration gate, while the final protocol uses all side-train frames. No
 ground-truth torso centering is used.

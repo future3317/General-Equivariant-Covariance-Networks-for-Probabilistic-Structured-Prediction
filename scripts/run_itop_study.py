@@ -178,6 +178,15 @@ def _parse_args() -> argparse.Namespace:
         "--seeds", default="42",
         help="comma-separated seeds; default is the single controlled seed 42",
     )
+    parser.add_argument(
+        "--skip_joint_finetune",
+        action="store_true",
+        help=(
+            "run deterministic and frozen-head stages only; the joint stage is "
+            "opt-in because side-only fine-tuning can collapse cross-view OOD "
+            "uncertainty"
+        ),
+    )
     parser.add_argument("--dry_run", action="store_true")
     return parser.parse_args()
 
@@ -216,6 +225,9 @@ def main() -> None:
             "train_cache_sample_limit": args.train_cache_sample_limit,
             "seeds": list(seeds),
             "probabilistic_models": list(PROBABILISTIC_MODELS),
+            "joint_finetune": (
+                "skipped_by_protocol" if args.skip_joint_finetune else "enabled"
+            ),
         }
         (study_root / "study_manifest.json").write_text(
             json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
@@ -335,35 +347,45 @@ def main() -> None:
     else:
         graph_model, graph_selection = _best_graph_model(study_root, seeds)
         graph_selection["selected"] = graph_model
+        graph_selection["joint_finetune"] = (
+            "skipped_by_protocol" if args.skip_joint_finetune else "enabled"
+        )
         (study_root / "graph_family_selection.json").write_text(
             json.dumps(graph_selection, indent=2) + "\n", encoding="utf-8"
         )
 
-    for seed in seeds:
-        seed_root = study_root / f"seed_{seed}"
-        joint_models = ("independent_gaussian", graph_model)
-        for model in joint_models:
-            if model not in PROBABILISTIC_MODELS:
-                print(
-                    f"[deferred] select graph family after frozen-head runs for seed {seed}"
+    if args.skip_joint_finetune:
+        print(
+            "[skip protocol] joint uncertainty-head fine-tuning is disabled; "
+            "use the completed frozen-head comparison for model selection",
+            flush=True,
+        )
+    else:
+        for seed in seeds:
+            seed_root = study_root / f"seed_{seed}"
+            joint_models = ("independent_gaussian", graph_model)
+            for model in joint_models:
+                if model not in PROBABILISTIC_MODELS:
+                    print(
+                        f"[deferred] select graph family after frozen-head runs for seed {seed}"
+                    )
+                    continue
+                frozen = seed_root / f"frozen_{model}"
+                joint = seed_root / f"joint_{model}"
+                _run(
+                    _training_command(
+                        args,
+                        run_dir=joint,
+                        model=model,
+                        phase="joint_finetune",
+                        seed=seed,
+                        epochs=joint_epochs,
+                        resume_checkpoint=frozen / "best_model.pt",
+                    ),
+                    outputs=(joint / "best_model.pt", joint / "metrics.json"),
+                    environment=environment,
+                    dry_run=args.dry_run,
                 )
-                continue
-            frozen = seed_root / f"frozen_{model}"
-            joint = seed_root / f"joint_{model}"
-            _run(
-                _training_command(
-                    args,
-                    run_dir=joint,
-                    model=model,
-                    phase="joint_finetune",
-                    seed=seed,
-                    epochs=joint_epochs,
-                    resume_checkpoint=frozen / "best_model.pt",
-                ),
-                outputs=(joint / "best_model.pt", joint / "metrics.json"),
-                environment=environment,
-                dry_run=args.dry_run,
-            )
 
     if len(deterministic_runs) == 3:
         ensemble = study_root / "deterministic_ensemble"

@@ -132,13 +132,43 @@ def _load_prediction(path: Path) -> dict[str, torch.Tensor]:
     return torch.load(path, map_location="cpu", weights_only=True)
 
 
+def _available_models(root: Path) -> tuple[str, ...]:
+    """Return only models with a complete, evaluable artifact set.
+
+    A deliberately stopped ablation may retain a checkpoint and history but
+    no test predictions/metrics.  That artifact is useful provenance, not a
+    valid row in the final comparison.
+    """
+    required = ("metrics.json", "history.json", "predictions_side.pt", "predictions_top.pt")
+    return tuple(
+        model
+        for model in MODEL_INFO
+        if all((root / model / filename).is_file() for filename in required)
+    )
+
+
 def audit(results: Path, output: Path) -> dict[str, Any]:
     root = results / "seed_42"
     output.mkdir(parents=True, exist_ok=True)
-    selected = _read_json(results / "graph_family_selection.json")
     records: OrderedDict[str, Any] = OrderedDict()
+    models = _available_models(root)
+    if not models:
+        raise FileNotFoundError(f"no complete ITOP model artifacts found under {root}")
+    selection_path = results / "graph_family_selection.json"
+    selected = (
+        _read_json(selection_path)
+        if selection_path.is_file()
+        else {
+            "criterion": "frozen-head validation NLL recorded in model histories",
+            "selected": "graph_student_t"
+            if "frozen_graph_student_t" in models
+            else None,
+            "note": "joint fine-tuning was skipped by protocol",
+        }
+    )
 
-    for model, (label, phase) in MODEL_INFO.items():
+    for model in models:
+        label, phase = MODEL_INFO[model]
         run = root / model
         metrics = _read_json(run / "metrics.json")
         history = _read_json(run / "history.json")
@@ -168,10 +198,9 @@ def audit(results: Path, output: Path) -> dict[str, Any]:
         "test_views": {"side": "IID", "top": "cross-view OOD"},
         "graph_family_selection": selected,
         "model_note": (
-            "The runner jointly fine-tunes independent Gaussian and the graph "
-            "family selected by frozen-head validation NLL. Thus graph Gaussian "
-            "is a frozen-head comparator here; graph Student-t is the selected "
-            "joint graph model."
+            "Only complete prediction artifacts are included. Joint fine-tuning "
+            "is an optional ablation; when it is stopped or skipped, its partial "
+            "checkpoint is excluded rather than treated as a final result."
         ),
         "models": records,
     }
@@ -233,7 +262,13 @@ def _write_tables(audit_record: dict[str, Any], output: Path) -> None:
         "",
         "Scope: one seed (42), full valid side-train exposure, 512 points, one GPU; side-test is IID and top-test is cross-view OOD.",
         "",
-        "The runner jointly fine-tunes independent Gaussian and the graph family selected by frozen-head validation NLL. Therefore the graph-Gaussian row is frozen-head, while graph Student-t has both frozen and joint rows.",
+        (
+            "Complete artifacts include the frozen-head comparison and the "
+            "available joint ablations; the incomplete/stopped joint graph "
+            "Student-t ablation is excluded from all final rows."
+            if any(record["phase"] == "joint" for record in audit_record["models"].values())
+            else "Joint fine-tuning was skipped by protocol; this audit reports the complete frozen-head comparison only."
+        ),
         "",
         "## Training summary",
         "",
@@ -296,15 +331,18 @@ def _load_metrics(audit_record: dict[str, Any], model: str) -> dict[str, Any]:
 
 def _write_figures(results: Path, output: Path, audit_record: dict[str, Any]) -> None:
     setup_tpami_style()
-    _plot_training_curves(results, output)
+    models = tuple(audit_record["models"])
+    _plot_training_curves(results, output, models)
     _plot_metric_comparison(output, audit_record)
     _plot_ood(output, audit_record)
-    _plot_risk_coverage(results, output)
+    _plot_risk_coverage(results, output, audit_record)
     _plot_visibility(output, audit_record)
     _plot_structure(results, output, audit_record)
 
 
-def _plot_training_curves(results: Path, output: Path) -> None:
+def _plot_training_curves(
+    results: Path, output: Path, models: tuple[str, ...]
+) -> None:
     fig, axes = plt.subplots(1, 2, figsize=cm2inch(17.2, 6.7))
     det_history = _read_json(results / "seed_42" / "deterministic" / "history.json")
     axes[0].plot(
@@ -317,7 +355,7 @@ def _plot_training_curves(results: Path, output: Path) -> None:
     axes[0].set_ylabel("Validation objective")
     axes[0].set_xlabel("Epoch")
     colors = dict(zip(MODEL_INFO, PALETTE + [COLORS["gray"]]))
-    for model in MODEL_INFO:
+    for model in models:
         if model == "deterministic":
             continue
         history = _read_json(results / "seed_42" / model / "history.json")
@@ -339,24 +377,25 @@ def _plot_training_curves(results: Path, output: Path) -> None:
 
 
 def _plot_metric_comparison(output: Path, audit_record: dict[str, Any]) -> None:
-    labels = [record["label"] for record in audit_record["models"].values()]
+    models = list(audit_record["models"])
+    labels = [audit_record["models"][model]["label"] for model in models]
     x = np.arange(len(labels))
     fig, axes = plt.subplots(1, 3, figsize=cm2inch(18.0, 7.0))
     for offset, view, color in ((-0.18, "side", COLORS["midnight_blue"]), (0.18, "top", COLORS["champagne_gold"])):
-        values = [_load_metrics(audit_record, model)[view]["mpjpe_cm"] for model in MODEL_INFO]
+        values = [_load_metrics(audit_record, model)[view]["mpjpe_cm"] for model in models]
         axes[0].bar(x + offset, values, 0.36, color=color, label="Side IID" if view == "side" else "Top OOD")
     axes[0].set_title("Point error", loc="left", fontweight="bold")
     axes[0].set_ylabel("MPJPE (cm)")
     axes[0].set_xticks(x, labels, rotation=65, ha="right", fontsize=7)
     axes[0].legend(fontsize=8)
     for offset, view, color in ((-0.18, "side", COLORS["midnight_blue"]), (0.18, "top", COLORS["champagne_gold"])):
-        values = [(_load_metrics(audit_record, model)[view].get("nll") or np.nan) for model in MODEL_INFO]
+        values = [(_load_metrics(audit_record, model)[view].get("nll") or np.nan) for model in models]
         axes[1].bar(x + offset, values, 0.36, color=color, label="Side IID" if view == "side" else "Top OOD")
     axes[1].set_title("Proper probabilistic score", loc="left", fontweight="bold")
     axes[1].set_ylabel("Family-correct NLL")
     axes[1].set_xticks(x, labels, rotation=65, ha="right", fontsize=7)
     axes[1].legend(fontsize=8)
-    prob_models = [model for model in MODEL_INFO if model != "deterministic"]
+    prob_models = [model for model in models if model != "deterministic"]
     px = np.arange(len(prob_models))
     values_side = [_load_metrics(audit_record, model)["side"].get("mace") for model in prob_models]
     values_top = [_load_metrics(audit_record, model)["top"].get("mace") for model in prob_models]
@@ -365,7 +404,7 @@ def _plot_metric_comparison(output: Path, audit_record: dict[str, Any]) -> None:
     axes[2].set_title("Frame calibration diagnostic", loc="left", fontweight="bold")
     axes[2].set_ylabel("MACE")
     axes[2].set_ylim(0, 0.55)
-    axes[2].set_xticks(px, [MODEL_INFO[m][0].replace(" (frozen)", "\nF").replace(" (joint)", "\nJ") for m in prob_models], rotation=35, ha="right", fontsize=7)
+    axes[2].set_xticks(px, [audit_record["models"][m]["label"].replace(" (frozen)", "\nF").replace(" (joint)", "\nJ") for m in prob_models], rotation=35, ha="right", fontsize=7)
     axes[2].legend(fontsize=8)
     label_panels(axes)
     fig.tight_layout()
@@ -374,8 +413,8 @@ def _plot_metric_comparison(output: Path, audit_record: dict[str, Any]) -> None:
 
 
 def _plot_ood(output: Path, audit_record: dict[str, Any]) -> None:
-    models = [model for model in MODEL_INFO if model != "deterministic"]
-    labels = [MODEL_INFO[model][0] for model in models]
+    models = [model for model in audit_record["models"] if model != "deterministic"]
+    labels = [audit_record["models"][model]["label"] for model in models]
     x = np.arange(len(models))
     fig, axes = plt.subplots(1, 2, figsize=cm2inch(16.8, 6.7))
     top_nll = [_load_metrics(audit_record, model)["top"].get("nll", np.nan) for model in models]
@@ -397,8 +436,19 @@ def _plot_ood(output: Path, audit_record: dict[str, Any]) -> None:
     plt.close(fig)
 
 
-def _plot_risk_coverage(results: Path, output: Path) -> None:
-    selected = ("joint_independent_gaussian", "joint_graph_student_t")
+def _plot_risk_coverage(
+    results: Path, output: Path, audit_record: dict[str, Any]
+) -> None:
+    preferred = (
+        "frozen_graph_student_t",
+        "joint_graph_student_t",
+        "joint_independent_gaussian",
+        "frozen_graph_gaussian",
+        "frozen_independent_gaussian",
+    )
+    selected = tuple(model for model in preferred if model in audit_record["models"])
+    if not selected:
+        return
     fig, axes = plt.subplots(1, 2, figsize=cm2inch(16.8, 6.7))
     for view, ax in zip(("side", "top"), axes):
         for index, model in enumerate(selected):
@@ -411,7 +461,7 @@ def _plot_risk_coverage(results: Path, output: Path) -> None:
             risks = torch.stack(
                 [sorted_error[: max(1, int(float(f) * len(sorted_error)))].mean() for f in fractions]
             )
-            ax.plot(fractions.numpy() * 100, risks.numpy(), color=PALETTE[index], label=MODEL_INFO[model][0])
+            ax.plot(fractions.numpy() * 100, risks.numpy(), color=PALETTE[index], label=audit_record["models"][model]["label"])
         ax.set_title(f"{view.capitalize()} {'IID' if view == 'side' else 'OOD'}", loc="left", fontweight="bold")
         ax.set_xlabel("Retained coverage (%)")
         ax.set_ylabel("Mean frame joint error (cm)")
@@ -424,8 +474,8 @@ def _plot_risk_coverage(results: Path, output: Path) -> None:
 
 
 def _plot_visibility(output: Path, audit_record: dict[str, Any]) -> None:
-    models = list(MODEL_INFO)
-    labels = [MODEL_INFO[model][0] for model in models]
+    models = list(audit_record["models"])
+    labels = [audit_record["models"][model]["label"] for model in models]
     x = np.arange(len(models))
     fig, axes = plt.subplots(1, 2, figsize=cm2inch(17.5, 6.8))
     for ax, view in zip(axes, ("side", "top")):
@@ -444,10 +494,18 @@ def _plot_visibility(output: Path, audit_record: dict[str, Any]) -> None:
 
 
 def _plot_structure(results: Path, output: Path, audit_record: dict[str, Any]) -> None:
+    preferred = (
+        "frozen_graph_student_t",
+        "joint_graph_student_t",
+        "frozen_graph_gaussian",
+        "joint_independent_gaussian",
+        "frozen_independent_gaussian",
+    )
+    model = next((candidate for candidate in preferred if candidate in audit_record["models"]), None)
+    if model is None:
+        return
     fig, axes = plt.subplots(1, 2, figsize=cm2inch(16.8, 6.8))
-    for index, (model, view) in enumerate(
-        (("joint_graph_student_t", "side"), ("joint_graph_student_t", "top"))
-    ):
+    for index, view in enumerate(("side", "top")):
         metrics = _load_metrics(audit_record, model)[view]
         distances = sorted(metrics["residual_correlation_by_skeleton_distance"], key=int)
         corr = [metrics["residual_correlation_by_skeleton_distance"][d] for d in distances]
@@ -458,17 +516,16 @@ def _plot_structure(results: Path, output: Path, audit_record: dict[str, Any]) -
             color=PALETTE[index],
             label=f"{view.capitalize()} {'IID' if view == 'side' else 'OOD'}",
         )
-    axes[0].set_title("Graph Student-t residual dependence", loc="left", fontweight="bold")
+    axes[0].set_title(f"{audit_record['models'][model]['label']} residual dependence", loc="left", fontweight="bold")
     axes[0].set_xlabel("Skeleton graph distance")
     axes[0].set_ylabel("Residual correlation")
     axes[0].legend(fontsize=8)
-    model = "joint_graph_student_t"
     x = np.arange(2)
     side = _load_metrics(audit_record, model)["side"]
     top = _load_metrics(audit_record, model)["top"]
     axes[1].bar(x - 0.17, [side["visible_mpjpe_cm"], top["visible_mpjpe_cm"]], 0.34, color=COLORS["midnight_blue"], label="Visible")
     axes[1].bar(x + 0.17, [side["occluded_mpjpe_cm"], top["occluded_mpjpe_cm"]], 0.34, color=COLORS["champagne_gold"], label="Occluded")
-    axes[1].set_title("Graph Student-t visibility error", loc="left", fontweight="bold")
+    axes[1].set_title(f"{audit_record['models'][model]['label']} visibility error", loc="left", fontweight="bold")
     axes[1].set_xticks(x, ["Side IID", "Top OOD"])
     axes[1].set_ylabel("MPJPE (cm)")
     axes[1].legend(fontsize=8)

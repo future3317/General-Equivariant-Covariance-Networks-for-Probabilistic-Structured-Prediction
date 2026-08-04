@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+import sys
 from types import SimpleNamespace
 
 import numpy as np
@@ -19,7 +20,12 @@ from scripts.train_itop import (
     _update_early_stopping,
     train_epoch,
 )
-from scripts.run_itop_study import _geometry_cache_complete, _training_command
+from scripts.evaluate_itop_final import _available_models
+from scripts.run_itop_study import (
+    _geometry_cache_complete,
+    _parse_args,
+    _training_command,
+)
 from torch.utils.data import DataLoader, RandomSampler, TensorDataset
 
 
@@ -192,6 +198,42 @@ def test_geometry_cache_requires_exact_sample_limit(tmp_path):
     with pytest.raises(RuntimeError, match="stale ITOP geometry cache"):
         _geometry_cache_complete(cache, sample_limit=None)
     assert _geometry_cache_complete(cache, sample_limit=64)
+
+
+def test_runner_exposes_explicit_joint_skip_flag(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_itop_study",
+            "--data_dir",
+            "data",
+            "--study_dir",
+            "results",
+            "--gpu",
+            "3",
+            "--skip_joint_finetune",
+        ],
+    )
+    assert _parse_args().skip_joint_finetune is True
+
+
+def test_final_evaluator_ignores_incomplete_stopped_ablation(tmp_path):
+    root = tmp_path / "seed_42"
+    complete = root / "frozen_graph_student_t"
+    partial = root / "joint_graph_student_t"
+    complete.mkdir(parents=True)
+    partial.mkdir(parents=True)
+    for filename in (
+        "metrics.json",
+        "history.json",
+        "predictions_side.pt",
+        "predictions_top.pt",
+    ):
+        (complete / filename).touch()
+    (partial / "history.json").touch()
+    (partial / "best_model.pt").touch()
+    assert _available_models(root) == ("frozen_graph_student_t",)
 
 
 def test_rng_checkpoint_round_trip_is_exact(tmp_path):
