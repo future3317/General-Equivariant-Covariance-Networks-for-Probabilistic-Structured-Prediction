@@ -74,6 +74,14 @@ def _spd_contract(compilation: O3Compilation) -> dict[str, Any]:
             "minimum_values": [],
             "note": "runtime range still depends on dtype and matrix-function inputs",
         }
+    elif any(value == 0.0 for value in minimums) and any(
+        value > 0.0 for value in minimums
+    ):
+        minimum_policy = {
+            "kind": "mixed_floor",
+            "minimum_values": minimums,
+            "note": "both zero-floor and positive-floor primitives are present",
+        }
     elif any(value > 0.0 for value in minimums):
         minimum_policy = {
             "kind": "positive_floor",
