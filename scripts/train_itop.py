@@ -26,7 +26,7 @@ from data.itop_dataset import (
 from data.itop_features import get_itop_feature_loaders
 from data.paths import dataset_dir
 from data.representation_metrics import infer_representation_block_metric
-from equivcompiler import FeatureSpec, GraphPrecision, plan_readout
+from equivcompiler import FeatureSpec, GraphPrecision, LowRankCovariance, plan_readout
 from evaluation import (
     binary_auroc,
     bone_length_error,
@@ -53,6 +53,8 @@ from spd_maps import RepresentationMetricMap
 MODEL_KINDS = (
     "deterministic",
     "independent_gaussian",
+    "independent_student_t",
+    "low_rank_student_t",
     "graph_gaussian",
     "graph_student_t",
 )
@@ -123,16 +125,18 @@ def _build_model(args: argparse.Namespace):
         )
         return model, None
 
-    graph = (
-        ITOP_INDEPENDENT_GRAPH
-        if args.model == "independent_gaussian"
-        else ITOP_OUTPUT_GRAPH
-    )
-    objective = "student_t" if args.model == "graph_student_t" else "gaussian"
+    is_student = args.model.endswith("_student_t")
+    if args.model in {"independent_gaussian", "independent_student_t"}:
+        covariance = GraphPrecision(ITOP_INDEPENDENT_GRAPH)
+    elif args.model == "low_rank_student_t":
+        covariance = LowRankCovariance(rank=4)
+    else:
+        covariance = GraphPrecision(ITOP_OUTPUT_GRAPH)
+    objective = "student_t" if is_student else "gaussian"
     plan = plan_readout(
         FeatureSpec.from_backbone(backbone),
         output=ITOP_OUTPUT_GRAPH.output_irreps,
-        covariance=GraphPrecision(graph),
+        covariance=covariance,
         distribution=objective,
         student_t_dof=args.student_t_dof,
         output_scope="global",
@@ -443,7 +447,7 @@ def evaluate(
     frame_indices: list[torch.Tensor] = []
     view_ids: list[torch.Tensor] = []
     component_totals: defaultdict[str, float] = defaultdict(float)
-    is_student = model_kind == "graph_student_t"
+    is_student = model_kind.endswith("_student_t")
 
     for batch in tqdm(loader, desc="evaluate", leave=False):
         batch = _to_device(batch, device)
@@ -743,7 +747,7 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
-    if args.model == "graph_student_t" and args.student_t_dof <= 2.0:
+    if args.model.endswith("_student_t") and args.student_t_dof <= 2.0:
         raise ValueError(
             "ITOP variance metrics require Student-t degrees of freedom > 2"
         )

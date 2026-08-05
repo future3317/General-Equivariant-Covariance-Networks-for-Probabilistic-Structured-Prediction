@@ -25,7 +25,7 @@ from evaluation import (
     irrep_resolved_whitening_defect,
     student_t_radial_pit,
     symmetric_whitened_residuals,
-    whitened_angular_defect,
+    whitened_second_moment_defect,
 )
 from evaluation.calibration import marginal_interval_quantile
 from scripts.dielectric_runtime import (
@@ -114,7 +114,7 @@ def audit(checkpoint_dir: Path, device: str) -> dict:
         residual_irreps
         * torch.linalg.solve(scale_irreps, residual_irreps.unsqueeze(-1)).squeeze(-1)
     ).sum(dim=-1)
-    angular_defect = whitened_angular_defect(
+    second_moment_defect = whitened_second_moment_defect(
         mu,
         target,
         scale,
@@ -205,7 +205,7 @@ def audit(checkpoint_dir: Path, device: str) -> dict:
             "q99": float(torch.quantile(maha2, 0.99)),
         },
         "symmetry_aware_calibration": {
-            "whitened_angular_defect": float(angular_defect),
+            "whitened_second_moment_defect": float(second_moment_defect),
             "whitened_second_moment_trace": float(
                 symmetric_z.square().sum(dim=-1).mean()
             ),

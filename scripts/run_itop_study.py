@@ -13,6 +13,8 @@ from pathlib import Path
 
 PROBABILISTIC_MODELS = (
     "independent_gaussian",
+    "independent_student_t",
+    "low_rank_student_t",
     "graph_gaussian",
     "graph_student_t",
 )

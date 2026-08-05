@@ -60,8 +60,15 @@ scale. Temperature scaling is \(S'=TS\), equivalently
 
 Sampling uses \(Y=\mu+Lz\) for Gaussian \(LL^T=S\), and
 \(Y=\mu+Lz/\sqrt{\chi^2_\nu/\nu}\) for Student-t. Energy score, sliced CRPS,
-Mahalanobis, coverage, calibration and angular diagnostics must consume the
+Mahalanobis, coverage, calibration and whitened second-moment diagnostics must consume the
 same prediction materialization and inference precision contract.
+
+When the declared coordinates are matrix-log/Kelvin--Mandel coordinates,
+\(\mu\) and \(S\) describe the transformed target distribution. The nonlinear
+inverse map does not imply a raw-space mean \(\exp(\mu)\) or a raw-space
+covariance. Student-t tails generally do not have finite exponential moments,
+so raw-space moments may not exist; any raw-space summary requires an explicit
+finite-moment check and a validated pushforward or local delta-method protocol.
 
 For an equally weighted ensemble of (M) members, the moment decomposition is
 
@@ -166,7 +173,8 @@ domains and parameter bindings.
 
 The centered spectral map is fully defined as follows. Let
 \(s=\operatorname{tr}(A)/d\), \(\bar A=A-sI\), and
-\(\bar A=U\operatorname{diag}(\lambda_i)U^T\). Map volume with
+\(\bar A=U\operatorname{diag}(\lambda_i)U^T\). Map the common mean
+log-eigenvalue with
 
 \[
 v=v_{min}+(v_{max}-v_{min})\operatorname{sigmoid}(s),
@@ -184,6 +192,8 @@ and shape with
 S=\exp(v)U\operatorname{diag}(\exp\tilde\ell_i)U^T.
 \]
 
+The serialized/CLI names `volume_min` and `volume_max` are compatibility names
+for these mean-log-eigenvalue bounds; they are not bounds on \(\log\det S\).
 Therefore \(\det(U\operatorname{diag}(\exp\tilde\ell)U^T)=1\) and
 \(\kappa(S)\le\exp(b-a)\). The divided-difference VJP is part of the
 reference implementation for repeated or near-repeated eigenvalues.

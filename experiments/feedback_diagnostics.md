@@ -10,7 +10,7 @@ existing single-seed dielectric Student-t checkpoint
 | quantity | held-out value |
 |---|---:|
 | Mahalanobis² mean (Student-t scale) | 19.8701 |
-| symmetric-whitened angular defect | 8.3916 |
+| symmetric-whitened second-moment defect | 8.3916 |
 | radial PIT mean | 0.5146 |
 | radial PIT standard deviation | 0.3647 |
 | irrep defect, `0+` | 2.4241 |
@@ -19,8 +19,8 @@ existing single-seed dielectric Student-t checkpoint
 | covariance operator basis dimension | 21 |
 | covariance projection local Jacobian rank | 21 |
 
-The full covariance head is locally full rank. The large angular defect,
-especially in the `4+` component, supports an orientation/shape mismatch
+The full covariance head is locally full rank. The large whitened second-moment
+defect, especially in the `4+` component, supports a shape/orientation mismatch
 hypothesis; it is not evidence that the existing head lacks the 21-dimensional
 operator basis. The radial PIT is not enough to explain the defect by itself.
 
@@ -31,7 +31,7 @@ operator basis. The radial PIT is not enough to explain the defect by itself.
 - basis-independent angular whitening defect;
 - irrep-resolved whitening defect;
 - Gaussian/Student-t Energy Score and isotropic sliced CRPS;
-- centered log-volume/log-shape spectral SPD map;
+- centered mean-log-scale/log-shape spectral SPD map;
 - automatic `Lambda^2(V)` decomposition and skew operator basis;
 - zero-initialized equivariant isospectral orientation calibrator;
 - strict three-stage mean/covariance/joint protocol with an immutable RunSpec;
@@ -107,7 +107,7 @@ epoch 69 and stopped at epoch 84. The held-out results were:
 The final test audit reports mean Mahalanobis squared distance `30.351`, 90%
 ellipsoid coverage `0.6655`, 95% coverage `0.7260`, mean condition number
 `20.80`, and maximum condition number `54.598`, matching the certified centered
-shape-window bound. The symmetric-whitened angular defect is `12.440`; irrep
+shape-window bound. The symmetric-whitened second-moment defect is `12.440`; irrep
 defects are `5.012` (`0+`), `6.643` (`2+`), and `9.246` (`4+`). The covariance
 projection has operator dimension 21 and local Jacobian rank 21, so the
 calibration failure is not caused by a missing full-scatter degree of freedom.

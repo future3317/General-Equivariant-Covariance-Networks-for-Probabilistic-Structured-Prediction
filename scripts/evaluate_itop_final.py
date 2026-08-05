@@ -35,18 +35,26 @@ from plotting import (
 
 MODEL_INFO = OrderedDict(
     (
-        ("deterministic", ("Deterministic", "deterministic")),
+        ("deterministic", ("Det.", "deterministic")),
         (
             "frozen_independent_gaussian",
-            ("Independent Gaussian (frozen)", "frozen"),
+            ("Indep-G (F)", "frozen"),
         ),
-        ("frozen_graph_gaussian", ("Graph Gaussian (frozen)", "frozen")),
-        ("frozen_graph_student_t", ("Graph Student-t (frozen)", "frozen")),
+        (
+            "frozen_independent_student_t",
+            ("Indep-t (F)", "frozen"),
+        ),
+        (
+            "frozen_low_rank_student_t",
+            ("LR-t (F)", "frozen"),
+        ),
+        ("frozen_graph_gaussian", ("Graph-G (F)", "frozen")),
+        ("frozen_graph_student_t", ("Graph-t (F)", "frozen")),
         (
             "joint_independent_gaussian",
-            ("Independent Gaussian (joint)", "joint"),
+            ("Indep-G (J)", "joint"),
         ),
-        ("joint_graph_student_t", ("Graph Student-t (joint)", "joint")),
+        ("joint_graph_student_t", ("Graph-t (J)", "joint")),
     )
 )
 
@@ -359,7 +367,10 @@ def _plot_training_curves(
     axes[0].set_title("Deterministic backbone", loc="left", fontweight="bold")
     axes[0].set_ylabel("Validation objective")
     axes[0].set_xlabel("Epoch")
-    colors = dict(zip(MODEL_INFO, PALETTE + [COLORS["gray"]]))
+    colors = {
+        model: PALETTE[index % len(PALETTE)]
+        for index, model in enumerate(MODEL_INFO)
+    }
     for model in models:
         if model == "deterministic":
             continue
@@ -409,7 +420,7 @@ def _plot_metric_comparison(output: Path, audit_record: dict[str, Any]) -> None:
     axes[2].set_title("Frame calibration diagnostic", loc="left", fontweight="bold")
     axes[2].set_ylabel("MACE")
     axes[2].set_ylim(0, 0.55)
-    axes[2].set_xticks(px, [audit_record["models"][m]["label"].replace(" (frozen)", "\nF").replace(" (joint)", "\nJ") for m in prob_models], rotation=35, ha="right", fontsize=7)
+    axes[2].set_xticks(px, [audit_record["models"][m]["label"] for m in prob_models], rotation=30, ha="right", fontsize=7)
     axes[2].legend(fontsize=8)
     label_panels(axes)
     fig.tight_layout()
@@ -424,11 +435,12 @@ def _plot_ood(output: Path, audit_record: dict[str, Any]) -> None:
     fig, axes = plt.subplots(1, 2, figsize=cm2inch(16.8, 6.7))
     top_nll = [_load_metrics(audit_record, model)["top"].get("nll", np.nan) for model in models]
     auroc = [_load_metrics(audit_record, model).get("ood", {}).get("side_top_uncertainty_auroc", np.nan) for model in models]
-    axes[0].bar(x, top_nll, color=PALETTE[:len(models)])
+    colors = [PALETTE[index % len(PALETTE)] for index in range(len(models))]
+    axes[0].bar(x, top_nll, color=colors)
     axes[0].set_title("Top-view OOD proper score", loc="left", fontweight="bold")
     axes[0].set_ylabel("Top-test NLL")
     axes[0].set_xticks(x, labels, rotation=60, ha="right", fontsize=7)
-    axes[1].bar(x, auroc, color=PALETTE[:len(models)])
+    axes[1].bar(x, auroc, color=colors)
     axes[1].axhline(0.5, color=COLORS["dark_gray"], linestyle="--", linewidth=1, label="Chance")
     axes[1].set_title("Side/top uncertainty separation", loc="left", fontweight="bold")
     axes[1].set_ylabel("Uncertainty AUROC")

@@ -1,4 +1,4 @@
-"""SPD map with independent log-volume and centered log-shape control."""
+"""SPD map with independent mean log-scale and centered log-shape control."""
 
 from __future__ import annotations
 
@@ -9,12 +9,16 @@ from spd_maps.spectral_window import SpectralWindowMap
 
 
 class CenteredSpectralWindowMap(SPDMap):
-    """Map a symmetric generator to SPD while separating volume from shape.
+    """Map a symmetric generator to SPD while separating scale from shape.
 
     The trace component controls the common log-scale and the trace-free
     component is passed through a bounded spectral window.  Consequently the
     condition-number bound depends only on ``shape_min/max`` and is independent
     of the predicted overall uncertainty level.
+
+    ``volume_min`` and ``volume_max`` are retained as compatibility names for
+    the serialized/CLI schema. They bound the common mean log-eigenvalue
+    before exponentiation; they are not bounds on log determinant.
     """
 
     def __init__(

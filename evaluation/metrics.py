@@ -339,19 +339,20 @@ def student_t_radial_pit(
     return torch.as_tensor(values, dtype=q.dtype, device=q.device)
 
 
-def whitened_angular_defect(
+def whitened_second_moment_defect(
     pred: Tensor,
     target: Tensor,
     scale: Tensor,
     *,
     nu: float | None = None,
 ) -> Tensor:
-    """Frobenius angular/shape defect after symmetric whitening.
+    """Frobenius whitened second-moment defect.
 
     The expected whitened second moment is ``I`` for a Gaussian and
     ``nu/(nu-2) I`` for a Student-t with ``nu > 2``.  The returned scalar is
-    invariant to orthogonal coordinate changes and separates shape/orientation
-    error from radial scale error only when interpreted together with PIT.
+    invariant to orthogonal coordinate changes. It is a joint diagnostic of
+    scale, anisotropy, orientation, and conditional-mixture misspecification;
+    it is not a pure angular or eigenvector error.
     """
     if nu is not None and nu <= 2:
         raise ValueError("nu must be greater than 2 for a finite second moment")
@@ -365,6 +366,22 @@ def whitened_angular_defect(
         moment = moment / z.shape[0]
     identity = torch.eye(z.shape[-1], dtype=z.dtype, device=z.device)
     return torch.linalg.matrix_norm(moment / expected - identity)
+
+
+def whitened_angular_defect(
+    pred: Tensor,
+    target: Tensor,
+    scale: Tensor,
+    *,
+    nu: float | None = None,
+) -> Tensor:
+    """Compatibility alias for :func:`whitened_second_moment_defect`.
+
+    The old name is retained for released scripts and checkpoints. The
+    statistic is not an isolated angular defect; new reports must use the
+    canonical name.
+    """
+    return whitened_second_moment_defect(pred, target, scale, nu=nu)
 
 
 def irrep_resolved_whitening_defect(

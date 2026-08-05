@@ -38,7 +38,7 @@ The machine-readable boundary is recorded in every compilation report under
 The same representation layer can compile `Lambda^2(V)` for orientation
 calibration. `EquivariantIsospectralOrientationCalibrator` predicts a skew
 generator `K` in an orthonormal basis and applies `exp(K) S exp(K)^T`. It is
-zero-initialized and preserves SPD, eigenvalues, log-volume, and condition
+zero-initialized and preserves SPD, eigenvalues, determinant, and condition
 number. Dense orientation calibration is intended only for small outputs;
 high-multiplicity and graph-structured outputs must select an explicit
 block/low-rank policy with its compiled cost recorded.
@@ -104,7 +104,7 @@ test metrics are NLL `-2.6248`, physical MAE `2.0611`, log-Kelvin--Mandel MAE
 `0.1604`, Energy Score `0.4427`, sliced CRPS `0.1551`, and risk--coverage AUC
 `0.5623`. Joint ellipsoid coverage is `43.8/59.4/71.2/76.9%` at nominal
 `50/80/90/95%`; ACE is `0.1025`. The covariance basis and local Jacobian both
-have rank 21, while the angular whitening defect is `10.4612` and the maximum
+have rank 21, while the whitened second-moment defect is `10.4612` and the maximum
 condition number is `54.5975` (the certified `exp(4)` bound). All metrics and
 figures use the recorded inference-contract hash.
 
@@ -113,7 +113,7 @@ it does **not** identify a material's physical aleatoric covariance. With one
 fixed-protocol DFPT label per structure, a learned distribution mixes surrogate
 error, finite-data/model uncertainty, and any irreducible observation noise.
 It is reported as a predictive-distribution audit, including its undercoverage
-and angular-shape failure, rather than as recovered physical uncertainty.
+and shape-sensitive calibration failure, rather than as recovered physical uncertainty.
 
 Validation-only scalar temperature calibration is intentionally **not applied**:
 it worsens held-out test NLL from `-2.6248` to `-2.4257` (block calibration:
@@ -137,12 +137,13 @@ it worsens held-out test NLL from `-2.6248` to `-2.4257` (block calibration:
 - Matrix-exponential full covariance, multiplicity-space block covariance, or
   low-rank-plus-isotropic covariance.
 - Proper multivariate Gaussian and Student-t negative log-likelihoods.
-- Symmetric whitening, Student-t radial PIT, angular whitening defect, and
+- Symmetric whitening, Student-t radial PIT, whitened second-moment defect, and
   irrep-resolved calibration diagnostics.
 - Gaussian/Student-t Energy Score and isotropic sliced CRPS for
   orientation-sensitive proper-score evaluation.
-- Centered spectral windows that control log-volume separately from trace-free
-  log-shape.
+- Centered spectral windows that control common mean log-scale separately from
+  trace-free log-shape. The legacy `volume_min/max` names denote mean
+  log-eigenvalue bounds, not log determinant.
 
 For repeated variables with a known graph, the compiler predicts equivariant
 unary and relational SPD precision potentials and assembles
@@ -176,7 +177,7 @@ Score, and dependence-sensitive variogram score. These extensions have not yet
 been used to claim improved dielectric performance from an ensemble.
 
 The completed controlled ordinary-versus-OOF faithful comparison was a
-**No-Go**: OOF slightly worsened NLL, angular whitening defect, Energy Score,
+**No-Go**: OOF slightly worsened NLL, whitened second-moment defect, Energy Score,
 sliced CRPS, and risk--coverage while leaving coverage unchanged; its tiny
 variogram change was not decision-relevant. OOF and pseudo-Wasserstein are
 therefore not expanded. The next independent protocol is a finite deep
@@ -364,7 +365,8 @@ The report includes:
 The public policies are deliberately orthogonal. `FullCovariance()`,
 `LowRankCovariance(rank)`, `IsotypicBlockCovariance()`, and
 `GraphPrecision(graph)` define operator families. `AutoBudget(max_parameters,
-candidates)` minimizes emitted parameter count among feasible candidates, while
+`candidates)` minimizes emitted parameter count among feasible candidates as an
+explicit compiler budget policy, not as statistical model selection, while
 `FirstFeasible(max_parameters, priority)` follows an explicit user order.
 `ExactOnly()` and `TruncatedMultiplicityRank(rank)` control fidelity;
 `ExactExecutorCandidates()` or `SpecificExecutor(name)` control executor
@@ -651,9 +653,10 @@ The ITOP loader reconstructs XYZ points from the documented depth calibration,
 centers only by the observable point-cloud centroid, filters invalid frames,
 and preserves joint visibility for visible/occluded calibration analysis. The
 controlled study trains a deterministic model, caches its frozen pooled
-features, then compares independent-joint Gaussian, graph Gaussian, and graph
-Student-t operators behind the same frozen backbone and deterministic mean
-readout. It reports side-view IID and side-to-top OOD accuracy, likelihood,
+features, then compares independent Gaussian, independent Student-t,
+parameter-matched low-rank Student-t, graph Gaussian, and graph Student-t
+operators behind the same frozen backbone and deterministic mean readout. It
+reports side-view IID and side-to-top OOD accuracy, likelihood,
 calibration, risk--coverage, occlusion, and residual-correlation metrics. The
 default final decision uses the frozen-head comparison; joint fine-tuning is an
 optional ablation because the completed side-only joint run harmed cross-view

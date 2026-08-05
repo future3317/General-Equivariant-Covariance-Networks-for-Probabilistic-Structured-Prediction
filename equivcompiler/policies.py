@@ -121,7 +121,11 @@ class SpectralWindowCovariance(OperatorFamilySpec):
 
 @dataclass(frozen=True)
 class CenteredSpectralWindowCovariance(OperatorFamilySpec):
-    """Full scatter family with independent volume and shape bounds."""
+    """Full scatter family with independent mean-log-scale and shape bounds.
+
+    ``volume_min``/``volume_max`` remain serialized compatibility names; they
+    bound the common mean log-eigenvalue, not log determinant.
+    """
 
     shape_min: float = -2.0
     shape_max: float = 2.0
@@ -158,7 +162,7 @@ class CenteredSpectralWindowCovariance(OperatorFamilySpec):
                 volume_max=float(self.volume_max),
             ),
             relation_to_full=FamilyRelation.STRICT_SUBSET,
-            restriction="independent_log_volume_and_centered_log_shape_windows",
+            restriction="independent_mean_log_scale_and_centered_log_shape_windows",
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -168,6 +172,7 @@ class CenteredSpectralWindowCovariance(OperatorFamilySpec):
             "shape_max": self.shape_max,
             "volume_min": self.volume_min,
             "volume_max": self.volume_max,
+            "volume_semantics": "common_mean_log_eigenvalue_bounds",
             "maximum_condition_number": float(math.exp(self.shape_max - self.shape_min)),
         }
 
@@ -395,7 +400,11 @@ class MinParameterCount(FamilyCostModel):
 
 @dataclass(frozen=True)
 class AutoBudget:
-    """Cost-based budget selection over explicitly supplied candidates."""
+    """Explicit parameter-budget policy over user-supplied candidates.
+
+    This is a compiler cost policy, not statistical model selection: it does
+    not inspect validation data, likelihoods, or predictive quality.
+    """
 
     max_parameters: int
     candidates: tuple[OperatorFamilySpec, ...]
@@ -414,6 +423,7 @@ class AutoBudget:
     def as_dict(self) -> dict[str, Any]:
         return {
             "kind": "auto_budget",
+            "selection_semantics": "explicit_parameter_budget_not_statistical_model_selection",
             "max_parameters": self.max_parameters,
             "objective": self.objective.as_dict(),
             "candidates": [candidate.as_dict() for candidate in self.candidates],

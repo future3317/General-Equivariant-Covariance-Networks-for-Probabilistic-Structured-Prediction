@@ -697,13 +697,13 @@ def main():
     elif train_args.covariance_parameterization == "centered_spectral_window":
         # The centered shape has zero mean after the map; its coordinate-wise
         # deviation can therefore span [shape_min-shape_max,
-        # shape_max-shape_min] before the bounded log-volume is added.
+        # shape_max-shape_min] before the bounded common mean log-scale is added.
         shape_radius = train_args.shape_max - train_args.shape_min
         bounds = (
             train_args.volume_min - shape_radius,
             train_args.volume_max + shape_radius,
         )
-        # The common log-volume cancels in a condition number.  Only the
+        # The common mean log-scale cancels in a condition number. Only the
         # centered trace-free shape range controls the certified ratio.
         condition_log_bound = train_args.shape_max - train_args.shape_min
     else:

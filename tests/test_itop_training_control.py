@@ -18,6 +18,8 @@ from scripts.run_itop_study import (
     _training_command,
 )
 from scripts.train_itop import (
+    MODEL_KINDS,
+    _build_model,
     _capture_rng_state,
     _load_checkpoint,
     _restore_rng_state,
@@ -216,6 +218,35 @@ def test_runner_exposes_explicit_joint_skip_flag(monkeypatch):
         ],
     )
     assert _parse_args().skip_joint_finetune is True
+
+
+def test_itop_factorial_exposes_radial_and_operator_controls():
+    assert "independent_student_t" in MODEL_KINDS
+    assert "low_rank_student_t" in MODEL_KINDS
+
+
+@pytest.mark.parametrize(
+    ("model", "covariance_mode"),
+    (("independent_student_t", "graph"), ("low_rank_student_t", "low_rank")),
+)
+def test_itop_factorial_models_bind_to_distinct_compiler_families(
+    model, covariance_mode
+):
+    _, plan = _build_model(
+        SimpleNamespace(
+            model=model,
+            hidden_dim=16,
+            max_radius=0.5,
+            lmax=2,
+            num_layers=1,
+            num_basis=4,
+            tp_backend="e3nn",
+            cueq_method="naive",
+            student_t_dof=5.0,
+        )
+    )
+    assert plan.compilation.covariance_mode == covariance_mode
+    assert plan.compilation.distribution_spec.objective_name() == "student_t"
 
 
 def test_final_evaluator_ignores_incomplete_stopped_ablation(tmp_path):

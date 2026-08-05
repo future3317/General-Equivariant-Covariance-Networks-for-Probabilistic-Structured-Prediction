@@ -41,6 +41,7 @@ from evaluation.metrics import (
     symmetric_whitened_residuals,
     whitened_angular_defect,
     whitened_residual_covariance,
+    whitened_second_moment_defect,
 )
 from evaluation.pose import (
     as_joint_positions,
@@ -112,4 +113,5 @@ __all__ = [
     "visible_occluded_mpjpe",
     "whitened_angular_defect",
     "whitened_residual_covariance",
+    "whitened_second_moment_defect",
 ]
