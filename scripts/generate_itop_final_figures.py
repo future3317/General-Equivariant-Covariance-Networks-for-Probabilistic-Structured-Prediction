@@ -20,6 +20,8 @@ from plotting import COLORS, cm2inch, label_panels, save_figure, setup_tpami_sty
 MODEL_LABELS = {
     "deterministic": "Det.",
     "frozen_independent_gaussian": "Indep-G",
+    "frozen_independent_student_t": "Indep-t",
+    "frozen_low_rank_student_t": "LR-t",
     "frozen_graph_gaussian": "Graph-G",
     "frozen_graph_student_t": "Graph-t",
 }
@@ -75,11 +77,65 @@ def _graph_distance_counts(num_nodes: int) -> dict[int, int]:
     return counts
 
 
+def _bootstrap_distance_intervals(
+    residual: np.ndarray,
+    distances: list[str],
+    *,
+    seed: int = 42,
+    repeats: int = 200,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Bootstrap graph-distance residual correlations over frames."""
+    rng = np.random.default_rng(seed)
+    num_frames, num_joints = residual.shape[:2]
+    adjacency = [[] for _ in range(num_joints)]
+    for source, target in ITOP_SKELETON_EDGES:
+        adjacency[source].append(target)
+        adjacency[target].append(source)
+    pairs: dict[int, list[tuple[int, int]]] = {}
+    for source in range(num_joints):
+        distance = [-1] * num_joints
+        distance[source] = 0
+        queue = deque([source])
+        while queue:
+            node = queue.popleft()
+            for neighbor in adjacency[node]:
+                if distance[neighbor] < 0:
+                    distance[neighbor] = distance[node] + 1
+                    queue.append(neighbor)
+        for target in range(source + 1, num_joints):
+            if distance[target] > 0:
+                pairs.setdefault(distance[target], []).append((source, target))
+
+    bootstraps = []
+    for _ in range(repeats):
+        indices = rng.integers(0, num_frames, size=num_frames)
+        sample = residual[indices]
+        centered = sample - sample.mean(axis=0, keepdims=True)
+        covariance = np.einsum("fja,fka->jk", centered, centered)
+        scale = np.sqrt(np.maximum(np.diag(covariance), np.finfo(float).eps))
+        correlation = covariance / (scale[:, None] * scale[None, :])
+        bootstraps.append(
+            [
+                np.mean(
+                    [
+                        correlation[source, target]
+                        for source, target in pairs[int(distance)]
+                    ]
+                )
+                for distance in distances
+            ]
+        )
+    values = np.asarray(bootstraps)
+    return np.percentile(values, 2.5, axis=0), np.percentile(values, 97.5, axis=0)
+
+
 def plot_overview(root: Path, output: Path) -> None:
     setup_tpami_style()
-    models = tuple(MODEL_LABELS)
+    models = tuple(
+        model for model in MODEL_LABELS if (root / "seed_42" / model).is_dir()
+    )
     records = {model: _metrics(root, model) for model in models}
-    fig, axes = plt.subplots(1, 3, figsize=cm2inch(18.0, 7.0))
+    fig, axes = plt.subplots(1, 3, figsize=cm2inch(18.2, 8.0), sharey=True)
     y = np.arange(len(models))[::-1]
     side_color, top_color = COLORS["midnight_blue"], COLORS["champagne_gold"]
 
@@ -94,10 +150,10 @@ def plot_overview(root: Path, output: Path) -> None:
             top = records[model]["top"].get(metric)
             if side is not None:
                 axis.plot(side, y[index] + 0.11, "o", color=side_color, ms=6)
-                axis.text(side, y[index] + 0.18, f"{side:.1f}", color=side_color, fontsize=8)
+                axis.text(side, y[index] + 0.18, f"{side:.1f}", color=side_color, fontsize=7)
             if top is not None:
                 axis.plot(top, y[index] - 0.11, "o", color=top_color, ms=6)
-                axis.text(top, y[index] - 0.20, f"{top:.1f}", color=top_color, fontsize=8)
+                axis.text(top, y[index] - 0.20, f"{top:.1f}", color=top_color, fontsize=7)
         axis.set_yticks(y, [MODEL_LABELS[model] for model in models])
         axis.set_xlabel(label)
         axis.set_title(title, loc="left", fontweight="bold")
@@ -106,7 +162,8 @@ def plot_overview(root: Path, output: Path) -> None:
     auroc = [records[model]["ood"].get("side_top_uncertainty_auroc", np.nan) for model in models]
     axes[2].scatter(auroc, y, color=COLORS["navy_light"], s=36, zorder=3)
     for value, ypos in zip(auroc, y):
-        axes[2].text(value + 0.025, ypos, f"{value:.3f}", va="center", fontsize=8)
+        if np.isfinite(value):
+            axes[2].text(value + 0.025, ypos, f"{value:.3f}", va="center", fontsize=7)
     axes[2].axvline(0.5, color=COLORS["dark_gray"], linestyle="--", linewidth=1)
     axes[2].set_xlim(0, 1.08)
     axes[2].set_yticks(y, [MODEL_LABELS[model] for model in models])
@@ -120,7 +177,7 @@ def plot_overview(root: Path, output: Path) -> None:
     axes[0].plot([], [], "o", color=top_color, label="Top OOD")
     axes[0].legend(loc="lower right", fontsize=8)
     label_panels(axes, x=-0.12, y=1.06, fontsize=11)
-    fig.suptitle("ITOP full side-train audit", y=1.02, fontweight="bold")
+    fig.suptitle("ITOP full side-train factorial audit", y=1.02, fontweight="bold")
     fig.tight_layout(rect=(0, 0, 1, 0.96))
     save_figure(fig, output / "itop_final_overview", formats=("pdf",))
     plt.close(fig)
@@ -131,27 +188,45 @@ def plot_structure(root: Path, output: Path) -> None:
     model_root = root / "seed_42" / "frozen_graph_student_t"
     metrics = _metrics(root, "frozen_graph_student_t")
     counts = _graph_distance_counts(15)
-    distances = sorted(metrics["side"]["residual_correlation_by_skeleton_distance"], key=int)
+    distances = sorted(
+        metrics["side"]["residual_correlation_by_skeleton_distance"], key=int
+    )
+    distance_values = [int(distance) for distance in distances]
 
     fig, axes = plt.subplots(1, 2, figsize=cm2inch(18.0, 7.0))
     for view, color, label in (
         ("side", COLORS["midnight_blue"], "Side IID"),
         ("top", COLORS["champagne_gold"], "Top OOD"),
     ):
-        values = [metrics[view]["residual_correlation_by_skeleton_distance"][d] for d in distances]
-        axes[0].plot([int(d) for d in distances], values, "o-", color=color, label=label)
+        values = [
+            metrics[view]["residual_correlation_by_skeleton_distance"][d]
+            for d in distances
+        ]
+        prediction = torch.load(
+            model_root / f"predictions_{view}.pt",
+            map_location="cpu",
+            weights_only=True,
+        )
+        residual = (
+            prediction["target"] - prediction["mean"]
+        ).reshape(-1, 15, 3).numpy()
+        lower, upper = _bootstrap_distance_intervals(residual, distances)
+        axes[0].errorbar(
+            distance_values,
+            values,
+            yerr=(np.asarray(values) - lower, upper - np.asarray(values)),
+            fmt="o-",
+            color=color,
+            capsize=2,
+            label=label,
+        )
     axes[0].set_xlabel("Skeleton graph distance")
     axes[0].set_ylabel("Residual correlation")
     axes[0].set_title("Structured residual dependence", loc="left", fontweight="bold")
     axes[0].legend(fontsize=8)
-    axes[0].set_xticks([int(d) for d in distances])
-    values = [
-        metrics["side"]["residual_correlation_by_skeleton_distance"][distance]
-        for distance in distances
-    ]
-    for distance, value in zip(distances, values):
-        axes[0].annotate(f"n={counts[int(distance)]}", (int(distance), value), xytext=(0, 7), textcoords="offset points", ha="center", fontsize=7)
-
+    axes[0].set_xticks(
+        distance_values, [f"{d}\n(n={counts[d]})" for d in distance_values]
+    )
     fractions = np.linspace(0.1, 1.0, 10)
     for view, color, label in (
         ("side", COLORS["midnight_blue"], "Side IID"),
