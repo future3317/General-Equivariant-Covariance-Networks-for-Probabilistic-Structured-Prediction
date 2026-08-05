@@ -1,14 +1,14 @@
 # From Structured Output Types to Predictive Distributions
 
 TPAMI submission implementation for *From Structured Output Types to Predictive
-Distributions: A Verified Compiler for Equivariant Learning*.
+Distributions: A Typed Compiler for Equivariant Learning*.
 
 The normative mathematical and inference semantics are fixed in
 [`mathematical_contract.md`](mathematical_contract.md). Code, experiments, and
 the manuscript reference this contract rather than maintaining parallel
 implicit definitions.
 
-The main abstraction is a verified compiler from structured output declarations
+The main abstraction is a typed, contract-checked compiler from structured output declarations
 to equivariant predictive distributions. Given a finite-dimensional orthogonal
 `O(3)` output representation `V` (or a Cartesian tensor symmetry formula), a
 distribution law, and an operator family, it constructs
