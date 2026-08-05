@@ -20,9 +20,15 @@ unfinished run as evidence.
 | `AutoBudget` was statistical model selection | Correct | API and manuscript document it as an explicit compiler parameter-budget policy. |
 | EIOC was a public compiler family or a demonstrated dielectric repair | Not supported by current code/evidence | It remains a prototype with a controlled synthetic intervention check; no real-data repair claim is made. |
 | Learned `nu`, faithful joint modes, and more OOF folds were required | Not required for the current core claim | They would be new training protocols, so they are not mixed into the factorial experiment. |
-| Finite-precision SPD behavior needs explicit qualification | Correct concern | The revision keeps the mathematical SPD contract separate from reduced-precision execution; a dedicated dtype/extreme-logit audit remains a follow-up gate before any stronger numerical-surjectivity claim. |
+| Finite-precision SPD behavior needs explicit qualification | Correct concern | Added `spd_contract` fields to compilation reports and ran `scripts.audit_spd_finite_precision`: 72 CPU cases across FP64/FP32/BF16 and logits -100/-1000/-10000. Zero-floor cases can become numerically singular; positive floors are reported as family parameters, not hidden jitter. |
 
 The new ITOP factorial is deliberately frozen-head, single-seed, and uses the
 same deterministic backbone, cache, split, optimizer, stopping rule, and
 evaluation protocol for every arm. It can distinguish operator-family and
 radial-law effects without reopening the rejected OOF/pseudo-W main line.
+
+The finite-precision audit is stored at
+`results/spd_finite_precision_audit.json`. Its 35/72 strict-SPD cases and
+37/72 non-strict cases are an expected diagnostic of zero-floor or very small
+Cholesky diagonals under finite arithmetic; they are not evidence that the
+real-arithmetic compiler certificate is false.

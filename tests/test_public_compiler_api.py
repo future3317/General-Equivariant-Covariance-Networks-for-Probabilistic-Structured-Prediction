@@ -57,6 +57,15 @@ def test_declarative_readout_api_builds_executable_and_full_report():
     assert record["execution_fidelity"]["exactness"] == "exact_for_active_family"
     assert record["probability"]["scale_semantics"] == "scatter"
     assert record["objective"]["proper"]
+    assert record["spd_contract"] == {
+        "mathematical_cone_status": "strict_spd",
+        "finite_precision_cone_status": "not_certified_without_dtype_audit",
+        "minimum_eigenvalue_policy": {
+            "kind": "none_declared",
+            "minimum_values": [],
+            "note": "runtime range still depends on dtype and matrix-function inputs",
+        },
+    }
     assert record["compiler_soundness"]["scope"].startswith("compositionally verified")
     assert "formal verification of arbitrary user-defined primitives" in record[
         "compiler_soundness"
@@ -131,6 +140,7 @@ def test_budget_subfamily_is_not_reported_as_lowering_approximation():
     counts = report.complexity["parameter_counts"]
     assert counts["canonical_covariance_coordinates"] == 231
     assert counts["active_covariance_coordinates"] == 169
+    assert report.spd_contract["minimum_eigenvalue_policy"]["kind"] == "zero_floor"
 
 
 def test_parity_failure_is_machine_readable():

@@ -19,3 +19,17 @@ only the active target is a compilation gate.
 Every `CompilationReport` exposes this boundary under `compiler_soundness`,
 and every operator verification exposes the same information under
 `family.assembly_ir.verification`.
+
+The report also separates the cone contract into `spd_contract`:
+
+- `mathematical_cone_status` is the verifier-derived real-arithmetic result;
+- `minimum_eigenvalue_policy` records whether the IR declares no floor, a
+  zero floor, or a positive floor; and
+- `finite_precision_cone_status` remains explicitly uncertified unless a
+  dtype/extreme-logit audit is run.  A positive floor is a family parameter,
+  not an implicit numerical jitter.
+
+The companion audit `python -m scripts.audit_spd_finite_precision` exercises
+representative scalar, low-rank, and isotypic constructions at extreme logits
+in FP64, FP32, and BF16.  It is evidence about a runtime/dtype envelope, not a
+replacement for the mathematical certificate.

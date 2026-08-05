@@ -17,6 +17,7 @@ from representations.adaptive_lifting import (
     irrep_multiplicities,
 )
 from representations.diagnostics import CompilationCertificate
+from representations.operator_ir import OperatorIR, Positivity
 
 if TYPE_CHECKING:
     from representations.compiler import O3Compilation
@@ -49,6 +50,50 @@ def _irrep_record(irreps: o3.Irreps) -> dict[str, Any]:
         ),
         "parities": sorted({_parity_name(irrep.p) for irrep in multiplicities}),
         "components": components,
+    }
+
+
+def _spd_contract(compilation: O3Compilation) -> dict[str, Any]:
+    """Report mathematical and finite-precision cone claims separately."""
+    verification = compilation.operator_family.verification
+    minimums: list[float] = []
+
+    def walk(node: OperatorIR) -> None:
+        attributes = node.attribute_dict()
+        if node.kind in {"positive_scalar_identity", "cholesky_positive"}:
+            minimum = attributes.get("minimum")
+            if isinstance(minimum, (int, float)):
+                minimums.append(float(minimum))
+        for child in node.inputs:
+            walk(child)
+
+    walk(compilation.operator_family.assembly)
+    if not minimums:
+        minimum_policy = {
+            "kind": "none_declared",
+            "minimum_values": [],
+            "note": "runtime range still depends on dtype and matrix-function inputs",
+        }
+    elif any(value > 0.0 for value in minimums):
+        minimum_policy = {
+            "kind": "positive_floor",
+            "minimum_values": minimums,
+            "note": "floor is part of the compiled family and is not a hidden jitter",
+        }
+    else:
+        minimum_policy = {
+            "kind": "zero_floor",
+            "minimum_values": minimums,
+            "note": "strict SPD is a real-arithmetic statement; extreme logits need a dtype audit",
+        }
+    return {
+        "mathematical_cone_status": (
+            "strict_spd"
+            if verification.positivity is Positivity.SPD
+            else verification.positivity.value
+        ),
+        "finite_precision_cone_status": "not_certified_without_dtype_audit",
+        "minimum_eigenvalue_policy": minimum_policy,
     }
 
 
@@ -310,6 +355,10 @@ class CompilationReport:
         return self["objective"]
 
     @property
+    def spd_contract(self) -> dict[str, Any]:
+        return self["spd_contract"]
+
+    @property
     def complexity(self) -> dict[str, Any]:
         return self["complexity"]
 
@@ -563,6 +612,7 @@ def build_compilation_report(
         # indistinguishable to downstream runners.
         "compatibility_hash": None,
         "probability": probability,
+        "spd_contract": _spd_contract(compilation),
         "output_scope": compilation.config.output_scope,
         "certificates": certificates,
         "compiler_soundness": {
