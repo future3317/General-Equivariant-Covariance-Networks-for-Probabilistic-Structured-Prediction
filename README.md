@@ -361,6 +361,9 @@ The report includes:
   covariance-specific storage and likelihood complexity;
 - exact covariance/scatter/precision semantics and the selected proper
   likelihood.
+- a separate `spd_contract` record: verifier-derived real-arithmetic cone
+  status, declared minimum-eigenvalue policy, and an explicit finite-precision
+  status that is not upgraded without a dtype/extreme-logit audit.
 
 The public policies are deliberately orthogonal. `FullCovariance()`,
 `LowRankCovariance(rank)`, `IsotypicBlockCovariance()`, and
