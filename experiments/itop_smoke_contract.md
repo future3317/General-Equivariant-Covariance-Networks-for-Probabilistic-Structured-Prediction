@@ -66,12 +66,13 @@ deterministic MSE
 ```
 
 For `phase=frozen_head`, the code checks and records the exact frozen and
-trainable parameter names and counts. The frozen boundary is
-`backbone + joint_head.mean_head`; covariance/scale parameters remain
-trainable. Thus frozen-head comparisons intentionally have identical means,
-MPJPE, and residuals; they compare probabilistic geometry and proper scores,
-not point-estimation accuracy. Joint fine-tuning is a separate protocol and
-must not be merged with frozen-head results.
+trainable parameter names and counts. The frozen boundary is the deterministic
+backbone, the direct `joint_head.mean_head`, and the compiler head's bypassed
+`mean_projection`; covariance/scale parameters remain trainable. Thus
+frozen-head comparisons intentionally have identical means, MPJPE, and
+residuals; they compare probabilistic geometry and proper scores, not
+point-estimation accuracy. Joint fine-tuning is a separate protocol and must
+not be merged with frozen-head results.
 
 The train sampler is seeded as a pure function of `(seed, epoch)`, and worker
 Python/NumPy streams are initialized from PyTorch's worker seed. Validation and

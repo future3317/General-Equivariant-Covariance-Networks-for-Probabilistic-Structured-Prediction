@@ -22,6 +22,7 @@ from scripts.train_itop import (
     MODEL_KINDS,
     _build_model,
     _capture_rng_state,
+    _freeze_record,
     _load_checkpoint,
     _restore_rng_state,
     _save_checkpoint,
@@ -250,6 +251,42 @@ def test_itop_factorial_models_bind_to_distinct_compiler_families(
     )
     assert plan.compilation.covariance_mode == covariance_mode
     assert plan.compilation.distribution_spec.objective_name() == "student_t"
+
+
+def test_frozen_head_contract_records_only_backbone_and_mean_head():
+    args = SimpleNamespace(
+        model="graph_student_t",
+        phase="frozen_head",
+        backbone_checkpoint=None,
+        resume_checkpoint=None,
+        hidden_dim=16,
+        max_radius=0.5,
+        lmax=2,
+        num_layers=1,
+        num_basis=4,
+        tp_backend="e3nn",
+        cueq_method="naive",
+        student_t_dof=5.0,
+    )
+    model, _ = _build_model(args)
+    for parameter in model.backbone.parameters():
+        parameter.requires_grad_(False)
+    for parameter in model.joint_head.mean_head.parameters():
+        parameter.requires_grad_(False)
+    record = _freeze_record(model, args)
+    assert record["boundary"].startswith("backbone and direct mean head frozen")
+    assert record["frozen_parameter_count"] > 0
+    assert record["trainable_parameter_count"] > 0
+    assert all(
+        name.startswith(
+            (
+                "backbone.",
+                "joint_head.mean_head.",
+                "joint_head.operator_head.mean_projection.",
+            )
+        )
+        for name in record["frozen_parameter_names"]
+    )
 
 
 def test_final_evaluator_ignores_incomplete_stopped_ablation(tmp_path):

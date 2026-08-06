@@ -319,7 +319,11 @@ def _freeze_record(model, args: argparse.Namespace) -> dict[str, Any]:
         name for name, parameter in model.named_parameters() if parameter.requires_grad
     ]
     if args.phase == "frozen_head":
-        allowed = ("backbone.", "joint_head.mean_head.")
+        allowed = (
+            "backbone.",
+            "joint_head.mean_head.",
+            "joint_head.operator_head.mean_projection.",
+        )
         unexpected = [name for name in frozen if not name.startswith(allowed)]
         if unexpected:
             raise RuntimeError(
@@ -328,7 +332,10 @@ def _freeze_record(model, args: argparse.Namespace) -> dict[str, Any]:
             )
         if not frozen or not trainable:
             raise RuntimeError("frozen-head contract must freeze and train parameters")
-        boundary = "backbone and mean head frozen; uncertainty head trainable"
+        boundary = (
+            "backbone and direct mean head frozen; bypassed operator mean projection "
+            "also fixed; uncertainty head trainable"
+        )
     elif args.phase == "deterministic":
         if frozen:
             raise RuntimeError(
