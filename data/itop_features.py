@@ -9,7 +9,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader, Dataset, RandomSampler, Subset
 
-from data.itop_dataset import itop_train_validation_indices
+from data.itop_dataset import itop_train_validation_indices, itop_worker_init_fn
 
 
 def sha256_file(path: str | Path) -> str:
@@ -77,6 +77,7 @@ def get_itop_feature_loaders(
         "num_workers": num_workers,
         "pin_memory": pin_memory,
         "persistent_workers": num_workers > 0,
+        "worker_init_fn": itop_worker_init_fn,
     }
     train_sampler = RandomSampler(
         train,
@@ -89,8 +90,23 @@ def get_itop_feature_loaders(
             generator=torch.Generator().manual_seed(seed + 1),
             **kwargs,
         ),
-        DataLoader(validation, shuffle=False, **kwargs),
-        DataLoader(side_test, shuffle=False, **kwargs),
-        DataLoader(top_test, shuffle=False, **kwargs),
+        DataLoader(
+            validation,
+            shuffle=False,
+            generator=torch.Generator().manual_seed(seed + 2),
+            **kwargs,
+        ),
+        DataLoader(
+            side_test,
+            shuffle=False,
+            generator=torch.Generator().manual_seed(seed + 3),
+            **kwargs,
+        ),
+        DataLoader(
+            top_test,
+            shuffle=False,
+            generator=torch.Generator().manual_seed(seed + 4),
+            **kwargs,
+        ),
         metadata,
     )

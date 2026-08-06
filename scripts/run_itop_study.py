@@ -11,12 +11,38 @@ import sys
 from collections.abc import Iterable
 from pathlib import Path
 
+from scripts.itop_reproducibility import (
+    GEOMETRY_CACHE_FILES,
+    atomic_write_json,
+    source_provenance,
+)
+
 PROBABILISTIC_MODELS = (
     "independent_gaussian",
     "independent_student_t",
     "low_rank_student_t",
     "graph_gaussian",
     "graph_student_t",
+)
+TRAINING_ARTIFACTS = (
+    "best_model.pt",
+    "last_state.pt",
+    "history.json",
+    "metrics.json",
+    "predictions_side.pt",
+    "predictions_top.pt",
+    "args.json",
+    "environment.json",
+    "compilation.json",
+    "feature_cache.json",
+    "provenance.json",
+    "train.log",
+)
+FEATURE_CACHE_ARTIFACTS = (
+    "metadata.json",
+    "side_train.pt",
+    "side_test.pt",
+    "top_test.pt",
 )
 
 
@@ -37,7 +63,11 @@ def _geometry_cache_complete(cache: Path, *, sample_limit: int | None) -> bool:
             f"{sample_limit}: {cache}. Remove this incompatible cache explicitly "
             "before rerunning."
         )
-    return True
+    return _complete(cache / name for name in GEOMETRY_CACHE_FILES)
+
+
+def _training_outputs(run_dir: Path) -> tuple[Path, ...]:
+    return tuple(run_dir / name for name in TRAINING_ARTIFACTS)
 
 
 def _run(
@@ -217,22 +247,6 @@ def main() -> None:
     study_root = args.study_dir / f"itop_{args.profile}_n{args.num_points}"
     if not args.dry_run:
         study_root.mkdir(parents=True, exist_ok=True)
-        manifest = {
-            "schema_version": 1,
-            "profile": args.profile,
-            "single_gpu": True,
-            "physical_gpu": args.gpu,
-            "num_points": args.num_points,
-            "train_cache_sample_limit": args.train_cache_sample_limit,
-            "seeds": list(seeds),
-            "probabilistic_models": list(PROBABILISTIC_MODELS),
-            "joint_finetune": (
-                "skipped_by_protocol" if args.skip_joint_finetune else "enabled"
-            ),
-        }
-        (study_root / "study_manifest.json").write_text(
-            json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
-        )
 
     geometry_stages = (("side", "train"), ("side", "test"), ("top", "test"))
     for view, split in geometry_stages:
@@ -263,10 +277,32 @@ def main() -> None:
         else:
             _run(
                 command,
-                outputs=(cache / "metadata.json",),
+                outputs=tuple(cache / name for name in GEOMETRY_CACHE_FILES),
                 environment=environment,
                 dry_run=args.dry_run,
             )
+
+    if not args.dry_run:
+        manifest = {
+            "schema_version": 2,
+            "profile": args.profile,
+            "single_gpu": True,
+            "physical_gpu": args.gpu,
+            "num_points": args.num_points,
+            "train_cache_sample_limit": args.train_cache_sample_limit,
+            "seeds": list(seeds),
+            "probabilistic_models": list(PROBABILISTIC_MODELS),
+            "joint_finetune": (
+                "skipped_by_protocol" if args.skip_joint_finetune else "enabled"
+            ),
+            "source": source_provenance(Path(__file__).resolve().parents[1]),
+            "artifact_contract": {
+                "training": list(TRAINING_ARTIFACTS),
+                "feature_cache": list(FEATURE_CACHE_ARTIFACTS),
+                "geometry_cache": list(GEOMETRY_CACHE_FILES),
+            },
+        }
+        atomic_write_json(manifest, study_root / "study_manifest.json")
 
     deterministic_runs = []
     for seed in seeds:
@@ -283,10 +319,7 @@ def main() -> None:
                 epochs=deterministic_epochs,
             ),
             outputs=(
-                deterministic / "best_model.pt",
-                deterministic / "metrics.json",
-                deterministic / "predictions_side.pt",
-                deterministic / "predictions_top.pt",
+                *_training_outputs(deterministic),
             ),
             environment=environment,
             dry_run=args.dry_run,
@@ -316,11 +349,8 @@ def main() -> None:
                 if args.train_cache_sample_limit is not None
                 else []
             ),
-            outputs=(
-                feature_cache / "metadata.json",
-                feature_cache / "side_train.pt",
-                feature_cache / "side_test.pt",
-                feature_cache / "top_test.pt",
+            outputs=tuple(
+                feature_cache / name for name in FEATURE_CACHE_ARTIFACTS
             ),
             environment=environment,
             dry_run=args.dry_run,
@@ -338,7 +368,7 @@ def main() -> None:
                     backbone_checkpoint=checkpoint,
                     feature_cache=feature_cache,
                 ),
-                outputs=(frozen / "best_model.pt", frozen / "metrics.json"),
+                outputs=_training_outputs(frozen),
                 environment=environment,
                 dry_run=args.dry_run,
             )
@@ -383,7 +413,7 @@ def main() -> None:
                         epochs=joint_epochs,
                         resume_checkpoint=frozen / "best_model.pt",
                     ),
-                    outputs=(joint / "best_model.pt", joint / "metrics.json"),
+                    outputs=_training_outputs(joint),
                     environment=environment,
                     dry_run=args.dry_run,
                 )

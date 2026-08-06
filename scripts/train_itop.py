@@ -48,6 +48,16 @@ from models import (
 )
 from representations import O3IrrepsSpec
 from scripts._common import add_tensor_product_arguments, tensor_product_kwargs
+from scripts.itop_reproducibility import (
+    atomic_write_json,
+    checkpoint_provenance,
+    contract_hash,
+    feature_cache_provenance,
+    geometry_cache_provenance,
+    sha256_file,
+    source_provenance,
+    training_contract,
+)
 from spd_maps import RepresentationMetricMap
 
 MODEL_KINDS = (
@@ -85,7 +95,7 @@ def _set_seed(seed: int) -> None:
 
 
 def _environment(device: torch.device) -> dict[str, Any]:
-    return {
+    environment = {
         "python": platform.python_version(),
         "torch": torch.__version__,
         "cuda_build": torch.version.cuda,
@@ -94,8 +104,21 @@ def _environment(device: torch.device) -> dict[str, Any]:
             torch.cuda.get_device_name(device) if device.type == "cuda" else "cpu"
         ),
         "tf32_matmul": bool(torch.backends.cuda.matmul.allow_tf32),
+        "cudnn_deterministic": bool(torch.backends.cudnn.deterministic),
         "cudnn_benchmark": bool(torch.backends.cudnn.benchmark),
+        "deterministic_algorithms": bool(torch.are_deterministic_algorithms_enabled()),
+        "torch_num_threads": torch.get_num_threads(),
+        "torch_num_interop_threads": torch.get_num_interop_threads(),
     }
+    if device.type == "cuda":
+        properties = torch.cuda.get_device_properties(device)
+        environment["cuda_device_count"] = torch.cuda.device_count()
+        environment["cuda_capability"] = [
+            int(properties.major),
+            int(properties.minor),
+        ]
+        environment["cuda_total_memory_bytes"] = int(properties.total_memory)
+    return environment
 
 
 def build_itop_backbone(args: argparse.Namespace) -> EquivariantBackbone:
@@ -162,11 +185,16 @@ def _save_checkpoint(payload: dict[str, Any], path: Path) -> None:
     temporary.replace(path)
 
 
+def _save_tensor_artifact(payload: Any, path: Path) -> None:
+    """Atomically publish predictions and feature-like tensor artifacts."""
+    temporary = path.with_suffix(path.suffix + ".partial")
+    torch.save(payload, temporary)
+    temporary.replace(path)
+
+
 def _write_json(payload: Any, path: Path) -> None:
     """Atomically publish a human-readable run artifact."""
-    temporary = path.with_suffix(path.suffix + ".partial")
-    temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    temporary.replace(path)
+    atomic_write_json(payload, path)
 
 
 def _capture_rng_state() -> dict[str, Any]:
@@ -221,6 +249,9 @@ def _set_loader_epoch(loader, *, seed: int, epoch: int) -> None:
     if not isinstance(generator, torch.Generator):
         raise TypeError("training loader must expose a generator-backed sampler")
     generator.manual_seed(seed * 1_000_003 + epoch)
+    loader_generator = getattr(loader, "generator", None)
+    if isinstance(loader_generator, torch.Generator):
+        loader_generator.manual_seed(seed * 1_000_033 + epoch)
 
 
 def _test_loader_kwargs(loader_kwargs: dict) -> dict:
@@ -276,6 +307,59 @@ def _configure_initialization(model, args: argparse.Namespace) -> bool:
     payload = _load_checkpoint(args.resume_checkpoint)
     model.load_state_dict(payload["model_state"], strict=True)
     return False
+
+
+def _freeze_record(model, args: argparse.Namespace) -> dict[str, Any]:
+    frozen = [
+        name
+        for name, parameter in model.named_parameters()
+        if not parameter.requires_grad
+    ]
+    trainable = [
+        name for name, parameter in model.named_parameters() if parameter.requires_grad
+    ]
+    if args.phase == "frozen_head":
+        allowed = ("backbone.", "joint_head.mean_head.")
+        unexpected = [name for name in frozen if not name.startswith(allowed)]
+        if unexpected:
+            raise RuntimeError(
+                "frozen-head contract froze parameters outside backbone/mean head: "
+                f"{unexpected}"
+            )
+        if not frozen or not trainable:
+            raise RuntimeError("frozen-head contract must freeze and train parameters")
+        boundary = "backbone and mean head frozen; uncertainty head trainable"
+    elif args.phase == "deterministic":
+        if frozen:
+            raise RuntimeError(
+                "deterministic phase unexpectedly contains frozen parameters"
+            )
+        boundary = "all deterministic parameters trainable"
+    else:
+        if frozen:
+            raise RuntimeError(
+                "joint fine-tuning unexpectedly contains frozen parameters"
+            )
+        boundary = "all parameters trainable from the selected frozen checkpoint"
+    return {
+        "phase": args.phase,
+        "boundary": boundary,
+        "frozen_parameter_names": frozen,
+        "trainable_parameter_names": trainable,
+        "frozen_parameter_count": sum(
+            parameter.numel()
+            for parameter in model.parameters()
+            if not parameter.requires_grad
+        ),
+        "trainable_parameter_count": sum(
+            parameter.numel()
+            for parameter in model.parameters()
+            if parameter.requires_grad
+        ),
+        "input_checkpoint": checkpoint_provenance(
+            args.backbone_checkpoint or args.resume_checkpoint
+        ),
+    }
 
 
 def _forward(
@@ -756,6 +840,7 @@ def main() -> None:
     if device.type == "cuda":
         torch.backends.cuda.matmul.allow_tf32 = False
         torch.backends.cudnn.allow_tf32 = False
+        torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
     _set_seed(args.seed)
     run_dir = Path(args.run_dir)
@@ -767,6 +852,7 @@ def main() -> None:
     logger = _logger(run_dir, continuing=args.continue_run)
     model, plan = _build_model(args)
     frozen_backbone = _configure_initialization(model, args)
+    freeze = _freeze_record(model, args)
     model = model.to(device)
     if args.compile_tp:
         model.backbone.compile_tensor_products(dynamic=True)
@@ -806,7 +892,10 @@ def main() -> None:
             train_view="side", test_view="side", seed=args.seed, **loader_kwargs
         )
         top_loader = get_itop_split_loader(
-            view="top", split="test", **_test_loader_kwargs(loader_kwargs)
+            view="top",
+            split="test",
+            seed=args.seed,
+            **_test_loader_kwargs(loader_kwargs),
         )
 
     if args.representation_metric == "block_auto":
@@ -825,8 +914,35 @@ def main() -> None:
         logger.info("Representation metric: %s", metric_stats)
 
     compilation = plan.compilation.as_dict() if plan is not None else None
+    source = source_provenance(Path(__file__).resolve().parents[1])
+    dataset = geometry_cache_provenance(
+        args.data_dir,
+        num_points=args.num_points,
+        num_neighbors=args.num_neighbors,
+        train_cache_sample_limit=args.train_cache_sample_limit,
+    )
+    feature_cache_record = (
+        feature_cache_provenance(args.feature_cache)
+        if args.feature_cache is not None
+        else None
+    )
+    contract = training_contract(args, device, freeze=freeze)
+    contract_digest = contract_hash(contract)
+    environment = _environment(device)
+    environment.update(
+        {
+            "source": source,
+            "dataset": dataset,
+            "feature_cache": feature_cache_record,
+            "input_checkpoint": checkpoint_provenance(
+                args.backbone_checkpoint or args.resume_checkpoint
+            ),
+            "training_contract": contract,
+            "training_contract_hash": contract_digest,
+        }
+    )
     logger.info("args=%s", json.dumps(vars(args), sort_keys=True))
-    logger.info("environment=%s", json.dumps(_environment(device), sort_keys=True))
+    logger.info("environment=%s", json.dumps(environment, sort_keys=True))
     logger.info("compilation=%s", json.dumps(compilation, sort_keys=True))
     logger.info("feature_cache=%s", json.dumps(feature_cache_metadata, sort_keys=True))
     logger.info(
@@ -976,7 +1092,7 @@ def main() -> None:
     logger.info("results=%s", json.dumps(results, sort_keys=True))
     records = {
         "args.json": vars(args),
-        "environment.json": _environment(device),
+        "environment.json": environment,
         "compilation.json": compilation,
         "feature_cache.json": feature_cache_metadata,
         "history.json": history,
@@ -984,8 +1100,37 @@ def main() -> None:
     }
     for filename, record in records.items():
         _write_json(record, run_dir / filename)
-    torch.save(side_artifact, run_dir / "predictions_side.pt")
-    torch.save(top_artifact, run_dir / "predictions_top.pt")
+    _save_tensor_artifact(side_artifact, run_dir / "predictions_side.pt")
+    _save_tensor_artifact(top_artifact, run_dir / "predictions_top.pt")
+    artifact_names = (
+        "best_model.pt",
+        "last_state.pt",
+        "history.json",
+        "metrics.json",
+        "predictions_side.pt",
+        "predictions_top.pt",
+    )
+    _write_json(
+        {
+            "schema_version": 1,
+            "source": source,
+            "dataset_cache_hash": dataset["dataset_cache_hash"],
+            "feature_cache_hash": (
+                feature_cache_record["feature_cache_hash"]
+                if feature_cache_record is not None
+                else None
+            ),
+            "training_contract_hash": contract_digest,
+            "input_checkpoint": checkpoint_provenance(
+                args.backbone_checkpoint or args.resume_checkpoint
+            ),
+            "freeze": freeze,
+            "artifacts": {
+                name: sha256_file(run_dir / name) for name in artifact_names
+            },
+        },
+        run_dir / "provenance.json",
+    )
 
 
 if __name__ == "__main__":

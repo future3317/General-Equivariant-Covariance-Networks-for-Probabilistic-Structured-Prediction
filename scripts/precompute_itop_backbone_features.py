@@ -13,6 +13,11 @@ from tqdm import tqdm
 from data.itop_dataset import get_itop_split_loader
 from data.itop_features import ITOPFeatureDataset, sha256_file
 from models.pooling import mean_pool
+from scripts.itop_reproducibility import (
+    atomic_write_json,
+    geometry_cache_provenance,
+    source_provenance,
+)
 from scripts.train_itop import build_itop_backbone
 
 
@@ -139,10 +144,15 @@ def main() -> None:
             training_args, "train_cache_sample_limit", None
         ),
         "counts": counts,
+        "source": source_provenance(Path(__file__).resolve().parents[1]),
+        "dataset_cache_hash": geometry_cache_provenance(
+            training_args.data_dir,
+            num_points=training_args.num_points,
+            num_neighbors=training_args.num_neighbors,
+            train_cache_sample_limit=args.train_cache_sample_limit,
+        )["dataset_cache_hash"],
     }
-    (args.output_dir / "metadata.json").write_text(
-        json.dumps(metadata, indent=2) + "\n", encoding="utf-8"
-    )
+    atomic_write_json(metadata, args.output_dir / "metadata.json")
 
 
 if __name__ == "__main__":

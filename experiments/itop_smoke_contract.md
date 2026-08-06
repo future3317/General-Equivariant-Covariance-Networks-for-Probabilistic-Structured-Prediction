@@ -47,3 +47,41 @@ NLL is -45.944/75.700, versus 27.929/75.563 cm and -13.326/291.460 for the
 independent Gaussian comparison. Top MACE is 0.500 and side/top uncertainty
 AUROC is 0.197; these negative calibration diagnostics are retained as part
 of the decision record. The result is development evidence only.
+
+## Reproducibility and freezing contract
+
+Every controlled ITOP stage records `training_contract_hash` and a companion
+`provenance.json`. The record binds the source commit and dirty-tree status,
+the complete geometry-cache file hashes, any feature-cache hashes, input
+checkpoint hashes, runtime device/dtype/TF32 flags, and the selected compiler
+backend. JSON and tensor artifacts are published atomically.
+
+The stage state machine is fixed:
+
+```text
+deterministic MSE
+  -> freeze deterministic backbone + mean head
+  -> train only the uncertainty head with proper Gaussian/Student-t NLL
+  -> optionally fine-tune a selected head only when explicitly enabled
+```
+
+For `phase=frozen_head`, the code checks and records the exact frozen and
+trainable parameter names and counts. The frozen boundary is
+`backbone + joint_head.mean_head`; covariance/scale parameters remain
+trainable. Thus frozen-head comparisons intentionally have identical means,
+MPJPE, and residuals; they compare probabilistic geometry and proper scores,
+not point-estimation accuracy. Joint fine-tuning is a separate protocol and
+must not be merged with frozen-head results.
+
+The train sampler is seeded as a pure function of `(seed, epoch)`, and worker
+Python/NumPy streams are initialized from PyTorch's worker seed. Validation and
+test loaders use fixed non-shuffling generators. CUDA TF32 and cuDNN autotuning
+are disabled and cuDNN deterministic mode is requested. This fixes the data,
+split, optimization, freezing, precision, and artifact semantics; exact
+bitwise equality across different CUDA/e3nn kernels is not claimed.
+
+Each completed stage must contain at least:
+`best_model.pt`, `last_state.pt`, `history.json`, `metrics.json`,
+`predictions_side.pt`, `predictions_top.pt`, `args.json`, `environment.json`,
+`compilation.json`, `feature_cache.json`, `provenance.json`, and `train.log`.
+The study runner skips a stage only when the complete set is present.

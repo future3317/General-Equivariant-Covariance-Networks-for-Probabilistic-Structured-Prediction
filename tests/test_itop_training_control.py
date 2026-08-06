@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader, RandomSampler, TensorDataset
 
 from scripts.evaluate_itop_final import _available_models
 from scripts.run_itop_study import (
+    GEOMETRY_CACHE_FILES,
     _geometry_cache_complete,
     _parse_args,
     _training_command,
@@ -199,6 +200,8 @@ def test_geometry_cache_requires_exact_sample_limit(tmp_path):
     (cache / "metadata.json").write_text('{"sample_limit": 64}', encoding="utf-8")
     with pytest.raises(RuntimeError, match="stale ITOP geometry cache"):
         _geometry_cache_complete(cache, sample_limit=None)
+    for name in GEOMETRY_CACHE_FILES:
+        (cache / name).touch()
     assert _geometry_cache_complete(cache, sample_limit=64)
 
 

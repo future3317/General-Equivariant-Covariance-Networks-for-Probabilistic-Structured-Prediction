@@ -83,6 +83,8 @@ overconfident on the top-view shift, while side-only joint fine-tuning improves
 top MPJPE slightly but collapses top NLL to 4,988.677. These results support a
 cross-view OOD diagnostic, not a calibration or SOTA claim. The full root-cause
 record is [`docs/itop_final_root_cause_diagnosis.md`](docs/itop_final_root_cause_diagnosis.md).
+The reproducibility, freezing, and artifact contract is recorded in
+[`experiments/itop_smoke_contract.md`](experiments/itop_smoke_contract.md).
 
 ## Evidence and uncertainty semantics
 

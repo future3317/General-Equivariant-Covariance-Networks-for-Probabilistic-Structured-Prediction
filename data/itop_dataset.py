@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import random
 from functools import lru_cache
 from pathlib import Path
 
@@ -392,10 +393,19 @@ def _loader_kwargs(
         "num_workers": num_workers,
         "pin_memory": pin_memory,
         "persistent_workers": persistent_workers and num_workers > 0,
+        "worker_init_fn": itop_worker_init_fn,
     }
     if num_workers > 0 and prefetch_factor is not None:
         kwargs["prefetch_factor"] = prefetch_factor
     return kwargs
+
+
+def itop_worker_init_fn(worker_id: int) -> None:
+    """Bind Python/NumPy worker RNGs to PyTorch's per-loader worker seed."""
+    del worker_id
+    worker_seed = torch.initial_seed() % (2**32)
+    random.seed(worker_seed)
+    np.random.seed(worker_seed)
 
 
 def get_itop_loaders(
@@ -474,10 +484,18 @@ def get_itop_loaders(
             **loader_kwargs,
         ),
         PyGDataLoader(
-            validation_dataset, batch_size=batch_size, shuffle=False, **loader_kwargs
+            validation_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            generator=torch.Generator().manual_seed(seed + 2),
+            **loader_kwargs,
         ),
         PyGDataLoader(
-            test_dataset, batch_size=batch_size, shuffle=False, **loader_kwargs
+            test_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            generator=torch.Generator().manual_seed(seed + 3),
+            **loader_kwargs,
         ),
     )
 
@@ -495,6 +513,7 @@ def get_itop_split_loader(
     persistent_workers: bool = False,
     prefetch_factor: int | None = None,
     cache_sample_limit: int | None = None,
+    seed: int = 42,
 ) -> PyGDataLoader:
     """Build one deterministic loader from its required geometry cache."""
     if split not in {"train", "test"}:
@@ -515,4 +534,10 @@ def get_itop_split_loader(
         persistent_workers=persistent_workers,
         prefetch_factor=prefetch_factor,
     )
-    return PyGDataLoader(dataset, batch_size=batch_size, shuffle=False, **loader_kwargs)
+    return PyGDataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        generator=torch.Generator().manual_seed(seed + 3),
+        **loader_kwargs,
+    )
