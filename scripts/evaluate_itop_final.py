@@ -160,8 +160,8 @@ def _available_models(root: Path) -> tuple[str, ...]:
     )
 
 
-def audit(results: Path, output: Path) -> dict[str, Any]:
-    root = results / "seed_42"
+def audit(results: Path, output: Path, *, seed: int = 42) -> dict[str, Any]:
+    root = results / f"seed_{seed}"
     output.mkdir(parents=True, exist_ok=True)
     records: OrderedDict[str, Any] = OrderedDict()
     models = _available_models(root)
@@ -207,7 +207,7 @@ def audit(results: Path, output: Path) -> dict[str, Any]:
     audit_record = {
         "schema_version": 1,
         "study": "ITOP final one-seed full side-train, 512 points",
-        "seed": 42,
+        "seed": seed,
         "test_views": {"side": "IID", "top": "cross-view OOD"},
         "graph_family_selection": selected,
         "model_note": (
@@ -221,7 +221,7 @@ def audit(results: Path, output: Path) -> dict[str, Any]:
         json.dumps(audit_record, indent=2) + "\n", encoding="utf-8"
     )
     _write_tables(audit_record, output)
-    _write_figures(results, output, audit_record)
+    _write_figures(results, output, audit_record, seed=seed)
     return audit_record
 
 
@@ -342,22 +342,25 @@ def _load_metrics(audit_record: dict[str, Any], model: str) -> dict[str, Any]:
     return audit_record["models"][model]["metrics"]
 
 
-def _write_figures(results: Path, output: Path, audit_record: dict[str, Any]) -> None:
+def _write_figures(
+    results: Path, output: Path, audit_record: dict[str, Any], *, seed: int
+) -> None:
     setup_tpami_style()
     models = tuple(audit_record["models"])
-    _plot_training_curves(results, output, models)
+    _plot_training_curves(results, output, models, seed=seed)
     _plot_metric_comparison(output, audit_record)
     _plot_ood(output, audit_record)
-    _plot_risk_coverage(results, output, audit_record)
+    _plot_risk_coverage(results, output, audit_record, seed=seed)
     _plot_visibility(output, audit_record)
-    _plot_structure(results, output, audit_record)
+    _plot_structure(results, output, audit_record, seed=seed)
 
 
 def _plot_training_curves(
-    results: Path, output: Path, models: tuple[str, ...]
+    results: Path, output: Path, models: tuple[str, ...], *, seed: int
 ) -> None:
     fig, axes = plt.subplots(1, 2, figsize=cm2inch(17.2, 6.7))
-    det_history = _read_json(results / "seed_42" / "deterministic" / "history.json")
+    seed_root = results / f"seed_{seed}"
+    det_history = _read_json(seed_root / "deterministic" / "history.json")
     axes[0].plot(
         [r["epoch"] for r in det_history],
         [r["loss"] for r in det_history],
@@ -374,7 +377,7 @@ def _plot_training_curves(
     for model in models:
         if model == "deterministic":
             continue
-        history = _read_json(results / "seed_42" / model / "history.json")
+        history = _read_json(seed_root / model / "history.json")
         axes[1].plot(
             [r["epoch"] for r in history],
             [r["loss"] for r in history],
@@ -454,7 +457,7 @@ def _plot_ood(output: Path, audit_record: dict[str, Any]) -> None:
 
 
 def _plot_risk_coverage(
-    results: Path, output: Path, audit_record: dict[str, Any]
+    results: Path, output: Path, audit_record: dict[str, Any], *, seed: int
 ) -> None:
     preferred = (
         "frozen_graph_student_t",
@@ -469,7 +472,9 @@ def _plot_risk_coverage(
     fig, axes = plt.subplots(1, 2, figsize=cm2inch(16.8, 6.7))
     for view, ax in zip(("side", "top"), axes):
         for index, model in enumerate(selected):
-            prediction = _load_prediction(results / "seed_42" / model / f"predictions_{view}.pt")
+            prediction = _load_prediction(
+                results / f"seed_{seed}" / model / f"predictions_{view}.pt"
+            )
             uncertainty = prediction["frame_uncertainty"].float()
             error = prediction["joint_errors"].float().mean(-1) * 100.0
             order = torch.argsort(uncertainty)
@@ -510,7 +515,9 @@ def _plot_visibility(output: Path, audit_record: dict[str, Any]) -> None:
     plt.close(fig)
 
 
-def _plot_structure(results: Path, output: Path, audit_record: dict[str, Any]) -> None:
+def _plot_structure(
+    results: Path, output: Path, audit_record: dict[str, Any], *, seed: int
+) -> None:
     preferred = (
         "frozen_graph_student_t",
         "joint_graph_student_t",
@@ -556,8 +563,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--results", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
-    record = audit(args.results, args.output)
+    record = audit(args.results, args.output, seed=args.seed)
     print(json.dumps({"models": list(record["models"]), "output": str(args.output)}, indent=2))
 
 
