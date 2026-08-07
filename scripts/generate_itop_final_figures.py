@@ -160,7 +160,7 @@ def plot_overview(root: Path, output: Path) -> None:
     fig, axes = plt.subplots(
         1,
         3,
-        figsize=cm2inch(18.2, 7.4),
+        figsize=cm2inch(18.2, 7.9),
         sharey=True,
         gridspec_kw={"width_ratios": (1.02, 1.22, 0.98)},
     )
@@ -202,7 +202,7 @@ def plot_overview(root: Path, output: Path) -> None:
                     ha="right",
                     va="bottom",
                     color=side_color,
-                    fontsize=7,
+                    fontsize=7.5,
                 )
             if top is not None:
                 axis.scatter(
@@ -222,7 +222,7 @@ def plot_overview(root: Path, output: Path) -> None:
                     ha="left",
                     va="top",
                     color=top_color,
-                    fontsize=7,
+                    fontsize=7.5,
                 )
         axis.set_yticks(y, [MODEL_LABELS[model] for model in models])
         axis.set_xlabel(xlabel)
@@ -266,7 +266,7 @@ def plot_overview(root: Path, output: Path) -> None:
                 textcoords="offset points",
                 ha="left" if value >= 0.5 else "right",
                 va="center",
-                fontsize=7,
+                fontsize=7.5,
                 color=color,
             )
     axes[2].set_xlim(0, 1.08)
@@ -289,16 +289,8 @@ def plot_overview(root: Path, output: Path) -> None:
         handlelength=1.8,
         columnspacing=1.5,
     )
-    fig.text(
-        0.5,
-        0.01,
-        "Frozen heads share the deterministic mean; only probabilistic fit and OOD ranking differ.",
-        ha="center",
-        fontsize=7.5,
-        color=COLORS["dark_gray"],
-    )
-    label_panels(axes, x=-0.14, y=1.08, fontsize=10)
-    fig.subplots_adjust(left=0.13, right=0.99, bottom=0.19, top=0.80, wspace=0.35)
+    label_panels(axes, x=-0.14, y=1.07, fontsize=10)
+    fig.subplots_adjust(left=0.13, right=0.99, bottom=0.17, top=0.80, wspace=0.35)
     save_figure(fig, output / "itop_final_overview", formats=("pdf", "png"))
     plt.close(fig)
 
@@ -316,7 +308,7 @@ def plot_structure(root: Path, output: Path) -> None:
     fig, axes = plt.subplots(
         1,
         2,
-        figsize=cm2inch(18.0, 7.0),
+        figsize=cm2inch(18.0, 7.4),
         gridspec_kw={"width_ratios": (1.05, 1.0)},
     )
     for view, color, label in (
@@ -398,8 +390,8 @@ def plot_structure(root: Path, output: Path) -> None:
         handlelength=2.0,
         columnspacing=1.8,
     )
-    label_panels(axes, x=-0.14, y=1.08, fontsize=10)
-    fig.subplots_adjust(left=0.11, right=0.99, bottom=0.22, top=0.82, wspace=0.31)
+    label_panels(axes, x=-0.14, y=1.07, fontsize=10)
+    fig.subplots_adjust(left=0.11, right=0.99, bottom=0.20, top=0.82, wspace=0.31)
     save_figure(fig, output / "itop_final_structure", formats=("pdf", "png"))
     plt.close(fig)
 
