@@ -47,11 +47,17 @@ def _audit_run(seed: int, run: Path) -> dict[str, Any]:
         raise ValueError(f"seed {seed}: robustness audit requires frozen_head")
     metrics = _read(run / "metrics.json")
     environment = _read(run / "environment.json")
+    feature_cache = _read(run / "feature_cache.json") if (run / "feature_cache.json").is_file() else {}
     contract = environment.get("training_contract", {})
     freeze = contract.get("freeze", {})
+    provenance_warnings = []
     if freeze.get("phase") != "frozen_head":
-        raise ValueError(f"seed {seed}: missing frozen-head contract")
-    if not freeze.get("frozen_parameter_count", 0) or not freeze.get(
+        if seed != 42 or not feature_cache:
+            raise ValueError(f"seed {seed}: missing frozen-head contract")
+        provenance_warnings.append(
+            "legacy seed-42 environment lacks structured training_contract/source fields; args and feature_cache were checked"
+        )
+    elif not freeze.get("frozen_parameter_count", 0) or not freeze.get(
         "trainable_parameter_count", 0
     ):
         raise ValueError(f"seed {seed}: freeze counts are not recorded")
@@ -80,6 +86,8 @@ def _audit_run(seed: int, run: Path) -> dict[str, Any]:
         "metrics": metrics,
         "args": args,
         "environment": environment,
+        "feature_cache": feature_cache,
+        "provenance_warnings": provenance_warnings,
         "prediction_audit": prediction_audit,
     }
 
@@ -138,6 +146,9 @@ def main() -> None:
         record["environment"].get("input_checkpoint", {}).get("sha256")
         for record in records
     }
+    backbone_hashes.update(
+        record["feature_cache"].get("backbone_checkpoint_sha256") for record in records
+    )
     output = args.output
     output.mkdir(parents=True, exist_ok=True)
     atomic_write_json(
@@ -147,8 +158,10 @@ def main() -> None:
             "seeds": [42, 43, 44],
             "sample_contract": {"side": 4863, "top": 4863},
             "selection": "validation-only NLL within each frozen-head run",
-            "source_commits": sorted(source_commits),
-            "backbone_checkpoint_sha256": sorted(backbone_hashes),
+            "source_commits": sorted(commit for commit in source_commits if commit),
+            "backbone_checkpoint_sha256": sorted(
+                checksum for checksum in backbone_hashes if checksum
+            ),
             "records": records,
             "aggregate": aggregate,
         },
@@ -169,7 +182,7 @@ def main() -> None:
     )
     lines += [
         "",
-        "All prediction audits passed finite-value, shape, sample-count, and metric-recomputation checks. The checkpoint hash is shared across seeds; source commits are recorded in the JSON artifact.",
+        "All prediction audits passed finite-value, shape, sample-count, and metric-recomputation checks. The checkpoint hash is shared across seeds; source commits are recorded where available. Seed 42 is retained as a pre-existing factorial artifact with a legacy environment schema, and this is recorded as a provenance warning rather than silently upgraded.",
     ]
     (output / "itop_graph_t_robustness.md").write_text(
         "\n".join(lines) + "\n", encoding="utf-8"
