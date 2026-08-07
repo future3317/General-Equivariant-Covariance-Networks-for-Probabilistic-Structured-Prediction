@@ -26,9 +26,30 @@ MODEL_LABELS = {
     "frozen_graph_student_t": "Graph-t",
 }
 
+METHOD_COLORS = {
+    "deterministic": COLORS["dark_gray"],
+    "frozen_independent_gaussian": COLORS["red_strong"],
+    "frozen_independent_student_t": COLORS["red_2"],
+    "frozen_low_rank_student_t": COLORS["teal"],
+    "frozen_graph_gaussian": COLORS["green_3"],
+    "frozen_graph_student_t": COLORS["blue_main"],
+}
+
+
+def _seed_root(root: Path) -> Path:
+    """Locate the canonical seed artifact under a result or figure-input root."""
+    candidates = (root / "seed_42", root / "figures_input" / "seed_42")
+    for candidate in candidates:
+        if (candidate / "frozen_graph_student_t" / "metrics.json").is_file():
+            return candidate
+    raise FileNotFoundError(
+        "Could not find seed_42 artifacts under "
+        f"{root} or {root / 'figures_input'}"
+    )
+
 
 def _metrics(root: Path, model: str) -> dict:
-    path = root / "seed_42" / model / "metrics.json"
+    path = _seed_root(root) / model / "metrics.json"
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -131,15 +152,22 @@ def _bootstrap_distance_intervals(
 
 def plot_overview(root: Path, output: Path) -> None:
     setup_tpami_style()
+    seed_root = _seed_root(root)
     models = tuple(
-        model for model in MODEL_LABELS if (root / "seed_42" / model).is_dir()
+        model for model in MODEL_LABELS if (seed_root / model).is_dir()
     )
     records = {model: _metrics(root, model) for model in models}
-    fig, axes = plt.subplots(1, 3, figsize=cm2inch(18.2, 8.0), sharey=True)
+    fig, axes = plt.subplots(
+        1,
+        3,
+        figsize=cm2inch(18.2, 7.4),
+        sharey=True,
+        gridspec_kw={"width_ratios": (1.02, 1.22, 0.98)},
+    )
     y = np.arange(len(models))[::-1]
-    side_color, top_color = COLORS["midnight_blue"], COLORS["champagne_gold"]
+    side_color, top_color = COLORS["blue_main"], COLORS["red_strong"]
 
-    for axis, metric, label, title in zip(
+    for axis, metric, xlabel, title in zip(
         axes[:2],
         ("mpjpe_cm", "nll"),
         ("MPJPE (cm)", "Proper NLL"),
@@ -148,44 +176,136 @@ def plot_overview(root: Path, output: Path) -> None:
         for index, model in enumerate(models):
             side = records[model]["side"].get(metric)
             top = records[model]["top"].get(metric)
+            if side is not None and top is not None:
+                axis.plot(
+                    (side, top),
+                    (y[index], y[index]),
+                    color=COLORS["neutral"],
+                    linewidth=1.0,
+                    zorder=1,
+                )
             if side is not None:
-                axis.plot(side, y[index] + 0.11, "o", color=side_color, ms=6)
-                axis.text(side, y[index] + 0.18, f"{side:.1f}", color=side_color, fontsize=7)
+                axis.scatter(
+                    side,
+                    y[index],
+                    color=side_color,
+                    edgecolor="white",
+                    linewidth=0.7,
+                    s=34,
+                    zorder=3,
+                )
+                axis.annotate(
+                    f"{side:.1f}",
+                    (side, y[index]),
+                    xytext=(-4, 7),
+                    textcoords="offset points",
+                    ha="right",
+                    va="bottom",
+                    color=side_color,
+                    fontsize=7,
+                )
             if top is not None:
-                axis.plot(top, y[index] - 0.11, "o", color=top_color, ms=6)
-                axis.text(top, y[index] - 0.20, f"{top:.1f}", color=top_color, fontsize=7)
+                axis.scatter(
+                    top,
+                    y[index],
+                    color=top_color,
+                    edgecolor="white",
+                    linewidth=0.7,
+                    s=34,
+                    zorder=3,
+                )
+                axis.annotate(
+                    f"{top:.1f}",
+                    (top, y[index]),
+                    xytext=(4, -7),
+                    textcoords="offset points",
+                    ha="left",
+                    va="top",
+                    color=top_color,
+                    fontsize=7,
+                )
         axis.set_yticks(y, [MODEL_LABELS[model] for model in models])
-        axis.set_xlabel(label)
+        axis.set_xlabel(xlabel)
         axis.set_title(title, loc="left", fontweight="bold")
         axis.grid(axis="x")
+        axis.tick_params(axis="y", length=0)
 
     auroc = [records[model]["ood"].get("side_top_uncertainty_auroc", np.nan) for model in models]
-    axes[2].scatter(auroc, y, color=COLORS["navy_light"], s=36, zorder=3)
-    for value, ypos in zip(auroc, y):
+    axes[2].axvline(
+        0.5,
+        color=COLORS["dark_gray"],
+        linestyle="--",
+        linewidth=1.0,
+        label="Chance",
+    )
+    for model, value, ypos in zip(models, auroc, y):
         if np.isfinite(value):
-            axes[2].text(value + 0.025, ypos, f"{value:.3f}", va="center", fontsize=7)
-    axes[2].axvline(0.5, color=COLORS["dark_gray"], linestyle="--", linewidth=1)
+            color = METHOD_COLORS[model]
+            axes[2].hlines(
+                ypos,
+                0.5,
+                value,
+                color=color,
+                linewidth=2.0,
+                alpha=0.8,
+                zorder=2,
+            )
+            axes[2].scatter(
+                value,
+                ypos,
+                color=color,
+                edgecolor="white",
+                linewidth=0.7,
+                s=38,
+                zorder=3,
+            )
+            axes[2].annotate(
+                f"{value:.3f}",
+                (value, ypos),
+                xytext=(4 if value >= 0.5 else -4, 0),
+                textcoords="offset points",
+                ha="left" if value >= 0.5 else "right",
+                va="center",
+                fontsize=7,
+                color=color,
+            )
     axes[2].set_xlim(0, 1.08)
     axes[2].set_yticks(y, [MODEL_LABELS[model] for model in models])
     axes[2].set_xlabel("Side/top AUROC")
     axes[2].set_title("OOD ranking", loc="left", fontweight="bold")
     axes[2].grid(axis="x")
-
-    for axis in axes:
-        axis.tick_params(axis="y", length=0)
-    axes[0].plot([], [], "o", color=side_color, label="Side IID")
-    axes[0].plot([], [], "o", color=top_color, label="Top OOD")
-    axes[0].legend(loc="lower right", fontsize=8)
-    label_panels(axes, x=-0.12, y=1.06, fontsize=11)
-    fig.suptitle("ITOP full side-train factorial audit", y=1.02, fontweight="bold")
-    fig.tight_layout(rect=(0, 0, 1, 0.96))
-    save_figure(fig, output / "itop_final_overview", formats=("pdf",))
+    axes[2].tick_params(axis="y", length=0)
+    axes[0].scatter([], [], color=side_color, label="Side IID", s=34)
+    axes[0].scatter([], [], color=top_color, label="Top OOD", s=34)
+    handles, labels = axes[0].get_legend_handles_labels()
+    handles.append(axes[2].lines[0])
+    labels.append("Chance")
+    fig.legend(
+        handles,
+        labels,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.995),
+        ncol=3,
+        handlelength=1.8,
+        columnspacing=1.5,
+    )
+    fig.text(
+        0.5,
+        0.01,
+        "Frozen heads share the deterministic mean; only probabilistic fit and OOD ranking differ.",
+        ha="center",
+        fontsize=7.5,
+        color=COLORS["dark_gray"],
+    )
+    label_panels(axes, x=-0.14, y=1.08, fontsize=10)
+    fig.subplots_adjust(left=0.13, right=0.99, bottom=0.19, top=0.80, wspace=0.35)
+    save_figure(fig, output / "itop_final_overview", formats=("pdf", "png"))
     plt.close(fig)
 
 
 def plot_structure(root: Path, output: Path) -> None:
     setup_tpami_style()
-    model_root = root / "seed_42" / "frozen_graph_student_t"
+    model_root = _seed_root(root) / "frozen_graph_student_t"
     metrics = _metrics(root, "frozen_graph_student_t")
     counts = _graph_distance_counts(15)
     distances = sorted(
@@ -193,10 +313,15 @@ def plot_structure(root: Path, output: Path) -> None:
     )
     distance_values = [int(distance) for distance in distances]
 
-    fig, axes = plt.subplots(1, 2, figsize=cm2inch(18.0, 7.0))
+    fig, axes = plt.subplots(
+        1,
+        2,
+        figsize=cm2inch(18.0, 7.0),
+        gridspec_kw={"width_ratios": (1.05, 1.0)},
+    )
     for view, color, label in (
-        ("side", COLORS["midnight_blue"], "Side IID"),
-        ("top", COLORS["champagne_gold"], "Top OOD"),
+        ("side", COLORS["blue_main"], "Side IID"),
+        ("top", COLORS["red_strong"], "Top OOD"),
     ):
         values = [
             metrics[view]["residual_correlation_by_skeleton_distance"][d]
@@ -217,35 +342,65 @@ def plot_structure(root: Path, output: Path) -> None:
             yerr=(np.asarray(values) - lower, upper - np.asarray(values)),
             fmt="o-",
             color=color,
-            capsize=2,
+            capsize=2.5,
+            linewidth=1.8,
+            markersize=5,
             label=label,
         )
     axes[0].set_xlabel("Skeleton graph distance")
     axes[0].set_ylabel("Residual correlation")
     axes[0].set_title("Structured residual dependence", loc="left", fontweight="bold")
-    axes[0].legend(fontsize=8)
+    axes[0].set_ylim(-0.05, 0.95)
     axes[0].set_xticks(
         distance_values, [f"{d}\n(n={counts[d]})" for d in distance_values]
     )
     fractions = np.linspace(0.1, 1.0, 10)
     for view, color, label in (
-        ("side", COLORS["midnight_blue"], "Side IID"),
-        ("top", COLORS["champagne_gold"], "Top OOD"),
+        ("side", COLORS["blue_main"], "Side IID"),
+        ("top", COLORS["red_strong"], "Top OOD"),
     ):
         payload = torch.load(model_root / f"predictions_{view}.pt", map_location="cpu", weights_only=True)
         uncertainty = payload["frame_uncertainty"].numpy()
         error = payload["joint_errors"].float().mean(dim=-1).numpy() * 100.0
         curve = _risk_curve(uncertainty, error, fractions)
         lower, upper = _bootstrap_risk_band(uncertainty, error, fractions)
-        axes[1].plot(fractions * 100, curve, "o-", color=color, label=label)
-        axes[1].fill_between(fractions * 100, lower, upper, color=color, alpha=0.15)
+        axes[1].plot(
+            fractions * 100,
+            curve,
+            "o-",
+            color=color,
+            linewidth=1.8,
+            markersize=4.5,
+            label=label,
+        )
+        axes[1].fill_between(
+            fractions * 100,
+            lower,
+            upper,
+            color=color,
+            alpha=0.16,
+            linewidth=0,
+        )
     axes[1].set_xlabel("Retained coverage (%)")
     axes[1].set_ylabel("Mean joint error (cm)")
     axes[1].set_title("Selective risk with 95% bootstrap bands", loc="left", fontweight="bold")
-    axes[1].legend(fontsize=8)
-    label_panels(axes, x=-0.12, y=1.06, fontsize=11)
-    fig.tight_layout()
-    save_figure(fig, output / "itop_final_structure", formats=("pdf",))
+    axes[1].set_ylim(
+        min(0.0, float(np.nanmin(lower)) - 1.0),
+        float(np.nanmax(upper)) + 1.0,
+    )
+    handles, labels = axes[1].get_legend_handles_labels()
+    fig.legend(
+        handles,
+        labels,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.995),
+        ncol=2,
+        handlelength=2.0,
+        columnspacing=1.8,
+    )
+    label_panels(axes, x=-0.14, y=1.08, fontsize=10)
+    fig.subplots_adjust(left=0.11, right=0.99, bottom=0.22, top=0.82, wspace=0.31)
+    save_figure(fig, output / "itop_final_structure", formats=("pdf", "png"))
     plt.close(fig)
 
 

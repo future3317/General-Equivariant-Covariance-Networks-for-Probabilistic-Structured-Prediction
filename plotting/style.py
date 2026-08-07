@@ -38,6 +38,16 @@ COLORS.update(
         "secondary": COLORS["champagne_gold"],
         "tertiary": COLORS["navy_light"],
         "accent": COLORS["champagne_light"],
+        # Publication-semantic aliases used by the refreshed figures.  The
+        # legacy names above remain stable for older result generators.
+        "blue_main": "#0F4D92",
+        "blue_secondary": "#3775BA",
+        "green_3": "#4F9F59",
+        "red_2": "#B85C5A",
+        "red_strong": "#B64342",
+        "neutral": "#CFCECE",
+        "teal": "#287F8C",
+        "violet": "#7B4C9A",
     }
 )
 
@@ -53,11 +63,11 @@ DIVERGING_CMAP = LinearSegmentedColormap.from_list(
 
 # Sequential palette for methods / lines
 PALETTE = [
-    COLORS["midnight_blue"],
-    COLORS["champagne_gold"],
-    COLORS["navy_light"],
-    COLORS["champagne_light"],
-    COLORS["dark_gray"],
+    COLORS["blue_main"],
+    COLORS["green_3"],
+    COLORS["red_strong"],
+    COLORS["teal"],
+    COLORS["violet"],
     COLORS["gray"],
 ]
 
@@ -65,38 +75,43 @@ PALETTE = [
 # Default style parameters
 # ---------------------------------------------------------------------------
 DEFAULT_RC = {
-    # Font
-    "font.family": "serif",
-    "font.serif": ["Times New Roman", "DejaVu Serif", "serif"],
-    "mathtext.fontset": "cm",
+    # Use a bundled sans-serif font so rendering is deterministic across the
+    # local and server environments; retain mathtext for equations.
+    "font.family": "DejaVu Sans",
+    "mathtext.fontset": "dejavusans",
     "axes.unicode_minus": False,
     # Sizes suitable for IEEE TPAMI single- and double-column figures.
     "figure.dpi": 300,
     "savefig.dpi": 300,
-    "axes.labelsize": 12,
-    "axes.titlesize": 13,
-    "xtick.labelsize": 10,
-    "ytick.labelsize": 10,
-    "legend.fontsize": 10,
-    "figure.titlesize": 14,
+    "font.size": 10,
+    "axes.labelsize": 10,
+    "axes.titlesize": 11,
+    "xtick.labelsize": 8.5,
+    "ytick.labelsize": 8.5,
+    "legend.fontsize": 8.5,
+    "figure.titlesize": 12,
     # Lines / markers
     "lines.linewidth": 2.0,
     "lines.markersize": 6,
-    "axes.linewidth": 0.8,
-    "xtick.major.width": 0.8,
-    "ytick.major.width": 0.8,
+    "axes.linewidth": 1.2,
+    "axes.spines.top": False,
+    "axes.spines.right": False,
+    "xtick.major.width": 1.0,
+    "ytick.major.width": 1.0,
+    "xtick.direction": "out",
+    "ytick.direction": "out",
     # Grid
     "axes.grid": True,
-    "grid.alpha": 0.3,
+    "grid.alpha": 0.16,
     "grid.linewidth": 0.6,
+    "axes.axisbelow": True,
     # Legend
-    "legend.frameon": True,
-    "legend.framealpha": 0.95,
-    "legend.edgecolor": "#CCCCCC",
+    "legend.frameon": False,
     # Saving
     "savefig.bbox": "tight",
-    "savefig.pad_inches": 0.02,
+    "savefig.pad_inches": 0.05,
     "pdf.compression": 9,
+    "svg.fonttype": "none",
 }
 
 
