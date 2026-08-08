@@ -2,7 +2,7 @@ import json
 
 import numpy as np
 
-from scripts.audit_itop_mixture_mechanism import _geometry_descriptors
+from data.observation_descriptors import point_cloud_observation_descriptors
 
 
 def test_geometry_descriptors_use_observations_and_keep_visibility_diagnostic(tmp_path):
@@ -24,7 +24,7 @@ def test_geometry_descriptors_use_observations_and_keep_visibility_diagnostic(tm
     np.save(tmp_path / "frame_indices.npy", np.array([7, 9], dtype=np.int64))
     (tmp_path / "metadata.json").write_text(json.dumps({"test": True}))
 
-    result = _geometry_descriptors(tmp_path, view_id=1)
+    result = point_cloud_observation_descriptors(tmp_path, view_id=1)
     assert result["sample_id"].tolist() == [(1 << 32) + 7, (1 << 32) + 9]
     assert result["radius_mean"].shape == (2,)
     assert result["knn_distance_mean"].shape == (2,)

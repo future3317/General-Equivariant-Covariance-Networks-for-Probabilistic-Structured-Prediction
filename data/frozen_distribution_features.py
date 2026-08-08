@@ -8,9 +8,29 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader, Dataset, RandomSampler
 
+from compatibility.e3nn import o3
 from scripts.itop_reproducibility import sha256_file
 
 REQUIRED_FIELDS = ("features", "mean", "params", "target", "sample_id")
+
+
+def invariant_irrep_summary(
+    features: torch.Tensor, irreps: str | o3.Irreps
+) -> torch.Tensor:
+    """Summarize typed features into legal O(3)-invariant scalar probes."""
+    irreps = o3.Irreps(irreps)
+    if features.shape[-1] != irreps.dim:
+        raise ValueError("feature dimension does not match declared irreps")
+    summaries = []
+    for (multiplicity, irrep), feature_slice in zip(irreps, irreps.slices()):
+        block = features[..., feature_slice].reshape(
+            *features.shape[:-1], multiplicity, irrep.dim
+        )
+        if irrep.l == 0 and irrep.p == 1:
+            summaries.append(block.squeeze(-1))
+        else:
+            summaries.append(torch.linalg.vector_norm(block, dim=-1))
+    return torch.cat(summaries, dim=-1)
 
 
 class FrozenDistributionDataset(Dataset):
