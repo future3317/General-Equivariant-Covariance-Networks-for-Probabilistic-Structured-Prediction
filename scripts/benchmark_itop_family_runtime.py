@@ -245,7 +245,7 @@ def main() -> None:
     if args.repeats < 4:
         parser.error("--repeats must be at least 4")
     parsed = dict(_parse_run(specification) for specification in args.run)
-    if tuple(sorted(parsed)) != MODEL_ORDER:
+    if set(parsed) != set(MODEL_ORDER):
         parser.error(f"--run must name exactly {', '.join(MODEL_ORDER)}")
     device = torch.device(args.device)
     if device.type != "cuda":
