@@ -11,6 +11,12 @@ from evaluation.conformal import (
     evaluate_region,
     fit_split_conformal,
 )
+from evaluation.elliptical import (
+    elliptical_falsification,
+    elliptical_falsification_from_whitened,
+    falsification_decision,
+    stratified_elliptical_falsification,
+)
 from evaluation.ensemble import (
     combine_ensemble_moments,
     ensemble_nll,
@@ -75,10 +81,13 @@ __all__ = [
     "covariance_relative_error",
     "covariance_spectrum_diagnostics",
     "eigenvalue_error",
+    "elliptical_falsification",
+    "elliptical_falsification_from_whitened",
     "empirical_coverage",
     "energy_score",
     "ensemble_nll",
     "evaluate_region",
+    "falsification_decision",
     "fit_split_conformal",
     "fit_temperature",
     "irrep_resolved_whitening_defect",
@@ -107,6 +116,7 @@ __all__ = [
     "scale_equivariance_error",
     "scale_nll",
     "sharpness",
+    "stratified_elliptical_falsification",
     "student_t_radial_pit",
     "symmetric_whitened_residuals",
     "variogram_score",
