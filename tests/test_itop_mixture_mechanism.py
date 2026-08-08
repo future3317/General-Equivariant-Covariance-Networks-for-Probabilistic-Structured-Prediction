@@ -2,8 +2,13 @@ import json
 
 import h5py
 import numpy as np
+import torch
 
 from data.observation_descriptors import point_cloud_observation_descriptors
+from scripts.audit_itop_mixture_mechanism import (
+    _single_component_control,
+    _validation_selected_component,
+)
 
 
 def test_geometry_descriptors_use_observations_and_keep_visibility_diagnostic(tmp_path):
@@ -40,3 +45,38 @@ def test_geometry_descriptors_use_observations_and_keep_visibility_diagnostic(tm
     assert result["visible_fraction_diagnostic_only"].tolist() == [1.0, 1.0]
     assert result["valid_depth_fraction"].tolist() == [0.5, 0.75]
     assert result["valid_depth_mean"].tolist() == [1.5, 4.0]
+
+
+def test_validation_dominant_component_control_distinguishes_shift_from_mixture():
+    count = 6
+    fixed = {
+        "mean": torch.zeros(count, 2),
+        "scale": torch.eye(2).repeat(count, 1, 1),
+    }
+    target = torch.tensor([[1.0, 0.0]]).repeat(count, 1)
+    mixture = {
+        "target": target,
+        "component_means": torch.stack(
+            (target, -target),
+        ),
+        "component_scales": torch.eye(2).repeat(2, count, 1, 1),
+        "weights": torch.full((2, count), 0.5),
+    }
+    selected, selection = _validation_selected_component(
+        fixed,
+        mixture,
+        device=torch.device("cpu"),
+    )
+    control = _single_component_control(
+        fixed,
+        mixture,
+        component=selected,
+        device=torch.device("cpu"),
+    )
+    assert selected == 0
+    assert selection["assignment_fraction"] == 1.0
+    assert control["validation_selected_component_nll"] < control["fixed_nll"]
+    assert (
+        control["validation_selected_component_nll"]
+        < control["equal_weight_mixture_nll"]
+    )

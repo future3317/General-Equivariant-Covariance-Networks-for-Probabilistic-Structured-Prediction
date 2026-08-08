@@ -47,6 +47,84 @@ def _prediction(path: Path) -> dict[str, torch.Tensor]:
     return payload
 
 
+def _densities(
+    fixed: dict[str, torch.Tensor],
+    mixture: dict[str, torch.Tensor],
+    *,
+    device: torch.device,
+) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+    target = mixture["target"].to(device)
+    mixture_density = finite_mixture_log_prob(
+        mixture["component_means"].to(device),
+        mixture["component_scales"].to(device),
+        target,
+        distribution="student_t",
+        student_t_dof=5.0,
+        weights=mixture["weights"].to(device),
+    )
+    fixed_density = finite_mixture_log_prob(
+        fixed["mean"].unsqueeze(0).to(device),
+        fixed["scale"].unsqueeze(0).to(device),
+        target,
+        distribution="student_t",
+        student_t_dof=5.0,
+    )
+    return mixture_density, fixed_density
+
+
+def _validation_selected_component(
+    fixed: dict[str, torch.Tensor],
+    mixture: dict[str, torch.Tensor],
+    *,
+    device: torch.device,
+) -> tuple[int, dict[str, Any]]:
+    mixture_density, _ = _densities(fixed, mixture, device=device)
+    responsibilities = mixture_density["responsibilities"].cpu()
+    selected = int(responsibilities.mean(-1).argmax())
+    return selected, {
+        "selection_split": "Side validation only",
+        "component_index": selected,
+        "mean_responsibility": float(responsibilities[selected].mean()),
+        "assignment_fraction": float(
+            (responsibilities.argmax(0) == selected).float().mean()
+        ),
+    }
+
+
+def _single_component_control(
+    fixed: dict[str, torch.Tensor],
+    mixture: dict[str, torch.Tensor],
+    *,
+    component: int,
+    device: torch.device,
+) -> dict[str, float]:
+    mixture_density, fixed_density = _densities(fixed, mixture, device=device)
+    selected_density = finite_mixture_log_prob(
+        mixture["component_means"][component : component + 1].to(device),
+        mixture["component_scales"][component : component + 1].to(device),
+        mixture["target"].to(device),
+        distribution="student_t",
+        student_t_dof=5.0,
+    )
+    mixture_gain = mixture_density["log_prob"] - fixed_density["log_prob"]
+    selected_gain = selected_density["log_prob"] - fixed_density["log_prob"]
+    return {
+        "fixed_nll": float(-fixed_density["log_prob"].mean()),
+        "equal_weight_mixture_nll": float(-mixture_density["log_prob"].mean()),
+        "validation_selected_component_nll": float(
+            -selected_density["log_prob"].mean()
+        ),
+        "mixture_nll_gain_over_fixed": float(mixture_gain.mean()),
+        "selected_component_nll_gain_over_fixed": float(selected_gain.mean()),
+        "selected_component_positive_gain_fraction": float(
+            (selected_gain > 0.0).float().mean()
+        ),
+        "selected_component_nll_minus_mixture_nll": float(
+            (mixture_density["log_prob"] - selected_density["log_prob"]).mean()
+        ),
+    }
+
+
 def _audit_split(
     fixed: dict[str, torch.Tensor],
     mixture: dict[str, torch.Tensor],
@@ -82,25 +160,7 @@ def _audit_split(
             f"E2 mechanism alignment/leakage check failed: {required_equal}"
         )
 
-    means = mixture["component_means"].to(device)
-    scales = mixture["component_scales"].to(device)
-    target = mixture["target"].to(device)
-    weights = mixture["weights"].to(device)
-    mixture_density = finite_mixture_log_prob(
-        means,
-        scales,
-        target,
-        distribution="student_t",
-        student_t_dof=5.0,
-        weights=weights,
-    )
-    fixed_density = finite_mixture_log_prob(
-        fixed["mean"].unsqueeze(0).to(device),
-        fixed["scale"].unsqueeze(0).to(device),
-        target,
-        distribution="student_t",
-        student_t_dof=5.0,
-    )
+    mixture_density, fixed_density = _densities(fixed, mixture, device=device)
     responsibilities = mixture_density["responsibilities"].cpu()
     nll_gain = (mixture_density["log_prob"] - fixed_density["log_prob"]).cpu()
 
@@ -214,18 +274,34 @@ def main() -> None:
         if protocol["selection"]["ood_used_for_selection"]:
             raise ValueError(f"mixture artifact used OOD for selection: {run}")
         name = f"seed_{protocol['seed']}"
+        selected_component, selection_record = _validation_selected_component(
+            _prediction(args.fixed_run / "predictions_val.pt"),
+            _prediction(run / "predictions_val.pt"),
+            device=device,
+        )
         split_results = {}
         for split in ("test", "ood"):
+            fixed = _prediction(args.fixed_run / f"predictions_{split}.pt")
+            mixture = _prediction(run / f"predictions_{split}.pt")
             split_results[split] = _audit_split(
-                _prediction(args.fixed_run / f"predictions_{split}.pt"),
-                _prediction(run / f"predictions_{split}.pt"),
+                fixed,
+                mixture,
                 descriptors[split],
                 device=device,
+            )
+            split_results[split]["validation_selected_single_component_control"] = (
+                _single_component_control(
+                    fixed,
+                    mixture,
+                    component=selected_component,
+                    device=device,
+                )
             )
         record["runs"][name] = {
             "path": str(run.resolve()),
             "checkpoint_sha256": sha256_file(run / "best_model.pt"),
             "selection": protocol["selection"],
+            "dominant_component_selection": selection_record,
             "splits": split_results,
         }
     args.output_dir.mkdir(parents=True)
