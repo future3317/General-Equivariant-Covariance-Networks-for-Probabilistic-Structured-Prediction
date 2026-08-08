@@ -244,3 +244,24 @@ ablation, but cannot by itself explain the observed directional and
 radius-direction failures. A K=2 mixture is therefore the higher-priority E1
 intervention. Do not start E3; E2 must still determine whether ITOP's frozen
 pooled representation contains sufficient observation-ambiguity information.
+
+## E1 result and phase-gate decision
+
+E1 was completed under the frozen-feature/mean controls. The full result matrix,
+artifact hashes, paired three-seed ITOP audit, matched dielectric spectral
+control, and evidence-state separation are recorded in
+`e1_frozen_distribution_results_20260808.md`.
+
+The short conclusion is mixed rather than a general mixture win. Conditional
+nu materially improves dielectric radial fit and exact NLL but leaves the
+directional rejection unchanged; it worsens ITOP held-out scores. Minimal K=2
+shared-scatter mixtures stably improve ITOP exact NLL and projection PIT over
+three offset-training seeds, with nearly neutral Side Energy Score, but do not
+meet the multi-score gate on dielectric. Widening the centered spectral window
+worsens held-out dielectric scores, while unbounded matrix exponential fails
+the FP32 numerical-SPD artifact gate. The spectral window is not supported as
+the principal dielectric cause.
+
+No learned mixture gate, component-specific scatter, Graph-t replication,
+compiler-level public primitive, E2/E3 experiment, or manuscript result update
+was performed in this phase.
