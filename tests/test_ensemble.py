@@ -4,6 +4,7 @@ from evaluation.ensemble import (
     combine_ensemble_moments,
     energy_score_from_samples,
     ensemble_nll,
+    finite_mixture_log_prob,
     finite_mixture_nll,
     sample_ensemble,
     variogram_score,
@@ -103,3 +104,28 @@ def test_finite_mixture_accepts_invariant_sample_weights():
         weights=torch.tensor([[0.1], [0.9]]),
     )
     assert left < right
+
+
+def test_finite_mixture_log_prob_exposes_normalized_posteriors():
+    means = torch.tensor([[[-1.0]], [[1.0]]])
+    scales = torch.ones(2, 1, 1, 1)
+    target = torch.tensor([[0.75]])
+    result = finite_mixture_log_prob(
+        means,
+        scales,
+        target,
+        distribution="student_t",
+        student_t_dof=5.0,
+    )
+    torch.testing.assert_close(result["responsibilities"].sum(0), torch.ones(1))
+    assert result["responsibilities"][1, 0] > result["responsibilities"][0, 0]
+    torch.testing.assert_close(
+        finite_mixture_nll(
+            means,
+            scales,
+            target,
+            distribution="student_t",
+            student_t_dof=5.0,
+        ),
+        -result["log_prob"].mean(),
+    )

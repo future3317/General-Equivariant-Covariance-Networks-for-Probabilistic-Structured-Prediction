@@ -122,7 +122,7 @@ def energy_score_from_samples(
     return (first - 0.5 * pairwise).mean()
 
 
-def finite_mixture_nll(
+def finite_mixture_log_prob(
     means: torch.Tensor,
     scales: torch.Tensor,
     target: torch.Tensor,
@@ -130,12 +130,11 @@ def finite_mixture_nll(
     distribution: str = "gaussian",
     student_t_dof: float | torch.Tensor = 5.0,
     weights: torch.Tensor | None = None,
-) -> torch.Tensor:
-    """Exact finite-mixture NLL without moment matching.
+) -> dict[str, torch.Tensor]:
+    """Exact per-sample finite-mixture log probability and responsibilities.
 
     ``weights`` may be shared ``(M,)`` weights or sample-conditional ``(M,N)``
-    invariant weights.  The existing ensemble API delegates here with uniform
-    weights, so training and evaluation share one logsumexp implementation.
+    invariant weights. No moment matching is performed.
     """
     if means.ndim != 3 or scales.ndim != 4:
         raise ValueError("expected means (M,N,d) and scales (M,N,d,d)")
@@ -174,7 +173,34 @@ def finite_mixture_nll(
         log_weights = weights.log()
         if log_weights.ndim == 1:
             log_weights = log_weights[:, None]
-    return -torch.logsumexp(component_log_prob + log_weights, dim=0).mean()
+    joint_log_prob = component_log_prob + log_weights
+    mixture_log_prob = torch.logsumexp(joint_log_prob, dim=0)
+    return {
+        "log_prob": mixture_log_prob,
+        "component_log_prob": component_log_prob,
+        "responsibilities": torch.softmax(joint_log_prob, dim=0),
+    }
+
+
+def finite_mixture_nll(
+    means: torch.Tensor,
+    scales: torch.Tensor,
+    target: torch.Tensor,
+    *,
+    distribution: str = "gaussian",
+    student_t_dof: float | torch.Tensor = 5.0,
+    weights: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Exact finite-mixture NLL without moment matching."""
+    statistics = finite_mixture_log_prob(
+        means,
+        scales,
+        target,
+        distribution=distribution,
+        student_t_dof=student_t_dof,
+        weights=weights,
+    )
+    return -statistics["log_prob"].mean()
 
 
 def ensemble_nll(
