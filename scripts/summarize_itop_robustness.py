@@ -177,7 +177,7 @@ def main() -> None:
     lines = [
         f"# ITOP {args.model} robustness audit",
         "",
-        "Frozen-backbone head-seed audit; seeds 42, 43, and 44 use the same deterministic backbone and pooled feature cache. Each head uses its own seeded side-train split, sampler, initialization, validation-NLL selection, and complete side/top test prediction artifacts.",
+        "Frozen-backbone head-seed audit; seeds 42, 43, and 44 use the same deterministic backbone and pooled feature cache. Within each seed, the canonical seeded side-train split and sampler law are shared across families; seeds vary the shared split, sampler, and head initialization together. Each head is selected by validation NLL and has complete side/top test prediction artifacts.",
         "",
         "| Metric | Mean $\\pm$ std |",
         "|---|---:|",
