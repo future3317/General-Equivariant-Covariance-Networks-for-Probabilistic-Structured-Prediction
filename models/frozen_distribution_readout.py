@@ -107,6 +107,7 @@ class FrozenConditionalStudentT(torch.nn.Module):
         return {
             "loss": -log_prob.mean(),
             "log_prob": log_prob,
+            "params": params,
             "nu": nu,
             "mahalanobis2": statistics["mahalanobis2"],
             "logdet": statistics["logdet"],

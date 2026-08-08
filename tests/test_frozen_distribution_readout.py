@@ -20,6 +20,13 @@ def test_conditional_nu_is_invariant_and_above_finite_covariance_threshold():
     torch.testing.assert_close(nu, transformed_nu)
     assert bool((nu > 2.0).all())
 
+    mean = torch.randn(7, 3, dtype=torch.float64)
+    target = torch.randn_like(mean)
+    raw = torch.randn(7, 3, 3, dtype=torch.float64)
+    params = 0.5 * (raw + raw.transpose(-1, -2))
+    result = model(features, mean, params, target)
+    torch.testing.assert_close(result["params"], params)
+
 
 def test_symmetric_mixture_means_are_equivariant_and_preserve_frozen_mean():
     torch.manual_seed(3)
