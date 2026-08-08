@@ -286,14 +286,16 @@ def plot_uncertainty_alignment(
     correlation_difference = predicted_corr - residual_corr
     fig = plt.figure(figsize=cm2inch(18.2, 10.4))
     grid = fig.add_gridspec(
-        2,
         3,
-        height_ratios=(1.0, 0.66),
-        hspace=0.54,
+        3,
+        height_ratios=(1.0, 0.055, 0.58),
+        hspace=0.46,
         wspace=0.22,
     )
     heat_axes = [fig.add_subplot(grid[0, index]) for index in range(3)]
-    coverage_axis = fig.add_subplot(grid[1, :])
+    correlation_bar_axis = fig.add_subplot(grid[1, :2])
+    difference_bar_axis = fig.add_subplot(grid[1, 2])
+    coverage_axis = fig.add_subplot(grid[2, :])
     norm = Normalize(vmin=-1.0, vmax=1.0)
     correlation_image = None
     for ax, matrix, title in (
@@ -336,21 +338,15 @@ def plot_uncertainty_alignment(
     heat_axes[2].grid(False)
     correlation_bar = fig.colorbar(
         correlation_image,
-        ax=heat_axes[:2],
-        location="top",
-        shrink=0.72,
-        pad=0.08,
-        aspect=35,
+        cax=correlation_bar_axis,
+        orientation="horizontal",
     )
     correlation_bar.set_label("Correlation", fontsize=8)
     correlation_bar.ax.tick_params(labelsize=7)
     difference_bar = fig.colorbar(
         difference_image,
-        ax=heat_axes[2],
-        location="top",
-        shrink=0.78,
-        pad=0.08,
-        aspect=22,
+        cax=difference_bar_axis,
+        orientation="horizontal",
     )
     difference_bar.set_label("Correlation defect", fontsize=8)
     difference_bar.ax.tick_params(labelsize=7)
@@ -395,12 +391,17 @@ def plot_uncertainty_alignment(
         fontsize=9,
         fontweight="bold",
     )
-    coverage_axis.legend(fontsize=7, loc="lower right", ncol=2)
+    coverage_axis.legend(
+        fontsize=7,
+        loc="lower center",
+        bbox_to_anchor=(0.5, 1.01),
+        ncol=2,
+    )
     coverage_axis.grid(axis="x", alpha=0.25)
     coverage_axis.tick_params(axis="y", length=0)
     for ax in (*heat_axes, coverage_axis):
         ax.tick_params(labelsize=7)
-    fig.subplots_adjust(left=0.08, right=0.99, bottom=0.11, top=0.86)
+    fig.subplots_adjust(left=0.08, right=0.99, bottom=0.11, top=0.96)
     save_figure(fig, save_path)
     plt.close(fig)
 
