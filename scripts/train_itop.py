@@ -52,7 +52,7 @@ from models import (
     EquivariantBackbone,
     StructuredProbabilisticPredictor,
 )
-from representations import O3IrrepsSpec
+from representations import O3IrrepsSpec, certify_numerical_spd
 from scripts._common import add_tensor_product_arguments, tensor_product_kwargs
 from scripts.itop_reproducibility import (
     atomic_write_json,
@@ -538,6 +538,30 @@ def _energy_and_bone_error(
     return score.mean(), bone
 
 
+def _materialize_evaluation_scatter(
+    spd_map,
+    params: torch.Tensor,
+) -> tuple[torch.Tensor, dict[str, object]]:
+    """Materialize a diagnostic scatter matrix without changing the model law.
+
+    ITOP trains and selects checkpoints with FP32 operator/NLL algebra.  Dense
+    diagnostic sampling, however, must not confuse reconstruction error of an
+    ill-conditioned matrix exponential in FP32 with a change to the compiled
+    SPD distribution.  Re-applying the same frozen FP32 generator in FP64 is
+    an evaluation-dtype audit, not a repair: no eigenvalue clipping or jitter
+    is introduced, and a numerically marginal FP64 result is rejected.
+    """
+    scale = spd_map(params.detach().double())
+    _require_finite_tensor("evaluation FP64 scale", scale)
+    certificate = certify_numerical_spd(scale, dtype=torch.float64)
+    if not certificate.strict:
+        raise FloatingPointError(
+            "evaluation scatter failed the FP64 numerical SPD certificate: "
+            f"{certificate.as_dict()}"
+        )
+    return scale, certificate.as_dict()
+
+
 @torch.inference_mode()
 def evaluate(
     model,
@@ -564,6 +588,7 @@ def evaluate(
     frame_indices: list[torch.Tensor] = []
     view_ids: list[torch.Tensor] = []
     component_totals: defaultdict[str, float] = defaultdict(float)
+    scale_certificates: list[dict[str, object]] = []
     is_student = model_kind.endswith("_student_t")
 
     for batch in tqdm(loader, desc="evaluate", leave=False):
@@ -593,14 +618,18 @@ def evaluate(
             _require_finite_tensor(f"evaluation component {name}", value)
             component_totals[name] += float(value) * batch_size
         count += batch_size
-        means.append(result["mu"].float().cpu())
-        targets.append(target_batch.cpu())
+        mean = result["mu"].detach().double()
+        target = target_batch.detach().double()
+        means.append(mean.cpu())
+        targets.append(target.cpu())
         visibility.append(visible_batch.cpu())
         frame_indices.append(_batch_field(batch, "frame_index").cpu())
         view_ids.append(_batch_field(batch, "view_id").cpu())
         if detailed and model_kind != "deterministic":
-            scatter = result["scale"].float()
-            _require_finite_tensor("evaluation scale", scatter)
+            scatter, scale_certificate = _materialize_evaluation_scatter(
+                model.spd_map, result["params"]
+            )
+            scale_certificates.append(scale_certificate)
             covariance = (
                 (student_t_dof / (student_t_dof - 2.0)) * scatter
                 if is_student
@@ -609,14 +638,16 @@ def evaluate(
             scatters.append(scatter.cpu())
             covariances.append(covariance.cpu())
             parameters.append(result["params"].float().cpu())
-            residual = target_batch - result["mu"].float()
+            residual = target - mean
             frame_mahalanobis.append(
-                model.spd_map.precision_action(result["params"].float(), residual).cpu()
+                model.spd_map.precision_action(
+                    result["params"].detach().double(), residual
+                ).cpu()
             )
             energy, bone = _energy_and_bone_error(
-                result["mu"].float(),
+                mean,
                 scatter,
-                target_batch,
+                target,
                 samples=32,
                 student_t_dof=student_t_dof if is_student else None,
             )
@@ -705,12 +736,29 @@ def evaluate(
     artifact.update(
         {
             "params": torch.cat(parameters),
+            "scale": scatter,
             "frame_uncertainty": frame_uncertainty,
             "joint_uncertainty": joint_uncertainty,
             "frame_mahalanobis2": frame_maha2,
             "joint_mahalanobis2": joint_maha2,
         }
     )
+    metrics["scale_materialization"] = {
+        "dtype": "float64",
+        "generator_dtype": "float32",
+        "policy": "reject_if_not_strict",
+        "batches": len(scale_certificates),
+        "minimum_eigenvalue": min(
+            float(certificate["minimum_eigenvalue"])
+            for certificate in scale_certificates
+        ),
+        "maximum_scale": max(
+            float(certificate["scale"]) for certificate in scale_certificates
+        ),
+        "maximum_threshold": max(
+            float(certificate["threshold"]) for certificate in scale_certificates
+        ),
+    }
     return metrics, artifact
 
 

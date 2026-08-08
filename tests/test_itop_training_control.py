@@ -25,6 +25,7 @@ from scripts.train_itop import (
     _configure_initialization,
     _freeze_record,
     _load_checkpoint,
+    _materialize_evaluation_scatter,
     _restore_rng_state,
     _save_checkpoint,
     _set_loader_epoch,
@@ -32,6 +33,7 @@ from scripts.train_itop import (
     _update_early_stopping,
     train_epoch,
 )
+from spd_maps import MatrixExponentialMap
 
 
 class _NonFiniteGradient(torch.autograd.Function):
@@ -137,6 +139,19 @@ def test_early_stopping_tracks_improvement_and_rejects_nan():
     assert (best, stale, improved) == (2.9, 0, True)
     with pytest.raises(FloatingPointError, match="validation criterion"):
         _update_early_stopping(float("nan"), best, stale)
+
+
+def test_itop_evaluation_materializes_frozen_generator_in_fp64_without_repair():
+    params = torch.diag_embed(torch.tensor([[0.0, -4.0, 3.0]], dtype=torch.float32))
+    scale, certificate = _materialize_evaluation_scatter(MatrixExponentialMap(), params)
+    assert scale.dtype == torch.float64
+    assert certificate["dtype"] == "float64"
+    assert certificate["policy"] == "reject_if_not_strict"
+    assert certificate["strict"] is True
+    torch.testing.assert_close(
+        scale,
+        torch.diag_embed(torch.exp(params.double().diagonal(dim1=-2, dim2=-1))),
+    )
 
 
 def test_training_sample_order_is_seed_and_epoch_addressable():
