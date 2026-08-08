@@ -15,7 +15,7 @@ import torch
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
-from matplotlib.patches import Ellipse, Patch
+from matplotlib.patches import Ellipse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -177,28 +177,13 @@ def _bootstrap_distance_intervals(
     return np.percentile(values, 2.5, axis=0), np.percentile(values, 97.5, axis=0)
 
 
-def _representative_frame(side: dict, top: dict) -> tuple[int, int]:
-    """Select a deterministic paired frame with maximal top-view visibility."""
-    side_lookup = {
-        int(frame): index for index, frame in enumerate(side["frame_index"].tolist())
-    }
-    common = [
-        (side_lookup[int(frame)], top_index)
-        for top_index, frame in enumerate(top["frame_index"].tolist())
-        if int(frame) in side_lookup
-    ]
-    if not common:
-        raise ValueError("side and top predictions have no common frame identifiers")
-    visible = np.asarray(
-        [int(top["visible_joints"][top_index].sum()) for _, top_index in common]
-    )
+def _representative_side_frame(prediction: dict) -> int:
+    """Select an IID exemplar without using its error or target geometry."""
+    visible = prediction["visible_joints"].sum(dim=1).numpy()
     candidates = np.flatnonzero(visible == visible.max())
-    uncertainty = np.asarray(
-        [float(top["frame_uncertainty"][common[index][1]]) for index in candidates]
-    )
+    uncertainty = prediction["frame_uncertainty"][candidates].numpy()
     median = float(np.median(uncertainty))
-    selected = int(candidates[np.argmin(np.abs(uncertainty - median))])
-    return common[selected]
+    return int(candidates[np.argmin(np.abs(uncertainty - median))])
 
 
 def _graph_spd_map(root: Path):
@@ -356,6 +341,78 @@ def _plot_pose_distribution(
         fontsize=7,
         color=COLORS["dark_gray"],
     )
+
+
+def _plot_observation_shift(axis, side: dict, top: dict) -> None:
+    """Show aggregate visibility and error shifts without a misleading pose overlay."""
+    samples = (
+        (
+            "Side IID",
+            COLORS["blue_main"],
+            side["visible_joints"].sum(dim=1).numpy(),
+            side["joint_errors"].float().mean(dim=-1).numpy() * 100.0,
+        ),
+        (
+            "Top OOD",
+            COLORS["red_strong"],
+            top["visible_joints"].sum(dim=1).numpy(),
+            top["joint_errors"].float().mean(dim=-1).numpy() * 100.0,
+        ),
+    )
+    visibility_axis, error_axis = axis
+    rng = np.random.default_rng(42)
+    for panel, value_index, ylabel, ylim in (
+        (visibility_axis, 2, "Visible joints (of 15)", (0.0, 15.6)),
+        (error_axis, 3, "Frame mean joint error (cm)", None),
+    ):
+        values = [sample[value_index] for sample in samples]
+        boxes = panel.boxplot(
+            values,
+            positions=(0, 1),
+            widths=0.48,
+            patch_artist=True,
+            showfliers=False,
+            medianprops={"color": COLORS["dark_gray"], "linewidth": 1.5},
+            whiskerprops={"color": COLORS["dark_gray"], "linewidth": 1.0},
+            capprops={"color": COLORS["dark_gray"], "linewidth": 1.0},
+        )
+        for box, (_, color, *_rest) in zip(boxes["boxes"], samples):
+            box.set(facecolor=color, alpha=0.26, edgecolor=color, linewidth=1.25)
+        for xpos, (_, color, *rest) in enumerate(samples):
+            values_for_model = rest[value_index - 2]
+            count = min(420, len(values_for_model))
+            indices = rng.choice(len(values_for_model), size=count, replace=False)
+            jitter = rng.uniform(-0.16, 0.16, size=count)
+            panel.scatter(
+                np.full(count, xpos) + jitter,
+                values_for_model[indices],
+                s=5.5,
+                color=color,
+                alpha=0.12,
+                linewidths=0,
+                zorder=1,
+            )
+            median = float(np.median(values_for_model))
+            panel.annotate(
+                f"median {median:.0f}" if value_index == 2 else f"median {median:.1f}",
+                (xpos, median),
+                xytext=(0, 5),
+                textcoords="offset points",
+                ha="center",
+                va="bottom",
+                fontsize=6.2,
+                color=color,
+                fontweight="bold",
+            )
+        panel.set_xlim(-0.55, 1.55)
+        panel.set_xticks((0, 1), ("Side", "Top"))
+        panel.set_ylabel(ylabel)
+        if ylim is not None:
+            panel.set_ylim(ylim)
+        panel.grid(axis="y", alpha=0.18)
+    error_upper = max(float(np.max(sample[3])) for sample in samples)
+    error_axis.set_ylim(0.0, 10.0 * np.ceil((error_upper + 1.0) / 10.0))
+    visibility_axis.set_title("(b) Observation shift", loc="left", fontweight="bold")
 
 
 def _marker_area(model: str) -> float:
@@ -600,7 +657,7 @@ def plot_structure(root: Path, output: Path) -> None:
     top_prediction = torch.load(
         model_root / "predictions_top.pt", map_location="cpu", weights_only=True
     )
-    side_index, top_index = _representative_frame(side_prediction, top_prediction)
+    side_index = _representative_side_frame(side_prediction)
     mapping = _graph_spd_map(root)
     fig = plt.figure(figsize=cm2inch(18.0, 12.3))
     grid = fig.add_gridspec(
@@ -610,41 +667,22 @@ def plot_structure(root: Path, output: Path) -> None:
         hspace=0.20,
         wspace=0.25,
     )
-    pose_axes = (fig.add_subplot(grid[0, 0]), fig.add_subplot(grid[0, 1]))
+    pose_axis = fig.add_subplot(grid[0, 0])
+    observation_grid = grid[0, 1].subgridspec(1, 2, wspace=0.42)
+    observation_axes = (
+        fig.add_subplot(observation_grid[0, 0]),
+        fig.add_subplot(observation_grid[0, 1]),
+    )
     diagnostic_axes = (fig.add_subplot(grid[1, 0]), fig.add_subplot(grid[1, 1]))
     _plot_pose_distribution(
-        pose_axes[0],
+        pose_axis,
         side_prediction,
         side_index,
         mapping=mapping,
         color=COLORS["blue_main"],
         title="(a) Side IID predictive pose",
     )
-    _plot_pose_distribution(
-        pose_axes[1],
-        top_prediction,
-        top_index,
-        mapping=mapping,
-        color=COLORS["red_strong"],
-        title="(b) Top OOD predictive pose",
-    )
-    pose_handles = (
-        Line2D([], [], color=COLORS["dark_gray"], linewidth=2, label="Mean; edge width = relational precision"),
-        Line2D([], [], color=COLORS["gray"], linestyle="--", linewidth=1, label="Target"),
-        Patch(facecolor=COLORS["dark_gray"], alpha=0.16, label="50% Student-t scatter ellipse"),
-        Line2D([], [], marker="o", linestyle="none", markerfacecolor=COLORS["dark_gray"], markeredgecolor="white", label="Visible joint"),
-        Line2D([], [], marker="o", linestyle="none", markerfacecolor="white", markeredgecolor=COLORS["dark_gray"], label="Occluded joint"),
-    )
-    fig.legend(
-        handles=pose_handles,
-        loc="upper center",
-        bbox_to_anchor=(0.5, 0.865),
-        fontsize=6.3,
-        handlelength=1.5,
-        ncol=5,
-        columnspacing=1.1,
-        frameon=False,
-    )
+    _plot_observation_shift(observation_axes, side_prediction, top_prediction)
     for view, color, label in (
         ("side", COLORS["blue_main"], "Side IID"),
         ("top", COLORS["red_strong"], "Top OOD"),
@@ -714,17 +752,8 @@ def plot_structure(root: Path, output: Path) -> None:
         min(0.0, float(np.nanmin(lower)) - 1.0),
         float(np.nanmax(upper)) + 1.0,
     )
-    handles, labels = diagnostic_axes[1].get_legend_handles_labels()
-    fig.legend(
-        handles,
-        labels,
-        loc="upper center",
-        bbox_to_anchor=(0.5, 0.995),
-        ncol=2,
-        handlelength=2.0,
-        columnspacing=1.8,
-    )
-    fig.subplots_adjust(left=0.10, right=0.99, bottom=0.10, top=0.90)
+    diagnostic_axes[1].legend(loc="lower left", fontsize=6.8, handlelength=2.0)
+    fig.subplots_adjust(left=0.10, right=0.99, bottom=0.10, top=0.92)
     save_figure(fig, output / "itop_final_structure", formats=("pdf", "png"))
     plt.close(fig)
 
