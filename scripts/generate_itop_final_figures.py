@@ -36,10 +36,10 @@ MODEL_LABELS = {
 METHOD_COLORS = {
     "deterministic": COLORS["dark_gray"],
     "frozen_full_student_t": COLORS["violet"],
-    "frozen_independent_gaussian": COLORS["red_strong"],
-    "frozen_independent_student_t": COLORS["red_strong"],
+    "frozen_independent_gaussian": COLORS["gray"],
+    "frozen_independent_student_t": COLORS["gray"],
     "frozen_low_rank_student_t": COLORS["teal"],
-    "frozen_graph_gaussian": COLORS["blue_main"],
+    "frozen_graph_gaussian": COLORS["gray"],
     "frozen_graph_student_t": COLORS["blue_main"],
 }
 
@@ -409,7 +409,7 @@ def _plot_observation_shift(axis, side: dict, top: dict) -> None:
         panel.set_ylabel(ylabel)
         if ylim is not None:
             panel.set_ylim(ylim)
-        panel.grid(axis="y", alpha=0.18)
+        panel.grid(False)
     error_upper = max(float(np.max(sample[3])) for sample in samples)
     error_axis.set_ylim(0.0, 10.0 * np.ceil((error_upper + 1.0) / 10.0))
     visibility_axis.set_title("(b) Observation shift", loc="left", fontweight="bold")
@@ -440,10 +440,86 @@ def _load_robustness(specifications: list[str]) -> dict[str, dict]:
     return records
 
 
+def _load_runtime(path: Path) -> dict:
+    """Load the measured, frozen-head cost audit used in the ITOP figure."""
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("kind") != "itop_frozen_head_family_runtime_audit":
+        raise ValueError(f"{path}: not an ITOP frozen-head runtime audit")
+    rows = payload.get("rows")
+    if not isinstance(rows, dict) or set(rows) != set(ROBUSTNESS_MODELS):
+        raise ValueError(f"{path}: incomplete Full-t/LR-t/Graph-t runtime rows")
+    return rows
+
+
+def _plot_runtime(axis, runtime: dict) -> None:
+    """Plot measured per-batch NLL cost without implying end-to-end speed."""
+    models = tuple(ROBUSTNESS_MODELS)
+    coordinates = np.asarray([runtime[model]["active_coordinates"] for model in models])
+    positions = np.arange(len(models))
+    medians = np.asarray(
+        [runtime[model]["timings"]["nll_evaluation"]["median_ms"] for model in models]
+    )
+    q1 = np.asarray(
+        [runtime[model]["timings"]["nll_evaluation"]["q1_ms"] for model in models]
+    )
+    q3 = np.asarray(
+        [runtime[model]["timings"]["nll_evaluation"]["q3_ms"] for model in models]
+    )
+    for model, x_value, coordinate, y_value, low, high in zip(
+        models, positions, coordinates, medians, q1, q3
+    ):
+        frozen_name = ROBUSTNESS_MODELS[model]
+        color = METHOD_COLORS[frozen_name]
+        backward = runtime[model]["timings"]["forward_backward"]["median_ms"]
+        peak_memory = runtime[model]["timings"]["forward_backward"][
+            "peak_allocated_mb"
+        ]
+        axis.errorbar(
+            x_value,
+            y_value,
+            yerr=np.asarray([[y_value - low], [high - y_value]]),
+            color=color,
+            fmt="o",
+            markersize=7,
+            capsize=2.5,
+            linewidth=1.4,
+            markeredgecolor="white",
+            markeredgewidth=0.8,
+            zorder=3,
+        )
+        axis.annotate(
+            f"{MODEL_LABELS[frozen_name]}\n"
+            f"{coordinate:,} coords\n"
+            f"backward {backward:.1f} ms\n{peak_memory:.1f} MB",
+            (x_value, y_value),
+            xytext=(5, 5),
+            textcoords="offset points",
+            fontsize=6.3,
+            color=COLORS["dark_gray"],
+            va="bottom",
+        )
+    axis.set_xticks(positions, [MODEL_LABELS[ROBUSTNESS_MODELS[model]] for model in models])
+    axis.set_xlim(-0.30, len(models) - 0.70)
+    axis.set_ylim(0.0, max(float(q3.max()) * 1.25, 15.5))
+    axis.set_xlabel("Student-$t$ covariance family")
+    axis.set_ylabel("Proper-NLL evaluation (ms / batch)")
+    axis.set_title("Frozen-head execution cost", loc="left", fontweight="bold", fontsize=9)
+    axis.grid(False)
+    axis.text(
+        0.0,
+        -0.30,
+        "Markers: median; bars: IQR; labels: backward median / peak allocated memory.",
+        transform=axis.transAxes,
+        fontsize=5.8,
+        color=COLORS["dark_gray"],
+    )
+
+
 def plot_overview(
     root: Path,
     output: Path,
     robustness: dict[str, dict],
+    runtime: dict,
 ) -> None:
     setup_tpami_style()
     seed_root = _seed_root(root)
@@ -516,7 +592,7 @@ def plot_overview(
     axis.set_xlabel("Side IID proper NLL")
     axis.set_ylabel("Top OOD proper NLL (log scale)")
     axis.set_title("Proper-score trade-off", loc="left", fontweight="bold")
-    axis.grid(which="major", alpha=0.65)
+    axis.grid(False)
     distribution_handles = (
         Line2D(
             [], [], marker="o", color="none", markerfacecolor=COLORS["dark_gray"],
@@ -564,81 +640,60 @@ def plot_overview(
         borderpad=0.4,
     )
 
-    auroc_models = tuple(
-        model
-        for model in probabilistic_models
-        if np.isfinite(records[model]["ood"].get("side_top_uncertainty_auroc", np.nan))
-    )
-    y = np.arange(len(auroc_models))[::-1]
-    axis = axes[1]
-    axis.axvline(
-        0.5,
-        color=COLORS["dark_gray"],
-        linestyle="--",
-        linewidth=1.0,
-    )
-    for model, value, ypos in zip(
-        auroc_models,
-        (
-            robustness[model]["side_top_uncertainty_auroc"]["mean"]
-            if model in robustness
-            else records[model]["ood"]["side_top_uncertainty_auroc"]
-            for model in auroc_models
-        ),
-        y,
-    ):
-        color = METHOD_COLORS[model]
-        robust = robustness.get(model)
-        if robust is not None:
-            seed_values = robust["side_top_uncertainty_auroc"]["values"]
-            axis.scatter(
-                seed_values,
-                np.full(len(seed_values), ypos),
-                color=color,
-                alpha=0.28,
-                edgecolor="none",
-                s=22,
-                zorder=2,
-            )
-            axis.errorbar(
-                value,
-                ypos,
-                xerr=robust["side_top_uncertainty_auroc"]["std"],
-                fmt="none",
-                ecolor=color,
-                elinewidth=1.4,
-                capsize=2.5,
-                zorder=2,
-            )
-        axis.hlines(ypos, 0.5, value, color=color, linewidth=2.1, alpha=0.85, zorder=2)
-        axis.scatter(
-            value,
-            ypos,
-            color=color,
-            edgecolor="white",
-            linewidth=0.7,
-            s=43,
-            zorder=3,
-        )
-        axis.annotate(
-            f"{value:.3f}",
-            (value, ypos),
-            xytext=(4, 0),
-            textcoords="offset points",
-            ha="left",
-            va="center",
-            fontsize=7.2,
-            color=color,
-        )
-    axis.set_xlim(0, 1.06)
-    axis.set_yticks(y, [MODEL_LABELS[model] for model in auroc_models])
-    axis.set_xlabel("Side/top uncertainty AUROC")
-    axis.set_title("Head-seed OOD sensitivity", loc="left", fontweight="bold")
-    axis.grid(axis="x", alpha=0.65)
-    axis.tick_params(axis="y", length=0)
+    _plot_runtime(axes[1], runtime)
     fig.subplots_adjust(left=0.14, right=0.99, bottom=0.20, top=0.86, wspace=0.35)
     save_figure(fig, output / "itop_final_overview", formats=("pdf", "png"))
     plt.close(fig)
+
+
+def _plot_visibility_alignment(axis, side: dict, top: dict) -> None:
+    """Diagnose the error/scatter failure by observation visibility."""
+    groups = (
+        ("Side visible", side, True, COLORS["blue_main"]),
+        ("Side occluded", side, False, COLORS["blue_main"]),
+        ("Top visible", top, True, COLORS["red_strong"]),
+        ("Top occluded", top, False, COLORS["red_strong"]),
+    )
+    errors = []
+    uncertainties = []
+    labels = []
+    colors = []
+    for label, payload, visible, color in groups:
+        mask = payload["visible_joints"].numpy() == visible
+        errors.append(payload["joint_errors"].float().numpy()[mask] * 100.0)
+        uncertainties.append(payload["joint_uncertainty"].float().numpy()[mask])
+        labels.append(label.replace(" ", "\n"))
+        colors.append(color)
+    error_axis, scatter_axis = axis
+    for panel, values, ylabel in (
+        (error_axis, errors, "Joint error (cm)"),
+        (scatter_axis, uncertainties, "Predicted joint scatter"),
+    ):
+        boxes = panel.boxplot(
+            values,
+            positions=np.arange(len(values)),
+            widths=0.55,
+            patch_artist=True,
+            showfliers=False,
+            medianprops={"color": COLORS["dark_gray"], "linewidth": 1.3},
+            whiskerprops={"color": COLORS["dark_gray"], "linewidth": 0.9},
+            capprops={"color": COLORS["dark_gray"], "linewidth": 0.9},
+        )
+        for box, color, label in zip(boxes["boxes"], colors, labels):
+            box.set(
+                facecolor=color,
+                alpha=0.20 if "visible" in label else 0.50,
+                edgecolor=color,
+                linewidth=1.1,
+            )
+        panel.set_xticks(np.arange(len(values)), labels, fontsize=6.0)
+        panel.set_ylabel(ylabel)
+        panel.grid(False)
+    error_axis.set_ylim(0.0, 145.0)
+    scatter_axis.set_yscale("log")
+    scatter_axis.set_ylim(0.01, 1.3)
+    error_axis.set_title("(d) Joint error", loc="left", fontweight="bold", fontsize=8.5)
+    scatter_axis.set_title("Predicted scatter", loc="left", fontweight="bold", fontsize=8.5)
 
 
 def plot_structure(root: Path, output: Path) -> None:
@@ -713,46 +768,19 @@ def plot_structure(root: Path, output: Path) -> None:
         )
     diagnostic_axes[0].set_xlabel("Skeleton graph distance")
     diagnostic_axes[0].set_ylabel("Residual correlation")
-    diagnostic_axes[0].set_title("(c) Structured residual dependence", loc="left", fontweight="bold")
+    diagnostic_axes[0].set_title("(c) Residual dependence", loc="left", fontweight="bold", fontsize=8.5)
     diagnostic_axes[0].set_ylim(-0.05, 0.95)
     diagnostic_axes[0].set_xticks(
         distance_values, [f"{d}\n(n={counts[d]})" for d in distance_values]
     )
-    fractions = np.linspace(0.1, 1.0, 10)
-    for view, color, label in (
-        ("side", COLORS["blue_main"], "Side IID"),
-        ("top", COLORS["red_strong"], "Top OOD"),
-    ):
-        payload = torch.load(model_root / f"predictions_{view}.pt", map_location="cpu", weights_only=True)
-        uncertainty = payload["frame_uncertainty"].numpy()
-        error = payload["joint_errors"].float().mean(dim=-1).numpy() * 100.0
-        curve = _risk_curve(uncertainty, error, fractions)
-        lower, upper = _bootstrap_risk_band(uncertainty, error, fractions)
-        diagnostic_axes[1].plot(
-            fractions * 100,
-            curve,
-            "o-",
-            color=color,
-            linewidth=1.8,
-            markersize=4.5,
-            label=label,
-        )
-        diagnostic_axes[1].fill_between(
-            fractions * 100,
-            lower,
-            upper,
-            color=color,
-            alpha=0.16,
-            linewidth=0,
-        )
-    diagnostic_axes[1].set_xlabel("Retained coverage (%)")
-    diagnostic_axes[1].set_ylabel("Mean joint error (cm)")
-    diagnostic_axes[1].set_title("(d) Selective risk (95% bootstrap)", loc="left", fontweight="bold")
-    diagnostic_axes[1].set_ylim(
-        min(0.0, float(np.nanmin(lower)) - 1.0),
-        float(np.nanmax(upper)) + 1.0,
+    diagnostic_axes[0].grid(False)
+    alignment_grid = grid[1, 1].subgridspec(1, 2, wspace=0.42)
+    alignment_axes = (
+        fig.add_subplot(alignment_grid[0, 0]),
+        fig.add_subplot(alignment_grid[0, 1]),
     )
-    diagnostic_axes[1].legend(loc="lower left", fontsize=6.8, handlelength=2.0)
+    diagnostic_axes[1].remove()
+    _plot_visibility_alignment(alignment_axes, side_prediction, top_prediction)
     fig.subplots_adjust(left=0.10, right=0.99, bottom=0.10, top=0.92)
     save_figure(fig, output / "itop_final_structure", formats=("pdf", "png"))
     plt.close(fig)
@@ -772,9 +800,16 @@ def main() -> None:
             "full_student_t, low_rank_student_t, graph_student_t"
         ),
     )
+    parser.add_argument(
+        "--runtime",
+        type=Path,
+        required=True,
+        help="benchmark_itop_family_runtime JSON for Full-t/LR-t/Graph-t",
+    )
     args = parser.parse_args()
     robustness = _load_robustness(args.robustness)
-    plot_overview(args.results, args.output, robustness)
+    runtime = _load_runtime(args.runtime)
+    plot_overview(args.results, args.output, robustness, runtime)
     plot_structure(args.results, args.output)
     print(f"ITOP final figures written to {args.output}")
 
