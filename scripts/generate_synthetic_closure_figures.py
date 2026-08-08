@@ -9,6 +9,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.colors import LogNorm
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -29,10 +30,81 @@ LABELS = {
 }
 
 
+def plot_cross_family_recovery(input_path: Path, output_path: Path) -> None:
+    """Render the controlled teacher/learner matrix as a log-scaled heatmap."""
+    data = json.loads(input_path.read_text(encoding="utf-8"))
+    families = data["matrix_families"]
+    rows = data["rows"]
+    means = np.empty((len(families), len(families)), dtype=float)
+    stds = np.empty_like(means)
+    for teacher_index, teacher in enumerate(families):
+        for learner_index, learner in enumerate(families):
+            values = [
+                float(row["covariance_relative_error"])
+                for row in rows
+                if row["teacher_family"] == teacher
+                and row["learner_family"] == learner
+            ]
+            if len(values) != 3:
+                raise ValueError(
+                    f"expected three seeds for {teacher}->{learner}, got {len(values)}"
+                )
+            means[teacher_index, learner_index] = np.mean(values)
+            stds[teacher_index, learner_index] = np.std(values, ddof=1)
+
+    setup_tpami_style()
+    fig, axis = plt.subplots(figsize=cm2inch(11.8, 8.8))
+    lower = max(float(means.min()) * 0.75, np.finfo(float).tiny)
+    upper = float(means.max()) * 1.08
+    image = axis.imshow(
+        means,
+        cmap="magma",
+        norm=LogNorm(vmin=lower, vmax=upper),
+        aspect="equal",
+    )
+    labels = [LABELS[family] for family in families]
+    axis.set_xticks(np.arange(len(families)), labels)
+    axis.set_yticks(np.arange(len(families)), labels)
+    axis.set_xlabel("Learner family")
+    axis.set_ylabel("Teacher family")
+    axis.set_title("Family match controls scatter recovery", loc="left", fontweight="bold")
+    axis.grid(False)
+    for row_index in range(len(families)):
+        for column_index in range(len(families)):
+            value = means[row_index, column_index]
+            text_color = "white" if value < 0.08 else "#20242A"
+            axis.text(
+                column_index,
+                row_index,
+                f"{value:.3f}\n$\\pm${stds[row_index, column_index]:.3f}",
+                ha="center",
+                va="center",
+                color=text_color,
+                fontsize=8.2,
+                fontweight="bold" if row_index == column_index else "normal",
+            )
+    colorbar = fig.colorbar(image, ax=axis, fraction=0.052, pad=0.05)
+    colorbar.set_label("Relative scatter error (log scale)")
+    axis.tick_params(length=0)
+    fig.subplots_adjust(left=0.20, right=0.88, bottom=0.16, top=0.88)
+    save_figure(fig, output_path)
+    plt.close(fig)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--cross-family-input",
+        type=Path,
+        help="Optional cross-family recovery JSON produced by the same benchmark.",
+    )
+    parser.add_argument(
+        "--cross-family-output",
+        type=Path,
+        help="Output basename for the optional cross-family heatmap.",
+    )
     args = parser.parse_args()
     data = json.loads(args.input.read_text(encoding="utf-8"))
     rows = data["rows"]
@@ -90,6 +162,15 @@ def main() -> None:
     fig.tight_layout(rect=(0.06, 0.06, 1, 0.96))
     save_figure(fig, args.output)
     plt.close(fig)
+    if (args.cross_family_input is None) != (args.cross_family_output is None):
+        parser.error(
+            "--cross-family-input and --cross-family-output must be provided together"
+        )
+    if args.cross_family_input is not None:
+        plot_cross_family_recovery(
+            args.cross_family_input,
+            args.cross_family_output,
+        )
 
 
 if __name__ == "__main__":

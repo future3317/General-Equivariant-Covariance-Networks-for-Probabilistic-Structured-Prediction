@@ -32,9 +32,9 @@ METHOD_COLORS = {
     "deterministic": COLORS["dark_gray"],
     "frozen_full_student_t": COLORS["violet"],
     "frozen_independent_gaussian": COLORS["red_strong"],
-    "frozen_independent_student_t": COLORS["red_2"],
+    "frozen_independent_student_t": COLORS["red_strong"],
     "frozen_low_rank_student_t": COLORS["teal"],
-    "frozen_graph_gaussian": COLORS["green_3"],
+    "frozen_graph_gaussian": COLORS["blue_main"],
     "frozen_graph_student_t": COLORS["blue_main"],
 }
 
@@ -45,6 +45,12 @@ ACTIVE_COORDS = {
     "frozen_low_rank_student_t": 181,
     "frozen_graph_gaussian": 174,
     "frozen_graph_student_t": 174,
+}
+
+ROBUSTNESS_MODELS = {
+    "full_student_t": "frozen_full_student_t",
+    "low_rank_student_t": "frozen_low_rank_student_t",
+    "graph_student_t": "frozen_graph_student_t",
 }
 
 
@@ -162,7 +168,36 @@ def _bootstrap_distance_intervals(
     return np.percentile(values, 2.5, axis=0), np.percentile(values, 97.5, axis=0)
 
 
-def plot_overview(root: Path, output: Path) -> None:
+def _marker_area(model: str) -> float:
+    return 34 + 2.2 * np.sqrt(ACTIVE_COORDS[model])
+
+
+def _load_robustness(specifications: list[str]) -> dict[str, dict]:
+    records = {}
+    for specification in specifications:
+        try:
+            model, path_text = specification.split("=", 1)
+        except ValueError as error:
+            raise ValueError(
+                f"invalid --robustness specification: {specification}"
+            ) from error
+        if model not in ROBUSTNESS_MODELS:
+            raise ValueError(f"unsupported robustness model: {model}")
+        payload = json.loads(Path(path_text).read_text(encoding="utf-8"))
+        payload_model = payload.get("model")
+        if payload_model is not None and payload_model != model:
+            raise ValueError(
+                f"robustness file identifies {payload_model}, expected {model}"
+            )
+        records[ROBUSTNESS_MODELS[model]] = payload["aggregate"]
+    return records
+
+
+def plot_overview(
+    root: Path,
+    output: Path,
+    robustness: dict[str, dict],
+) -> None:
     setup_tpami_style()
     seed_root = _seed_root(root)
     models = tuple(
@@ -183,13 +218,35 @@ def plot_overview(root: Path, output: Path) -> None:
     )
     axis = axes[0]
     for model in probabilistic_models:
-        side_nll = records[model]["side"]["nll"]
-        top_nll = records[model]["top"]["nll"]
+        robust = robustness.get(model)
+        side_nll = (
+            robust["side_nll"]["mean"]
+            if robust is not None
+            else records[model]["side"]["nll"]
+        )
+        top_nll = (
+            robust["top_nll"]["mean"]
+            if robust is not None
+            else records[model]["top"]["nll"]
+        )
         is_gaussian = "gaussian" in model
+        if robust is not None:
+            axis.errorbar(
+                side_nll,
+                top_nll,
+                xerr=robust["side_nll"]["std"],
+                yerr=robust["top_nll"]["std"],
+                fmt="none",
+                ecolor=METHOD_COLORS[model],
+                elinewidth=1.3,
+                capsize=2.5,
+                alpha=0.9,
+                zorder=2,
+            )
         axis.scatter(
             side_nll,
             top_nll,
-            s=34 + 2.2 * np.sqrt(ACTIVE_COORDS[model]),
+            s=_marker_area(model),
             marker="s" if is_gaussian else "o",
             color=METHOD_COLORS[model],
             edgecolor="white",
@@ -206,14 +263,14 @@ def plot_overview(root: Path, output: Path) -> None:
             fontweight="bold",
         )
     axis.set_yscale("log")
-    axis.set_xlim(-77, -13)
+    axis.set_xlim(-88, -13)
     axis.set_ylim(1.8, 1500)
     axis.set_yticks((2, 10, 50, 200, 1000), ("2", "10", "50", "200", "1000"))
     axis.set_xlabel("Side IID proper NLL")
     axis.set_ylabel("Top OOD proper NLL (log scale)")
     axis.set_title("Proper-score trade-off", loc="left", fontweight="bold")
     axis.grid(which="major", alpha=0.65)
-    family_handles = (
+    distribution_handles = (
         Line2D(
             [], [], marker="o", color="none", markerfacecolor=COLORS["dark_gray"],
             markeredgecolor="white", markersize=5, label="Student-$t$",
@@ -224,11 +281,37 @@ def plot_overview(root: Path, output: Path) -> None:
         ),
     )
     axis.legend(
-        handles=family_handles,
-        title=r"Family (area $\propto$ coordinates)",
-        loc="lower right",
+        handles=distribution_handles,
+        title="Distribution",
+        loc="upper left",
         fontsize=6.5,
         title_fontsize=6.5,
+        frameon=True,
+        handletextpad=0.4,
+        borderpad=0.4,
+    )
+    distribution_legend = axis.get_legend()
+    coordinate_handles = tuple(
+        Line2D(
+            [],
+            [],
+            marker="o",
+            linestyle="none",
+            color="none",
+            markerfacecolor=COLORS["neutral"],
+            markeredgecolor="white",
+            markersize=np.sqrt(34 + 2.2 * np.sqrt(coordinates)),
+            label=f"{coordinates:,}",
+        )
+        for coordinates in (90, 174, 1035)
+    )
+    axis.add_artist(distribution_legend)
+    axis.legend(
+        handles=coordinate_handles,
+        title="Active coordinates",
+        loc="lower right",
+        fontsize=6.2,
+        title_fontsize=6.2,
         frameon=True,
         handletextpad=0.4,
         borderpad=0.4,
@@ -249,10 +332,37 @@ def plot_overview(root: Path, output: Path) -> None:
     )
     for model, value, ypos in zip(
         auroc_models,
-        (records[model]["ood"]["side_top_uncertainty_auroc"] for model in auroc_models),
+        (
+            robustness[model]["side_top_uncertainty_auroc"]["mean"]
+            if model in robustness
+            else records[model]["ood"]["side_top_uncertainty_auroc"]
+            for model in auroc_models
+        ),
         y,
     ):
         color = METHOD_COLORS[model]
+        robust = robustness.get(model)
+        if robust is not None:
+            seed_values = robust["side_top_uncertainty_auroc"]["values"]
+            axis.scatter(
+                seed_values,
+                np.full(len(seed_values), ypos),
+                color=color,
+                alpha=0.28,
+                edgecolor="none",
+                s=22,
+                zorder=2,
+            )
+            axis.errorbar(
+                value,
+                ypos,
+                xerr=robust["side_top_uncertainty_auroc"]["std"],
+                fmt="none",
+                ecolor=color,
+                elinewidth=1.4,
+                capsize=2.5,
+                zorder=2,
+            )
         axis.hlines(ypos, 0.5, value, color=color, linewidth=2.1, alpha=0.85, zorder=2)
         axis.scatter(
             value,
@@ -276,7 +386,7 @@ def plot_overview(root: Path, output: Path) -> None:
     axis.set_xlim(0, 1.06)
     axis.set_yticks(y, [MODEL_LABELS[model] for model in auroc_models])
     axis.set_xlabel("Side/top uncertainty AUROC")
-    axis.set_title("Single-seed OOD ranking", loc="left", fontweight="bold")
+    axis.set_title("Head-seed OOD sensitivity", loc="left", fontweight="bold")
     axis.grid(axis="x", alpha=0.65)
     axis.tick_params(axis="y", length=0)
     fig.subplots_adjust(left=0.14, right=0.99, bottom=0.20, top=0.86, wspace=0.35)
@@ -389,8 +499,19 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--results", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--robustness",
+        action="append",
+        default=[],
+        metavar="MODEL=JSON",
+        help=(
+            "optional summarize_itop_robustness output; MODEL is one of "
+            "full_student_t, low_rank_student_t, graph_student_t"
+        ),
+    )
     args = parser.parse_args()
-    plot_overview(args.results, args.output)
+    robustness = _load_robustness(args.robustness)
+    plot_overview(args.results, args.output, robustness)
     plot_structure(args.results, args.output)
     print(f"ITOP final figures written to {args.output}")
 

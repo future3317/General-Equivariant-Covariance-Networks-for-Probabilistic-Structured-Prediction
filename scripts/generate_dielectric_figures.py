@@ -283,17 +283,28 @@ def plot_uncertainty_alignment(
 
     labels = [r"$c_{11}$", r"$c_{22}$", r"$c_{33}$", r"$c_{23}$", r"$c_{13}$", r"$c_{12}$"]
     distribution_label = r"Student-$t$" if distribution == "student_t" else "Gaussian"
-    fig, axes = plt.subplots(1, 3, figsize=cm2inch(16.5, 5.4))
+    correlation_difference = predicted_corr - residual_corr
+    fig = plt.figure(figsize=cm2inch(18.2, 10.4))
+    grid = fig.add_gridspec(
+        2,
+        3,
+        height_ratios=(1.0, 0.66),
+        hspace=0.54,
+        wspace=0.22,
+    )
+    heat_axes = [fig.add_subplot(grid[0, index]) for index in range(3)]
+    coverage_axis = fig.add_subplot(grid[1, :])
     norm = Normalize(vmin=-1.0, vmax=1.0)
+    correlation_image = None
     for ax, matrix, title in (
-        (axes[0], residual_corr.numpy(), "(a) Residual correlation"),
-        (axes[1], predicted_corr.numpy(), "(b) Predicted correlation"),
+        (heat_axes[0], residual_corr.numpy(), "(a) Empirical residual"),
+        (heat_axes[1], predicted_corr.numpy(), "(b) Mean predicted"),
     ):
-        image = ax.imshow(matrix, cmap=DIVERGING_CMAP, norm=norm)
+        correlation_image = ax.imshow(matrix, cmap=DIVERGING_CMAP, norm=norm)
         ax.set_xticks(range(6), labels, rotation=45, ha="right", fontsize=7)
         ax.set_yticks(range(6), labels, fontsize=7)
         ax.set_title(
-            f"{title}\nDiagonal | shear",
+            title,
             loc="left",
             fontsize=9,
             fontweight="bold",
@@ -301,45 +312,95 @@ def plot_uncertainty_alignment(
         )
         ax.axvline(2.5, color="white", linewidth=1.0)
         ax.axhline(2.5, color="white", linewidth=1.0)
-        for i in range(6):
-            for j in range(6):
-                ax.text(j, i, f"{matrix[i, j]:.2f}", ha="center", va="center", fontsize=6)
-    cbar_ax = fig.add_axes([0.635, 0.20, 0.012, 0.62])
-    cbar = fig.colorbar(image, cax=cbar_ax)
-    cbar.set_label("Correlation", fontsize=8)
-    cbar.ax.tick_params(labelsize=7)
+        ax.grid(False)
+    difference_limit = max(
+        0.1,
+        float(torch.max(torch.abs(correlation_difference)).item()),
+    )
+    difference_image = heat_axes[2].imshow(
+        correlation_difference.numpy(),
+        cmap=DIVERGING_CMAP,
+        norm=Normalize(vmin=-difference_limit, vmax=difference_limit),
+    )
+    heat_axes[2].set_xticks(range(6), labels, rotation=45, ha="right", fontsize=7)
+    heat_axes[2].set_yticks(range(6), labels, fontsize=7)
+    heat_axes[2].set_title(
+        "(c) Predicted - empirical",
+        loc="left",
+        fontsize=9,
+        fontweight="bold",
+        pad=4,
+    )
+    heat_axes[2].axvline(2.5, color="white", linewidth=1.0)
+    heat_axes[2].axhline(2.5, color="white", linewidth=1.0)
+    heat_axes[2].grid(False)
+    correlation_bar = fig.colorbar(
+        correlation_image,
+        ax=heat_axes[:2],
+        location="top",
+        shrink=0.72,
+        pad=0.08,
+        aspect=35,
+    )
+    correlation_bar.set_label("Correlation", fontsize=8)
+    correlation_bar.ax.tick_params(labelsize=7)
+    difference_bar = fig.colorbar(
+        difference_image,
+        ax=heat_axes[2],
+        location="top",
+        shrink=0.78,
+        pad=0.08,
+        aspect=22,
+    )
+    difference_bar.set_label("Correlation defect", fontsize=8)
+    difference_bar.ax.tick_params(labelsize=7)
 
-    x = np.arange(6)
-    width = 0.34
-    axes[2].bar(
-        x - width / 2,
-        marginal_coverage["coverage_50"],
-        width,
+    y = np.arange(6)
+    coverage_axis.axvline(
+        0.5,
         color=COLORS["midnight_blue"],
-        label="50% interval",
+        linestyle=":",
+        linewidth=1.1,
     )
-    axes[2].bar(
-        x + width / 2,
-        marginal_coverage["coverage_90"],
-        width,
+    coverage_axis.axvline(
+        0.9,
         color=COLORS["champagne_gold"],
-        label="90% interval",
+        linestyle=":",
+        linewidth=1.1,
     )
-    axes[2].axhline(0.5, color=COLORS["midnight_blue"], linestyle=":", linewidth=1)
-    axes[2].axhline(0.9, color=COLORS["champagne_gold"], linestyle=":", linewidth=1)
-    axes[2].set_xticks(x, labels, rotation=45, ha="right", fontsize=7)
-    axes[2].set_ylim(0, 1.05)
-    axes[2].set_ylabel("Empirical coverage", fontsize=8)
-    axes[2].set_title(
-        f"(c) Marginal calibration ({distribution_label})",
+    coverage_axis.scatter(
+        marginal_coverage["coverage_50"],
+        y - 0.10,
+        marker="o",
+        s=32,
+        color=COLORS["midnight_blue"],
+        label="50% marginal interval",
+        zorder=3,
+    )
+    coverage_axis.scatter(
+        marginal_coverage["coverage_90"],
+        y + 0.10,
+        marker="s",
+        s=32,
+        color=COLORS["champagne_gold"],
+        label="90% marginal interval",
+        zorder=3,
+    )
+    coverage_axis.set_yticks(y, labels)
+    coverage_axis.set_xlim(0.25, 1.01)
+    coverage_axis.set_xlabel("Empirical marginal coverage")
+    coverage_axis.set_title(
+        f"(d) Component calibration ({distribution_label})",
         loc="left",
         fontsize=9,
         fontweight="bold",
     )
-    axes[2].legend(fontsize=7, loc="lower left")
-    for ax in axes:
+    coverage_axis.legend(fontsize=7, loc="lower right", ncol=2)
+    coverage_axis.grid(axis="x", alpha=0.25)
+    coverage_axis.tick_params(axis="y", length=0)
+    for ax in (*heat_axes, coverage_axis):
         ax.tick_params(labelsize=7)
-    fig.subplots_adjust(left=0.06, right=0.96, bottom=0.20, top=0.88, wspace=0.50)
+    fig.subplots_adjust(left=0.08, right=0.99, bottom=0.11, top=0.86)
     save_figure(fig, save_path)
     plt.close(fig)
 
@@ -352,6 +413,7 @@ def plot_uncertainty_alignment(
         "marginal_coverage": marginal_coverage,
         "residual_correlation": residual_corr.tolist(),
         "predicted_correlation": predicted_corr.tolist(),
+        "predicted_minus_residual_correlation": correlation_difference.tolist(),
     }
 
 
