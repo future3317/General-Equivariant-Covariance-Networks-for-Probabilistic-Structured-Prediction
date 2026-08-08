@@ -200,3 +200,48 @@ Corrections/risks:
 4. Run E3 only if E0–E2 leave model/function uncertainty as a live root cause.
 5. Add a compiler-level mixture primitive only after E1 demonstrates that a
    mixture materially changes proper-score and diagnostic behavior.
+
+## E0 result and phase-gate decision
+
+E0 was subsequently executed from clean detached worktree commit `d945901` in
+the required `equivcompiler` environment. No model was trained. The runner
+verified finite saved tensors and exactly 4,863 Side plus 4,863 Top ITOP
+predictions before testing them. All records report `runner_source.dirty=false`.
+
+| Released artifact | Radial PIT mean / KS | Projection PIT rejected directions | Direction defect / rejected axes | Max radius-direction rho / permutation p | Decision |
+|---|---:|---:|---:|---:|---|
+| ITOP Graph-t Side | 0.6754 / 0.2935 | 63 / 64 | 10.825 / 63 / 64 | 0.375 / 0.005 | fixed radial law and single ellipse rejected |
+| ITOP Full-t Side | 0.6951 / 0.3162 | 64 / 64 | 6.053 / 59 / 64 | 0.344 / 0.005 | fixed radial law and single ellipse rejected |
+| ITOP Graph-t Top | 0.9965 / 0.9822 | 64 / 64 | 33.703 / 64 / 64 | 0.609 / 0.005 | fixed radial law and single ellipse rejected |
+| ITOP Full-t Top | 0.9996 / 0.9921 | 64 / 64 | 33.018 / 64 / 64 | 0.513 / 0.005 | fixed radial law and single ellipse rejected |
+| Dielectric unified joint | 0.5556 / 0.2143 | 42 / 64 | 2.893 / 56 / 64 | 0.477 / 0.005 | fixed radial law and single ellipse rejected |
+
+The ITOP conclusion is stable across declared visibility strata whenever a
+stratum has at least 20 samples. The dielectric conclusion is likewise stable
+across atom-count, element-count, and spatial-extent strata. Tied discrete
+element-count quantiles are represented as below/equal/above the shared cut;
+no empty tertile is silently interpreted.
+
+Evidence:
+
+- Server: `/home/workspace/lrh/RESULTS/Tpami/uncertainty_root_cause_d945901`
+- Local mirror: `results/uncertainty_root_cause_d945901`
+- JSON SHA-256: Graph-t `75f2d522...dd027d0`, Full-t
+  `7c71b2b3...57fec3`, dielectric `e1604665...0718d5`
+- Validation: 34 targeted tests passed in both local and server environments.
+
+**Phase-gate interpretation.** Full-t reduces the Side directional defect
+relative to Graph-t but still strongly fails spherical direction and
+radius-direction independence; on Top both families fail catastrophically.
+Therefore Graph precision restriction is not the common root cause. The same
+failure in the full-coordinate dielectric model independently rules out
+"missing covariance coordinates" as a sufficient explanation. E0 supports
+misspecification of the fitted single fixed-nu ellipse, but does not by itself
+identify multimodality: mean bias, sample-conditional scale error, skewness,
+observation insufficiency, and latent mixtures remain live explanations.
+
+Proceed to the controlled E1 family test. Conditional nu remains a cheap radial
+ablation, but cannot by itself explain the observed directional and
+radius-direction failures. A K=2 mixture is therefore the higher-priority E1
+intervention. Do not start E3; E2 must still determine whether ITOP's frozen
+pooled representation contains sufficient observation-ambiguity information.
