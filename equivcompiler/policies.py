@@ -179,7 +179,15 @@ class CenteredSpectralWindowCovariance(OperatorFamilySpec):
 
 @dataclass(frozen=True)
 class LowRankCovariance(OperatorFamilySpec):
-    """Exact low-rank-plus-isotropic scatter subfamily."""
+    """Exact low-rank-plus-isotropic scatter family.
+
+    For ``rank >= dim(V)``, an unconstrained matrix factor is pointwise
+    surjective onto SPD(V).  The equivariant factor field is not therefore
+    globally equal to the unrestricted equivariant SPD-field family: on an
+    input with a non-trivial stabilizer, every factor column must lie in the
+    stabilizer-invariant subspace.  The distinction is recorded explicitly in
+    ``relation_to_full`` instead of being hidden behind a dimension argument.
+    """
 
     rank: int = 8
 
@@ -225,13 +233,15 @@ class LowRankCovariance(OperatorFamilySpec):
             domain="scatter",
             assembly=OperatorIR.add(isotropic, gram),
             relation_to_full=(
-                FamilyRelation.EQUAL_TO_FULL
+                FamilyRelation.POINTWISE_FULL_NOT_FIELDWISE
                 if rank >= output.dim
                 else FamilyRelation.STRICT_SUBSET
             ),
             rank=rank,
             restriction=(
-                None if rank >= output.dim else "rank_r_plus_isotropic_scatter"
+                "pointwise_full_image_but_equivariant_field_not_proven_equal"
+                if rank >= output.dim
+                else "rank_r_plus_isotropic_scatter"
             ),
         )
 

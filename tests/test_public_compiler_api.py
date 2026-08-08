@@ -15,7 +15,11 @@ from equivcompiler import (
     describe_output,
     plan_readout,
 )
-from representations import CompilationError, EquivariantOutputGraph
+from representations import (
+    CompilationError,
+    EquivariantOutputGraph,
+    certify_numerical_spd,
+)
 
 SEED = "4x0e + 2x1o + 2x2e"
 
@@ -60,6 +64,18 @@ def test_declarative_readout_api_builds_executable_and_full_report():
     assert record["spd_contract"] == {
         "mathematical_cone_status": "strict_spd",
         "finite_precision_cone_status": "not_certified_without_dtype_audit",
+        "finite_precision_policy": {
+            "kind": "value_dependent_runtime_certificate",
+            "certificate": "representations.certify_numerical_spd",
+            "default_action": "reject_if_not_strict",
+            "hidden_jitter": False,
+            "supported_audit_dtypes": [
+                "float64",
+                "float32",
+                "float16",
+                "bfloat16",
+            ],
+        },
         "minimum_eigenvalue_policy": {
             "kind": "none_declared",
             "minimum_values": [],
@@ -67,6 +83,10 @@ def test_declarative_readout_api_builds_executable_and_full_report():
         },
     }
     assert record["compiler_soundness"]["scope"].startswith("compositionally verified")
+    verification = record["family"]["assembly_ir"]["verification"]
+    assert verification["type"] == "SPD(1x0e+1x2e)"
+    assert verification["typing_rule"] == "T-SpectralPositive"
+    assert set(verification["effects"]) == {"equivariant", "cone:spd"}
     assert "formal verification of arbitrary user-defined primitives" in record[
         "compiler_soundness"
     ]["not_claimed"]
@@ -81,6 +101,16 @@ def test_declarative_readout_api_builds_executable_and_full_report():
     assert result["mu"].shape == (3, 6)
     assert result["scale"].shape == (3, 6, 6)
     assert torch.isfinite(result["loss"])
+
+
+def test_runtime_spd_certificate_rejects_numerically_marginal_matrix_without_jitter():
+    good = torch.eye(3, dtype=torch.float32)
+    certificate = certify_numerical_spd(good)
+    assert certificate.strict
+    marginal = torch.diag(torch.tensor([1e-8, 1.0, 1.0], dtype=torch.float32))
+    certificate = certify_numerical_spd(marginal)
+    assert not certificate.strict
+    assert certificate.policy == "reject_if_not_strict"
 
 
 def test_planning_is_separate_from_materialization():

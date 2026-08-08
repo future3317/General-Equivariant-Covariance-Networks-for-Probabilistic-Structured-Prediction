@@ -26,7 +26,13 @@ from data.itop_dataset import (
 from data.itop_features import get_itop_feature_loaders
 from data.paths import dataset_dir
 from data.representation_metrics import infer_representation_block_metric
-from equivcompiler import FeatureSpec, GraphPrecision, LowRankCovariance, plan_readout
+from equivcompiler import (
+    FeatureSpec,
+    FullCovariance,
+    GraphPrecision,
+    LowRankCovariance,
+    plan_readout,
+)
 from evaluation import (
     binary_auroc,
     bone_length_error,
@@ -62,6 +68,7 @@ from spd_maps import RepresentationMetricMap
 
 MODEL_KINDS = (
     "deterministic",
+    "full_student_t",
     "independent_gaussian",
     "independent_student_t",
     "low_rank_student_t",
@@ -149,7 +156,9 @@ def _build_model(args: argparse.Namespace):
         return model, None
 
     is_student = args.model.endswith("_student_t")
-    if args.model in {"independent_gaussian", "independent_student_t"}:
+    if args.model == "full_student_t":
+        covariance = FullCovariance()
+    elif args.model in {"independent_gaussian", "independent_student_t"}:
         covariance = GraphPrecision(ITOP_INDEPENDENT_GRAPH)
     elif args.model == "low_rank_student_t":
         covariance = LowRankCovariance(rank=4)

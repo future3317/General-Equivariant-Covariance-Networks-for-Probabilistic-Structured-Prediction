@@ -256,9 +256,13 @@ correspondence, layout transform, graph identity, and rank. Near-miss programs
 use the generic recursive interpreter.
 
 For `LowRankCovariance(r)`, the isotropic term is `softplus(s) I` with no fixed
-positive floor. It is therefore strictly SPD for every finite parameter and,
-when `r >= dim(V)`, represents the same full SPD family as the unrestricted
-parameterization. For `r < dim(V)` it remains a documented strict subfamily.
+positive floor. It is therefore strictly SPD for every finite parameter. When
+`r >= dim(V)`, an unconstrained factor has a pointwise full SPD image, but the
+equivariant factor field is not claimed to equal the unrestricted equivariant
+field family: stabilizers can force every factor column into an invariant
+subspace. The compiler records this as
+`pointwise_full_not_equivariant_fieldwise`; when `r < dim(V)` it is a strict
+statistical subfamily.
 
 ## Stable staged interface
 

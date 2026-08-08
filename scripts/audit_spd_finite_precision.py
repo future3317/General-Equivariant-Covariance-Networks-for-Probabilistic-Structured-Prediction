@@ -18,6 +18,7 @@ from typing import Any
 import torch
 
 from compatibility.e3nn import o3
+from representations import certify_numerical_spd
 from spd_maps import (
     IrrepBlockDiagonalMap,
     IsotropicMap,
@@ -111,15 +112,15 @@ def _run_case(
         params = _parameters(name, map_object, logit, dtype)
         matrix = map_object(params)
         finite = bool(torch.isfinite(matrix).all())
-        eigenvalues = torch.linalg.eigvalsh(matrix.float().double())
-        minimum = float(eigenvalues.min().item())
+        certificate = certify_numerical_spd(matrix, dtype=dtype)
         record.update(
             {
                 "finite": finite,
-                "minimum_eigenvalue": minimum,
-                "finite_precision_cone_status": (
-                    "strict_spd" if finite and minimum > 0.0 else "not_strict_spd"
-                ),
+                "minimum_eigenvalue": certificate.minimum_eigenvalue,
+                "finite_precision_certificate": certificate.as_dict(),
+                "finite_precision_cone_status": "strict_spd"
+                if certificate.strict
+                else "not_strict_spd",
             }
         )
     except (RuntimeError, ValueError, TypeError) as error:

@@ -45,6 +45,7 @@ class FamilyRelation(str, Enum):
     """Set-theoretic relation between statistical operator families."""
 
     EQUAL_TO_FULL = "equal_to_full"
+    POINTWISE_FULL_NOT_FIELDWISE = "pointwise_full_not_equivariant_fieldwise"
     STRICT_SUBSET = "strict_subset"
     STRICT_SUPERSET = "strict_superset"
     EQUAL = "equal"
@@ -95,6 +96,9 @@ class OperatorVerification:
     result_dimension: int | None = None
     result_irreps: str | None = None
     environment_typed: bool = False
+    type_name: str = "Unknown"
+    effects: tuple[str, ...] = ()
+    typing_rule: str = "T-Unknown"
     proof_scope: str = "closed_typed_primitive_rule_set"
     trusted_base: tuple[str, ...] = (
         "registered primitive semantics",
@@ -131,6 +135,9 @@ class OperatorVerification:
             "result_dimension": self.result_dimension,
             "result_irreps": self.result_irreps,
             "environment_typed": self.environment_typed,
+            "type": self.type_name,
+            "effects": list(self.effects),
+            "typing_rule": self.typing_rule,
             "derivation": "closed_typed_primitive_rule_set",
             "proof_scope": self.proof_scope,
             "trusted_base": list(self.trusted_base),
@@ -301,6 +308,19 @@ def _verification(
     irreps: o3.Irreps | None,
     context: OperatorVerificationContext | None,
 ) -> OperatorVerification:
+    type_name, typing_rule = _typing_annotation(
+        instructions[-1] if instructions else "unknown",
+        dimension,
+        irreps,
+        positivity,
+    )
+    effects = []
+    if equivariance is Equivariance.VERIFIED:
+        effects.append("equivariant")
+    if positivity is Positivity.SPD:
+        effects.append("cone:spd")
+    elif positivity is Positivity.PSD:
+        effects.append("cone:psd")
     return OperatorVerification(
         positivity=positivity,
         equivariance=equivariance,
@@ -310,7 +330,48 @@ def _verification(
         result_dimension=dimension,
         result_irreps=str(irreps) if irreps is not None else None,
         environment_typed=context is not None,
+        type_name=type_name,
+        effects=tuple(effects),
+        typing_rule=typing_rule,
     )
+
+
+def _typing_annotation(
+    kind: str,
+    dimension: int | None,
+    irreps: o3.Irreps | None,
+    positivity: Positivity,
+) -> tuple[str, str]:
+    """Return the explicit type/rule label emitted for the semantic IR.
+
+    The verifier remains the executable implementation of these rules.  The
+    labels make its derivation inspectable and give the manuscript a stable
+    formal core without pretending that arbitrary user primitives are covered.
+    """
+    space = str(irreps) if irreps is not None else (f"dim={dimension}" if dimension else "?")
+    if kind == "parameter":
+        return f"Param({space})", "T-Parameter"
+    if kind == "symmetric_operator":
+        return f"SymOp({space})", "T-SymmetricOperator"
+    if kind == "equivariant_factor":
+        return f"Factor({space})", "T-EquivariantFactor"
+    if kind == "gram":
+        return f"PSD({space})", "T-Gram"
+    if kind == "positive_scalar_identity":
+        return f"SPD({space})", "T-ScalarIdentity"
+    if kind == "cholesky_positive":
+        return f"SPD({space})", "T-Cholesky"
+    if kind == "spectral_positive":
+        return f"SPD({space})", "T-SpectralPositive"
+    if kind == "add":
+        return f"SPD({space})" if positivity is Positivity.SPD else f"Op({space})", "T-SPDAdd"
+    if kind == "direct_sum":
+        return f"SPD({space})" if positivity is Positivity.SPD else f"Op({space})", "T-DirectSum"
+    if kind == "kronecker_identity":
+        return f"Op({space})", "T-KroneckerIdentity"
+    if kind == "pullback":
+        return f"SPD({space})" if positivity is Positivity.SPD else f"Op({space})", "T-GraphPullback"
+    return f"Unknown({space})", "T-Unknown"
 
 
 def _verify_node(
@@ -778,6 +839,9 @@ def verify_operator(
         result_dimension=certificate.result_dimension,
         result_irreps=certificate.result_irreps,
         environment_typed=True,
+        type_name="Unknown",
+        effects=(),
+        typing_rule="T-RootMismatch",
     )
 
 
@@ -913,14 +977,24 @@ class OperatorFamilyPlan:
             relation = (
                 FamilyRelation.EQUAL
                 if other.relation_to_full is FamilyRelation.EQUAL_TO_FULL
-                else FamilyRelation.STRICT_SUPERSET
+                else (
+                    FamilyRelation.UNKNOWN
+                    if other.relation_to_full
+                    is FamilyRelation.POINTWISE_FULL_NOT_FIELDWISE
+                    else FamilyRelation.STRICT_SUPERSET
+                )
             )
             return FamilyRelationCertificate(relation, "full_family_reference")
         if other.kind == "full":
             relation = (
                 FamilyRelation.EQUAL
                 if self.relation_to_full is FamilyRelation.EQUAL_TO_FULL
-                else FamilyRelation.STRICT_SUBSET
+                else (
+                    FamilyRelation.UNKNOWN
+                    if self.relation_to_full
+                    is FamilyRelation.POINTWISE_FULL_NOT_FIELDWISE
+                    else FamilyRelation.STRICT_SUBSET
+                )
             )
             return FamilyRelationCertificate(relation, "full_family_reference")
         if self.kind == other.kind == "low_rank" and self.rank and other.rank:

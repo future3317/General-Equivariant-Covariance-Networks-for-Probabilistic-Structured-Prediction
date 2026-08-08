@@ -25,9 +25,11 @@ The report also separates the cone contract into `spd_contract`:
 - `mathematical_cone_status` is the verifier-derived real-arithmetic result;
 - `minimum_eigenvalue_policy` records whether the IR declares no floor, a
   zero floor, or a positive floor; and
-- `finite_precision_cone_status` remains explicitly uncertified unless a
-  dtype/extreme-logit audit is run.  A positive floor is a family parameter,
-  not an implicit numerical jitter.
+- `finite_precision_cone_status` remains explicitly uncertified until a
+  value-dependent runtime certificate is run.  The public
+  `representations.certify_numerical_spd` check uses a scale-aware dtype
+  threshold and has a reject-on-failure policy; it never adds hidden jitter.
+  A positive floor is a family parameter, not an implicit numerical jitter.
 
 The companion audit `python -m scripts.audit_spd_finite_precision` exercises
 representative scalar, low-rank, and isotypic constructions at extreme logits

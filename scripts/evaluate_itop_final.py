@@ -37,6 +37,10 @@ MODEL_INFO = OrderedDict(
     (
         ("deterministic", ("Det.", "deterministic")),
         (
+            "frozen_full_student_t",
+            ("Full-t (F)", "frozen"),
+        ),
+        (
             "frozen_independent_gaussian",
             ("Indep-G (F)", "frozen"),
         ),

@@ -101,6 +101,13 @@ def _spd_contract(compilation: O3Compilation) -> dict[str, Any]:
             else verification.positivity.value
         ),
         "finite_precision_cone_status": "not_certified_without_dtype_audit",
+        "finite_precision_policy": {
+            "kind": "value_dependent_runtime_certificate",
+            "certificate": "representations.certify_numerical_spd",
+            "default_action": "reject_if_not_strict",
+            "hidden_jitter": False,
+            "supported_audit_dtypes": ["float64", "float32", "float16", "bfloat16"],
+        },
         "minimum_eigenvalue_policy": minimum_policy,
     }
 

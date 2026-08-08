@@ -227,6 +227,7 @@ def test_runner_exposes_explicit_joint_skip_flag(monkeypatch):
 def test_itop_factorial_exposes_radial_and_operator_controls():
     assert "independent_student_t" in MODEL_KINDS
     assert "low_rank_student_t" in MODEL_KINDS
+    assert "full_student_t" in MODEL_KINDS
 
 
 @pytest.mark.parametrize(
@@ -251,6 +252,24 @@ def test_itop_factorial_models_bind_to_distinct_compiler_families(
     )
     assert plan.compilation.covariance_mode == covariance_mode
     assert plan.compilation.distribution_spec.objective_name() == "student_t"
+
+
+def test_itop_full_control_binds_to_unrestricted_family():
+    _, plan = _build_model(
+        SimpleNamespace(
+            model="full_student_t",
+            hidden_dim=16,
+            max_radius=0.5,
+            lmax=2,
+            num_layers=1,
+            num_basis=4,
+            tp_backend="e3nn",
+            cueq_method="naive",
+            student_t_dof=5.0,
+        )
+    )
+    assert plan.compilation.covariance_mode == "full"
+    assert plan.compilation.covariance_parameter_count == 1035
 
 
 def test_frozen_head_contract_records_only_backbone_and_mean_head():

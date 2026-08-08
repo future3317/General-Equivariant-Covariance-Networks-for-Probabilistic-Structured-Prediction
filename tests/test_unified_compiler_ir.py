@@ -221,7 +221,10 @@ def test_restricted_family_treats_canonical_failure_as_diagnostic():
 def test_alternative_full_family_parameterization_keeps_canonical_diagnostic():
     output = O3IrrepsSpec.from_cartesian("ij=ji")
     family = LowRankCovariance(output.dim).compile(output)
-    assert family.relation_to_full == FamilyRelation.EQUAL_TO_FULL
+    assert (
+        family.relation_to_full
+        == FamilyRelation.POINTWISE_FULL_NOT_FIELDWISE
+    )
     compiler = O3ProgramCompiler(output)
     canonical = (
         EllipticalDistribution().canonical_reference(output).decompose_o3().irreps
@@ -574,7 +577,10 @@ def test_low_rank_request_is_never_silently_clamped():
     family = LowRankCovariance(10).compile(O3IrrepsSpec.from_cartesian("ij=ji"))
     assert family.rank == 10
     assert family.parameter_count == 61
-    assert family.relation_to_full == FamilyRelation.EQUAL_TO_FULL
+    assert (
+        family.relation_to_full
+        == FamilyRelation.POINTWISE_FULL_NOT_FIELDWISE
+    )
     restricted = LowRankCovariance(5).compile(O3IrrepsSpec.from_cartesian("ij=ji"))
     assert restricted.relation_to_full == FamilyRelation.STRICT_SUBSET
 

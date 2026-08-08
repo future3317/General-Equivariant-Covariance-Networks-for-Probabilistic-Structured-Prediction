@@ -48,6 +48,10 @@ from representations.operator_ir import (
     ParameterBinding,
     Positivity,
 )
+from representations.finite_precision import (
+    NumericalSPDCertificate,
+    certify_numerical_spd,
+)
 from representations.operator_lowering import OptimizationCertificate
 from representations.report import CompilationReport, build_compilation_report
 from representations.representation_ir import (
@@ -79,6 +83,8 @@ __all__ = [
     "EquivariantOutputGraph",
     "ExteriorSquareExpr",
     "FamilyRelation",
+    "NumericalSPDCertificate",
+    "certify_numerical_spd",
     "InnerProductRep",
     "InvariantMetricSpec",
     "IrrepsExpr",
