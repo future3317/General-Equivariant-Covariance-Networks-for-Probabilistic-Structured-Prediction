@@ -265,3 +265,32 @@ the principal dielectric cause.
 No learned mixture gate, component-specific scatter, Graph-t replication,
 compiler-level public primitive, E2/E3 experiment, or manuscript result update
 was performed in this phase.
+
+## E2 result and phase-gate decision
+
+E2 was subsequently completed without training a new predictive model. The
+full evidence matrix, protocol, artifact hashes, and interpretation boundaries
+are recorded in `e2_information_sufficiency_results_20260808.md`.
+
+The predeclared matched linear probe found no significant Side-test MSE
+increment from raw observation descriptors beyond legal frozen-H invariants;
+the paired bootstrap interval crossed zero. Train-derived missing-depth,
+point-dropout, and quantization-noise pushforward covariances also had
+near-zero frame-error rank correlation on Side and Top. These results reject
+the tested low-capacity observation-information hypothesis, but do not prove
+that every possible observation-aware representation is redundant.
+
+The no-training mechanism audit further showed that K=2's Side gain is not
+evidence that two modes are required. For every seed, one component selected
+using Side validation alone improved Side test NLL by 2.92--2.97 over the
+frozen baseline, compared with 2.28--2.33 for the equal-weight mixture. The
+same selected shift worsened Top NLL. Combined with collapsed responsibilities
+and weak delta/residual alignment, this identifies the E1 mixture primarily as
+an IID frozen-mean bias/density-mass surrogate, not demonstrated one-to-many
+conditional structure or physical multimodality.
+
+Therefore neither an observation-aware uncertainty path nor a public
+finite-mixture compiler primitive passes its E2 gate. Model/function
+uncertainty remains live, so the next experimental phase is E3 true
+end-to-end independent members with exact finite-mixture scoring. E3 has not
+been started, and the manuscript main results remain unchanged.
