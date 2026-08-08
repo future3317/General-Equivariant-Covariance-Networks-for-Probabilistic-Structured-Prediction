@@ -164,8 +164,11 @@ def _predict_repeats(
             batch_size=batch_size,
             shuffle=False,
             num_workers=num_workers,
-            pin_memory=device.type == "cuda",
-            persistent_workers=num_workers > 0,
+            # This diagnostic repeatedly constructs short-lived loaders. Pin
+            # and persistent worker threads add no reuse and can outlive a
+            # repeat when HDF5 workers are torn down.
+            pin_memory=False,
+            persistent_workers=False,
         )
         means = []
         sample_ids = []
