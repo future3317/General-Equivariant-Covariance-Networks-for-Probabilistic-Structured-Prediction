@@ -4,12 +4,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import h5py
 import numpy as np
 import torch
 
 
 def point_cloud_observation_descriptors(
-    cache: str | Path, *, view_id: int
+    cache: str | Path,
+    *,
+    view_id: int,
+    depth_path: str | Path | None = None,
 ) -> dict[str, torch.Tensor]:
     """Return inference-time geometry descriptors and diagnostic visibility.
 
@@ -24,6 +28,8 @@ def point_cloud_observation_descriptors(
         np.array(np.load(cache / "visible_joints.npy"), dtype=np.bool_)
     )
     frame = torch.from_numpy(np.array(np.load(cache / "frame_indices.npy"))).long()
+    depth_file = h5py.File(depth_path, "r") if depth_path is not None else None
+    depth_data = depth_file["data"] if depth_file is not None else None
     records: dict[str, list[torch.Tensor]] = {}
     for start in range(0, len(points), 128):
         stop = min(start + 128, len(points))
@@ -52,8 +58,28 @@ def point_cloud_observation_descriptors(
             "knn_distance_mean": distances.mean((1, 2)),
             "knn_distance_q90": torch.quantile(distances.flatten(1), 0.90, dim=1),
         }
+        if depth_data is not None:
+            depth = torch.from_numpy(
+                np.asarray(depth_data[frame[start:stop].numpy()]).copy()
+            ).float()
+            flat = depth.flatten(1)
+            valid = torch.isfinite(flat) & (flat > 0)
+            count = valid.sum(1).clamp_min(1)
+            mean = torch.where(valid, flat, 0.0).sum(1) / count
+            centered = torch.where(valid, flat - mean[:, None], 0.0)
+            chunk.update(
+                {
+                    "valid_depth_fraction": valid.float().mean(1),
+                    "valid_depth_mean": mean,
+                    "valid_depth_std": (centered.square().sum(1) / count).sqrt(),
+                    "valid_depth_min": torch.where(valid, flat, torch.inf).amin(1),
+                    "valid_depth_max": torch.where(valid, flat, -torch.inf).amax(1),
+                }
+            )
         for name, values in chunk.items():
             records.setdefault(name, []).append(values)
+    if depth_file is not None:
+        depth_file.close()
     result = {name: torch.cat(values) for name, values in records.items()}
     result["visible_fraction_diagnostic_only"] = visible.float().mean(1)
     result["sample_id"] = frame + view_id * (1 << 32)

@@ -153,6 +153,9 @@ def main() -> None:
     parser.add_argument("--side_train_geometry", type=Path, required=True)
     parser.add_argument("--side_test_geometry", type=Path, required=True)
     parser.add_argument("--top_test_geometry", type=Path, required=True)
+    parser.add_argument("--side_train_depth", type=Path, required=True)
+    parser.add_argument("--side_test_depth", type=Path, required=True)
+    parser.add_argument("--top_test_depth", type=Path, required=True)
     parser.add_argument("--output_dir", type=Path, required=True)
     args = parser.parse_args()
     if args.output_dir.exists():
@@ -162,10 +165,20 @@ def main() -> None:
     payloads = {name: dataset.payload for name, dataset in datasets.items()}
     full_descriptors = {
         "side_train": point_cloud_observation_descriptors(
-            args.side_train_geometry, view_id=0
+            args.side_train_geometry,
+            view_id=0,
+            depth_path=args.side_train_depth,
         ),
-        "test": point_cloud_observation_descriptors(args.side_test_geometry, view_id=0),
-        "ood": point_cloud_observation_descriptors(args.top_test_geometry, view_id=1),
+        "test": point_cloud_observation_descriptors(
+            args.side_test_geometry,
+            view_id=0,
+            depth_path=args.side_test_depth,
+        ),
+        "ood": point_cloud_observation_descriptors(
+            args.top_test_geometry,
+            view_id=1,
+            depth_path=args.top_test_depth,
+        ),
     }
     raw_names = sorted(
         name
