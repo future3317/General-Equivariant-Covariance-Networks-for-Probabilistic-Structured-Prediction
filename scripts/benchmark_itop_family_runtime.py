@@ -10,6 +10,7 @@ trains a model nor changes a checkpoint.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,11 @@ def _read_json(path: Path) -> dict[str, Any]:
     return payload
 
 
+def _canonical_json_hash(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _parse_run(specification: str) -> tuple[str, Path]:
     try:
         model, path_text = specification.split("=", 1)
@@ -57,19 +63,24 @@ def _run_contract(model: str, run: Path) -> dict[str, Any]:
         raise ValueError(f"{run}: does not certify frozen {model}")
     if not (run / "best_model.pt").is_file():
         raise FileNotFoundError(f"{run}: best_model.pt is required")
-    cache = environment.get("feature_cache")
-    checkpoint = environment.get("input_checkpoint")
-    if not isinstance(cache, dict) or not isinstance(checkpoint, dict):
-        raise TypeError(f"{run}: missing feature-cache or backbone provenance")
-    return {"args": args, "environment": environment}
+    cache_manifest = _read_json(run / "feature_cache.json")
+    checkpoint_sha256 = cache_manifest.get("backbone_checkpoint_sha256")
+    counts = cache_manifest.get("counts")
+    if not isinstance(checkpoint_sha256, str) or not isinstance(counts, dict):
+        raise TypeError(f"{run}: incomplete feature-cache provenance")
+    return {
+        "args": args,
+        "environment": environment,
+        "feature_cache_manifest": cache_manifest,
+        "feature_cache_manifest_sha256": _canonical_json_hash(cache_manifest),
+    }
 
 
 def _common_contract(records: dict[str, dict[str, Any]]) -> tuple[dict[str, Any], int]:
     reference = records[MODEL_ORDER[0]]
     reference_args = reference["args"]
-    reference_environment = reference["environment"]
-    reference_cache = reference_environment["feature_cache"]
-    reference_checkpoint = reference_environment["input_checkpoint"]
+    reference_cache = reference["feature_cache_manifest"]
+    reference_checkpoint = reference_cache["backbone_checkpoint_sha256"]
     required_args = (
         "feature_cache",
         "backbone_checkpoint",
@@ -92,24 +103,25 @@ def _common_contract(records: dict[str, dict[str, Any]]) -> tuple[dict[str, Any]
         }
         if mismatches:
             raise ValueError(f"{model}: incompatible runtime contract {mismatches}")
-        if environment["feature_cache"].get("feature_cache_hash") != reference_cache.get(
-            "feature_cache_hash"
-        ):
+        if record["feature_cache_manifest_sha256"] != reference[
+            "feature_cache_manifest_sha256"
+        ]:
             raise ValueError(f"{model}: feature-cache hash differs from reference")
-        if environment["input_checkpoint"].get("sha256") != reference_checkpoint.get(
-            "sha256"
-        ):
+        if environment.get("device") is None:
+            raise TypeError(f"{model}: environment provenance is incomplete")
+        if environment and record["feature_cache_manifest"].get(
+            "backbone_checkpoint_sha256"
+        ) != reference_checkpoint:
             raise ValueError(f"{model}: backbone checkpoint differs from reference")
-    geometry = reference_environment.get("dataset", {}).get("caches", {}).get(
-        "side_train", {}
-    )
-    samples = int(geometry.get("metadata", {}).get("num_samples", 0))
+    samples = int(reference_cache.get("counts", {}).get("side_train", 0))
     if samples < 2:
         raise ValueError("run provenance does not record a valid side-train size")
     return (
         {
-            "feature_cache_hash": reference_cache["feature_cache_hash"],
-            "backbone_checkpoint_sha256": reference_checkpoint["sha256"],
+            "feature_cache_manifest_sha256": reference[
+                "feature_cache_manifest_sha256"
+            ],
+            "backbone_checkpoint_sha256": reference_checkpoint,
             "feature_cache": reference_args["feature_cache"],
             "backbone_checkpoint": reference_args["backbone_checkpoint"],
             "side_train_samples": samples,
