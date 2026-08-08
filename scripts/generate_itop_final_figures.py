@@ -11,6 +11,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from matplotlib.lines import Line2D
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -35,6 +36,15 @@ METHOD_COLORS = {
     "frozen_low_rank_student_t": COLORS["teal"],
     "frozen_graph_gaussian": COLORS["green_3"],
     "frozen_graph_student_t": COLORS["blue_main"],
+}
+
+ACTIVE_COORDS = {
+    "frozen_full_student_t": 1035,
+    "frozen_independent_gaussian": 90,
+    "frozen_independent_student_t": 90,
+    "frozen_low_rank_student_t": 181,
+    "frozen_graph_gaussian": 174,
+    "frozen_graph_student_t": 174,
 }
 
 
@@ -161,138 +171,115 @@ def plot_overview(root: Path, output: Path) -> None:
     records = {model: _metrics(root, model) for model in models}
     fig, axes = plt.subplots(
         1,
-        3,
-        figsize=cm2inch(18.2, 7.9),
-        sharey=True,
-        gridspec_kw={"width_ratios": (1.02, 1.22, 0.98)},
+        2,
+        figsize=cm2inch(18.2, 7.4),
+        gridspec_kw={"width_ratios": (1.36, 0.92)},
     )
-    y = np.arange(len(models))[::-1]
-    side_color, top_color = COLORS["blue_main"], COLORS["red_strong"]
+    probabilistic_models = tuple(
+        model
+        for model in models
+        if records[model]["side"].get("nll") is not None
+        and records[model]["top"].get("nll") is not None
+    )
+    axis = axes[0]
+    for model in probabilistic_models:
+        side_nll = records[model]["side"]["nll"]
+        top_nll = records[model]["top"]["nll"]
+        is_gaussian = "gaussian" in model
+        axis.scatter(
+            side_nll,
+            top_nll,
+            s=34 + 2.2 * np.sqrt(ACTIVE_COORDS[model]),
+            marker="s" if is_gaussian else "o",
+            color=METHOD_COLORS[model],
+            edgecolor="white",
+            linewidth=0.9,
+            zorder=3,
+        )
+        axis.annotate(
+            MODEL_LABELS[model],
+            (side_nll, top_nll),
+            xytext=(5, 4),
+            textcoords="offset points",
+            color=METHOD_COLORS[model],
+            fontsize=7.5,
+            fontweight="bold",
+        )
+    axis.set_yscale("log")
+    axis.set_xlim(-77, -13)
+    axis.set_ylim(1.8, 1500)
+    axis.set_yticks((2, 10, 50, 200, 1000), ("2", "10", "50", "200", "1000"))
+    axis.set_xlabel("Side IID proper NLL")
+    axis.set_ylabel("Top OOD proper NLL (log scale)")
+    axis.set_title("Proper-score trade-off", loc="left", fontweight="bold")
+    axis.grid(which="major", alpha=0.65)
+    family_handles = (
+        Line2D(
+            [], [], marker="o", color="none", markerfacecolor=COLORS["dark_gray"],
+            markeredgecolor="white", markersize=5, label="Student-$t$",
+        ),
+        Line2D(
+            [], [], marker="s", color="none", markerfacecolor=COLORS["dark_gray"],
+            markeredgecolor="white", markersize=5, label="Gaussian",
+        ),
+    )
+    axis.legend(
+        handles=family_handles,
+        title=r"Family (area $\propto$ coordinates)",
+        loc="lower right",
+        fontsize=6.5,
+        title_fontsize=6.5,
+        frameon=True,
+        handletextpad=0.4,
+        borderpad=0.4,
+    )
 
-    for axis, metric, xlabel, title in zip(
-        axes[:2],
-        ("mpjpe_cm", "nll"),
-        ("MPJPE (cm)", "Proper NLL"),
-        ("Point error", "Probabilistic fit"),
-    ):
-        for index, model in enumerate(models):
-            side = records[model]["side"].get(metric)
-            top = records[model]["top"].get(metric)
-            if side is not None and top is not None:
-                axis.plot(
-                    (side, top),
-                    (y[index], y[index]),
-                    color=COLORS["neutral"],
-                    linewidth=1.0,
-                    zorder=1,
-                )
-            if side is not None:
-                axis.scatter(
-                    side,
-                    y[index],
-                    color=side_color,
-                    edgecolor="white",
-                    linewidth=0.7,
-                    s=34,
-                    zorder=3,
-                )
-                axis.annotate(
-                    f"{side:.1f}",
-                    (side, y[index]),
-                    xytext=(-4, 7),
-                    textcoords="offset points",
-                    ha="right",
-                    va="bottom",
-                    color=side_color,
-                    fontsize=7.5,
-                )
-            if top is not None:
-                axis.scatter(
-                    top,
-                    y[index],
-                    color=top_color,
-                    edgecolor="white",
-                    linewidth=0.7,
-                    s=34,
-                    zorder=3,
-                )
-                axis.annotate(
-                    f"{top:.1f}",
-                    (top, y[index]),
-                    xytext=(4, -7),
-                    textcoords="offset points",
-                    ha="left",
-                    va="top",
-                    color=top_color,
-                    fontsize=7.5,
-                )
-        axis.set_yticks(y, [MODEL_LABELS[model] for model in models])
-        axis.set_xlabel(xlabel)
-        axis.set_title(title, loc="left", fontweight="bold")
-        axis.grid(axis="x")
-        axis.tick_params(axis="y", length=0)
-
-    auroc = [records[model]["ood"].get("side_top_uncertainty_auroc", np.nan) for model in models]
-    axes[2].axvline(
+    auroc_models = tuple(
+        model
+        for model in probabilistic_models
+        if np.isfinite(records[model]["ood"].get("side_top_uncertainty_auroc", np.nan))
+    )
+    y = np.arange(len(auroc_models))[::-1]
+    axis = axes[1]
+    axis.axvline(
         0.5,
         color=COLORS["dark_gray"],
         linestyle="--",
         linewidth=1.0,
-        label="Chance",
     )
-    for model, value, ypos in zip(models, auroc, y):
-        if np.isfinite(value):
-            color = METHOD_COLORS[model]
-            axes[2].hlines(
-                ypos,
-                0.5,
-                value,
-                color=color,
-                linewidth=2.0,
-                alpha=0.8,
-                zorder=2,
-            )
-            axes[2].scatter(
-                value,
-                ypos,
-                color=color,
-                edgecolor="white",
-                linewidth=0.7,
-                s=38,
-                zorder=3,
-            )
-            axes[2].annotate(
-                f"{value:.3f}",
-                (value, ypos),
-                xytext=(4 if value >= 0.5 else -4, 0),
-                textcoords="offset points",
-                ha="left" if value >= 0.5 else "right",
-                va="center",
-                fontsize=7.5,
-                color=color,
-            )
-    axes[2].set_xlim(0, 1.08)
-    axes[2].set_yticks(y, [MODEL_LABELS[model] for model in models])
-    axes[2].set_xlabel("Side/top AUROC")
-    axes[2].set_title("OOD ranking", loc="left", fontweight="bold")
-    axes[2].grid(axis="x")
-    axes[2].tick_params(axis="y", length=0)
-    axes[0].scatter([], [], color=side_color, label="Side IID", s=34)
-    axes[0].scatter([], [], color=top_color, label="Top OOD", s=34)
-    handles, labels = axes[0].get_legend_handles_labels()
-    handles.append(axes[2].lines[0])
-    labels.append("Chance")
-    fig.legend(
-        handles,
-        labels,
-        loc="upper center",
-        bbox_to_anchor=(0.5, 0.995),
-        ncol=3,
-        handlelength=1.8,
-        columnspacing=1.5,
-    )
-    label_panels(axes, x=-0.14, y=1.07, fontsize=10)
-    fig.subplots_adjust(left=0.13, right=0.99, bottom=0.17, top=0.80, wspace=0.35)
+    for model, value, ypos in zip(
+        auroc_models,
+        (records[model]["ood"]["side_top_uncertainty_auroc"] for model in auroc_models),
+        y,
+    ):
+        color = METHOD_COLORS[model]
+        axis.hlines(ypos, 0.5, value, color=color, linewidth=2.1, alpha=0.85, zorder=2)
+        axis.scatter(
+            value,
+            ypos,
+            color=color,
+            edgecolor="white",
+            linewidth=0.7,
+            s=43,
+            zorder=3,
+        )
+        axis.annotate(
+            f"{value:.3f}",
+            (value, ypos),
+            xytext=(4, 0),
+            textcoords="offset points",
+            ha="left",
+            va="center",
+            fontsize=7.2,
+            color=color,
+        )
+    axis.set_xlim(0, 1.06)
+    axis.set_yticks(y, [MODEL_LABELS[model] for model in auroc_models])
+    axis.set_xlabel("Side/top uncertainty AUROC")
+    axis.set_title("Single-seed OOD ranking", loc="left", fontweight="bold")
+    axis.grid(axis="x", alpha=0.65)
+    axis.tick_params(axis="y", length=0)
+    fig.subplots_adjust(left=0.14, right=0.99, bottom=0.20, top=0.86, wspace=0.35)
     save_figure(fig, output / "itop_final_overview", formats=("pdf", "png"))
     plt.close(fig)
 
