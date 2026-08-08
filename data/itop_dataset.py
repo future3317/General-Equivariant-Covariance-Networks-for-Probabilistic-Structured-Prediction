@@ -232,7 +232,10 @@ class ITOPDepthDataset(Dataset):
         return points[selected]
 
     def __getitem__(self, item: int) -> Data:
-        record = self.sample_record(item)
+        return self.data_from_record(self.sample_record(item))
+
+    def data_from_record(self, record: dict[str, np.ndarray | int]) -> Data:
+        """Convert one canonical geometric record into the model input schema."""
         pos = torch.from_numpy(record["points"]).float()
         edge_index = knn_graph(pos, self.num_neighbors)
         return ITOPData(
@@ -248,9 +251,23 @@ class ITOPDepthDataset(Dataset):
 
     def sample_record(self, item: int) -> dict[str, np.ndarray | int]:
         """Return the deterministic geometric record before graph featurization."""
+        return self.sample_record_from_depth(item, self.depth_map(item))
+
+    def depth_map(self, item: int) -> np.ndarray:
+        """Return a writable raw depth observation for an indexed valid frame."""
         frame_index = int(self.indices[item])
-        depth = np.asarray(self._depth_data()[frame_index], dtype=np.float32)
+        return np.array(self._depth_data()[frame_index], dtype=np.float32, copy=True)
+
+    def sample_record_from_depth(
+        self,
+        item: int,
+        depth: np.ndarray,
+    ) -> dict[str, np.ndarray | int]:
+        """Apply the canonical geometry path to a supplied input-only depth map."""
+        frame_index = int(self.indices[item])
         observed = depth_to_point_cloud(depth)
+        if len(observed) == 0:
+            raise ValueError("depth map contains no valid points")
         centroid = observed.mean(axis=0, dtype=np.float64).astype(np.float32)
         points = self._sample_points(observed - centroid)
         joints = self.real_world_coordinates[frame_index] - centroid
