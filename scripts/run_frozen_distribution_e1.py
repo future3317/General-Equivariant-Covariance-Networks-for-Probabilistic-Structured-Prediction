@@ -12,6 +12,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from compatibility.e3nn import o3
 from data.frozen_distribution_features import frozen_distribution_loaders
 from distributions import StudentTNLL
 from equivcompiler import (
@@ -85,8 +86,10 @@ def _covariance_policy(metadata: dict, variant: str):
 
 
 def _build_spd_map(metadata: dict, variant: str, device: torch.device):
-    if metadata["operator_family"]["kind"] != "full":
-        raise ValueError("the first E1 phase is preregistered for Full operators")
+    output_dimension = o3.Irreps(metadata["output_irreps"]).dim
+    expected = output_dimension * (output_dimension + 1) // 2
+    if int(metadata["parameter_count"]) != expected:
+        raise ValueError("the first E1 phase is preregistered for Full coordinates")
     plan = plan_readout(
         FeatureSpec.from_irreps(metadata["feature_irreps"], scope="global"),
         output=metadata["output_irreps"],

@@ -74,7 +74,14 @@ def main() -> None:
         raise FileExistsError(f"refusing to overwrite E1 cache: {args.output_dir}")
     device = torch.device(args.device)
     model, spec, compilation = load_dielectric_checkpoint(args.checkpoint_dir, device)
-    if spec.distribution != "student_t" or compilation.operator_family.kind != "full":
+    full_parameter_count = (
+        compilation.output_spec.dim * (compilation.output_spec.dim + 1) // 2
+    )
+    if (
+        spec.distribution != "student_t"
+        or compilation.covariance_parameter_count != full_parameter_count
+        or len(compilation.operator_family.parameter_bindings) != 1
+    ):
         raise ValueError(
             "E1 dielectric cache requires the released Full Student-t model"
         )
