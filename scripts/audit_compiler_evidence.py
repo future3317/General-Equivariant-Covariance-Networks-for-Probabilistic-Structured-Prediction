@@ -47,6 +47,7 @@ def _family_cases() -> tuple[tuple[str, str, object], ...]:
         ("rank2/full", "ij=ji", FullCovariance()),
         ("rank2/low_rank", "ij=ji", LowRankCovariance(2)),
         ("rank2/isotypic", "ij=ji", IsotypicBlockCovariance()),
+        ("ITOP/full", graph.output_irreps, FullCovariance()),
         ("ITOP/graph", graph.output_irreps, GraphPrecision(graph)),
         ("elasticity/full", "ijkl=jikl=ijlk=klij", FullCovariance()),
         ("elasticity/low_rank", "ijkl=jikl=ijlk=klij", LowRankCovariance(8)),

@@ -1,4 +1,4 @@
-"""Audit and aggregate frozen-backbone ITOP Graph-Student-t runs."""
+"""Audit and aggregate frozen-backbone ITOP Student-t head-seed runs."""
 
 from __future__ import annotations
 
@@ -36,12 +36,12 @@ def _read(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _audit_run(seed: int, run: Path) -> dict[str, Any]:
+def _audit_run(seed: int, run: Path, *, model: str) -> dict[str, Any]:
     missing = [name for name in REQUIRED_ARTIFACTS if not (run / name).is_file()]
     if missing:
         raise FileNotFoundError(f"seed {seed}: missing artifacts {missing}")
     args = _read(run / "args.json")
-    if args.get("seed") != seed or args.get("model") != "graph_student_t":
+    if args.get("seed") != seed or args.get("model") != model:
         raise ValueError(f"seed {seed}: args.json does not identify this run")
     if args.get("phase") != "frozen_head":
         raise ValueError(f"seed {seed}: robustness audit requires frozen_head")
@@ -66,7 +66,7 @@ def _audit_run(seed: int, run: Path) -> dict[str, Any]:
     for view in ("side", "top"):
         prediction = _load_prediction(run / f"predictions_{view}.pt")
         record = _prediction_audit(
-            prediction, metrics[view], model="frozen_graph_student_t", view=view
+            prediction, metrics[view], model=f"frozen_{model}", view=view
         )
         if record["num_samples"] != 4863:
             raise ValueError(
@@ -121,7 +121,13 @@ def main() -> None:
         action="append",
         required=True,
         metavar="SEED=RUN_DIR",
-        help="repeat once per seed; RUN_DIR is the frozen_graph_student_t directory",
+        help="repeat once per seed; RUN_DIR is the selected frozen-head directory",
+    )
+    parser.add_argument(
+        "--model",
+        choices=("full_student_t", "low_rank_student_t", "graph_student_t"),
+        default="graph_student_t",
+        help="frozen uncertainty-head family to audit",
     )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
@@ -133,7 +139,7 @@ def main() -> None:
             seed = int(seed_text)
         except ValueError as error:
             raise ValueError(f"invalid --seed-run: {specification}") from error
-        records.append(_audit_run(seed, Path(run_text)))
+        records.append(_audit_run(seed, Path(run_text), model=args.model))
     records.sort(key=lambda record: record["seed"])
     if len(records) != 3 or [record["seed"] for record in records] != [42, 43, 44]:
         raise ValueError("the robustness audit requires exactly seeds 42, 43, and 44")
@@ -154,7 +160,8 @@ def main() -> None:
     atomic_write_json(
         {
             "schema_version": 1,
-            "study": "ITOP Graph Student-t frozen-backbone head-seed robustness",
+            "study": f"ITOP {args.model} frozen-backbone head-seed robustness",
+            "model": args.model,
             "seeds": [42, 43, 44],
             "sample_contract": {"side": 4863, "top": 4863},
             "selection": "validation-only NLL within each frozen-head run",
@@ -165,10 +172,10 @@ def main() -> None:
             "records": records,
             "aggregate": aggregate,
         },
-        output / "itop_graph_t_robustness.json",
+        output / f"itop_{args.model}_robustness.json",
     )
     lines = [
-        "# ITOP Graph Student-t robustness audit",
+        f"# ITOP {args.model} robustness audit",
         "",
         "Frozen-backbone head-seed audit; seeds 42, 43, and 44 use the same deterministic backbone and pooled feature cache. Each head uses its own seeded side-train split, sampler, initialization, validation-NLL selection, and complete side/top test prediction artifacts.",
         "",
@@ -184,7 +191,7 @@ def main() -> None:
         "",
         "All prediction audits passed finite-value, shape, sample-count, and metric-recomputation checks. The checkpoint hash is shared across seeds; source commits are recorded where available. Seed 42 is retained as a pre-existing factorial artifact with a legacy environment schema, and this is recorded as a provenance warning rather than silently upgraded.",
     ]
-    (output / "itop_graph_t_robustness.md").write_text(
+    (output / f"itop_{args.model}_robustness.md").write_text(
         "\n".join(lines) + "\n", encoding="utf-8"
     )
     print(json.dumps(aggregate, indent=2, sort_keys=True))

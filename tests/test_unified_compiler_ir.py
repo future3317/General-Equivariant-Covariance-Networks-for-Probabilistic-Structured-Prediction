@@ -43,6 +43,7 @@ from representations.operator_ir import (
     OperatorFamilyPlan,
     OperatorIR,
     ParameterBinding,
+    Positivity,
 )
 from representations.operator_lowering import RecursiveOperatorMap
 from representations.representation_ir import (
@@ -81,7 +82,13 @@ def test_all_operator_families_share_one_typed_ir():
     assert roots == ["spectral_positive", "add", "direct_sum"]
     graph_plan = GraphPrecision(graph).compile(O3IrrepsSpec(graph.output_irreps))
     assert graph_plan.assembly.kind == "add"
-    assert graph_plan.assembly.inputs[1].kind == "pullback"
+    pullback = graph_plan.assembly.inputs[1]
+    assert pullback.kind == "pullback"
+    verification = pullback.verify(graph_plan.verification_context)
+    assert verification.positivity is Positivity.PSD
+    assert verification.type_name.startswith("PSD(")
+    assert set(verification.effects) == {"equivariant", "cone:psd"}
+    assert verification.typing_rule == "T-PullbackPSD"
     assert all(plan.compile(output).parameter_expression.as_dict() for plan in families)
 
 

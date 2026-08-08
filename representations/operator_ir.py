@@ -370,7 +370,11 @@ def _typing_annotation(
     if kind == "kronecker_identity":
         return f"Op({space})", "T-KroneckerIdentity"
     if kind == "pullback":
-        return f"SPD({space})" if positivity is Positivity.SPD else f"Op({space})", "T-GraphPullback"
+        if positivity is Positivity.SPD:
+            return f"SPD({space})", "T-InjectivePullback"
+        if positivity is Positivity.PSD:
+            return f"PSD({space})", "T-PullbackPSD"
+        return f"Op({space})", "T-PullbackUnknown"
     return f"Unknown({space})", "T-Unknown"
 
 
