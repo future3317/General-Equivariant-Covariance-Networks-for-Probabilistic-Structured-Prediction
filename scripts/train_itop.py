@@ -75,7 +75,7 @@ MODEL_KINDS = (
     "graph_gaussian",
     "graph_student_t",
 )
-PHASES = ("deterministic", "frozen_head", "joint_finetune")
+PHASES = ("deterministic", "frozen_head", "joint_finetune", "end_to_end")
 
 
 def _logger(run_dir: Path, *, continuing: bool) -> logging.Logger:
@@ -311,6 +311,12 @@ def _configure_initialization(model, args: argparse.Namespace) -> bool:
         for parameter in model.joint_head.mean_head.parameters():
             parameter.requires_grad_(False)
         return True
+    if args.phase == "end_to_end":
+        if args.backbone_checkpoint is not None or args.resume_checkpoint is not None:
+            raise ValueError(
+                "end_to_end requires an independent initialization without input checkpoints"
+            )
+        return False
     if args.resume_checkpoint is None:
         raise ValueError("joint_finetune requires --resume_checkpoint")
     payload = _load_checkpoint(args.resume_checkpoint)
@@ -351,12 +357,18 @@ def _freeze_record(model, args: argparse.Namespace) -> dict[str, Any]:
                 "deterministic phase unexpectedly contains frozen parameters"
             )
         boundary = "all deterministic parameters trainable"
-    else:
+    elif args.phase == "joint_finetune":
         if frozen:
             raise RuntimeError(
                 "joint fine-tuning unexpectedly contains frozen parameters"
             )
         boundary = "all parameters trainable from the selected frozen checkpoint"
+    else:
+        if frozen:
+            raise RuntimeError(
+                "end-to-end phase unexpectedly contains frozen parameters"
+            )
+        boundary = "all probabilistic parameters trainable from an independent initialization"
     return {
         "phase": args.phase,
         "boundary": boundary,

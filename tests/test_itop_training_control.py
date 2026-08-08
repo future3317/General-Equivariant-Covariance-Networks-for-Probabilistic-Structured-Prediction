@@ -22,6 +22,7 @@ from scripts.train_itop import (
     MODEL_KINDS,
     _build_model,
     _capture_rng_state,
+    _configure_initialization,
     _freeze_record,
     _load_checkpoint,
     _restore_rng_state,
@@ -228,6 +229,20 @@ def test_itop_factorial_exposes_radial_and_operator_controls():
     assert "independent_student_t" in MODEL_KINDS
     assert "low_rank_student_t" in MODEL_KINDS
     assert "full_student_t" in MODEL_KINDS
+
+
+def test_end_to_end_phase_requires_independent_probabilistic_initialization():
+    model = torch.nn.Linear(2, 2)
+    args = SimpleNamespace(
+        phase="end_to_end",
+        model="full_student_t",
+        backbone_checkpoint=None,
+        resume_checkpoint=None,
+    )
+    assert _configure_initialization(model, args) is False
+    args.resume_checkpoint = "old.pt"
+    with pytest.raises(ValueError, match="independent initialization"):
+        _configure_initialization(model, args)
 
 
 @pytest.mark.parametrize(
