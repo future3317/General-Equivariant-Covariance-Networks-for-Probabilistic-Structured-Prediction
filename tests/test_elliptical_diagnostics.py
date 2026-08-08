@@ -4,6 +4,7 @@ from evaluation.elliptical import (
     elliptical_falsification_from_whitened,
     falsification_decision,
 )
+from scripts.audit_elliptical_law import _tertiles
 
 
 def _student_t_samples(
@@ -52,3 +53,15 @@ def test_directional_misspecification_is_detected():
     assert falsification_decision(audit)[
         "single_component_elliptical_structure_rejected"
     ]
+
+
+def test_tied_descriptor_quantiles_produce_nonempty_semantic_strata():
+    values = torch.tensor([2.0] * 4 + [3.0] * 16 + [4.0] * 5 + [5.0])
+    strata = _tertiles(values, "element_count")
+    assert list(strata) == [
+        "element_count_below_tied_cut",
+        "element_count_at_tied_cut",
+        "element_count_above_tied_cut",
+    ]
+    assert [int(mask.sum()) for mask in strata.values()] == [4, 16, 6]
+    assert torch.stack(list(strata.values())).sum(dim=0).eq(1).all()

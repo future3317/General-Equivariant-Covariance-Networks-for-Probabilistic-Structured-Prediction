@@ -52,6 +52,13 @@ def _json_artifact(path: Path) -> dict[str, Any]:
 def _tertiles(values: torch.Tensor, name: str) -> dict[str, torch.Tensor]:
     values = values.float()
     lower, upper = torch.quantile(values, torch.tensor([1.0 / 3.0, 2.0 / 3.0]))
+    if bool(torch.isclose(lower, upper)):
+        candidates = {
+            f"{name}_below_tied_cut": values < lower,
+            f"{name}_at_tied_cut": values == lower,
+            f"{name}_above_tied_cut": values > upper,
+        }
+        return {key: mask for key, mask in candidates.items() if bool(mask.any())}
     return {
         f"{name}_low": values <= lower,
         f"{name}_mid": (values > lower) & (values <= upper),
