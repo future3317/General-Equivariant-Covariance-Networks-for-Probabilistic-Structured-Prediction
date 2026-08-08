@@ -28,10 +28,10 @@ Evidence labels:
 | ITOP frozen-head three-seed audit | Yes | Yes | Verified, but not E3 | `results/itop_family_robustness_75b2ee1`; `results/itop_graph_t_robustness_ec25e58`; all reuse backbone SHA `85e46d...` |
 | Student-t radial PIT | Yes / dielectric audit | Yes for final unified dielectric checkpoint | Verified partially for E0 | `evaluation/metrics.py::student_t_radial_pit`; server unified joint `symmetry_audit.json` |
 | Symmetric whitening and second-moment defect | Yes / dielectric audit | Yes | Verified partially for E0 | `symmetric_whitened_residuals`, `whitened_second_moment_defect`, and `irrep_resolved_whitening_defect`; unified joint audit |
-| Random-direction projection PIT | Yes, added after the audit / E0 runner | No released cross-family artifact yet | Implemented, verification pending | `evaluation/elliptical.py`; `scripts/audit_elliptical_law.py` |
-| Whitened-direction sphericality | Yes, added after the audit / E0 runner | No released cross-family artifact yet | Implemented, verification pending | Pure directional test in `evaluation/elliptical.py`; the legacy `whitened_angular_defect` remains only a compatibility alias for the joint defect |
-| Radius-direction dependence | Yes, added after the audit / E0 runner | No released cross-family artifact yet | Implemented, verification pending | Signed/axial Spearman max-statistic permutation test in `evaluation/elliptical.py` |
-| E0 stratification by ITOP visibility / dielectric descriptors | Yes, added after the audit / E0 runner | Partial descriptive ITOP evidence only; formal E0 artifacts pending | Implemented, verification pending | Semantic ITOP visibility bins and dielectric descriptor strata in `scripts/audit_elliptical_law.py` |
+| Random-direction projection PIT | Yes / E0 runner | Yes for ITOP Graph-t, ITOP Full-t, and unified dielectric | Verified E0 | `evaluation/elliptical.py`; server `uncertainty_root_cause_d945901` |
+| Whitened-direction sphericality | Yes / E0 runner | Yes for ITOP Graph-t, ITOP Full-t, and unified dielectric | Verified E0 | Pure directional test in `evaluation/elliptical.py`; the legacy `whitened_angular_defect` remains only a compatibility alias for the joint defect |
+| Radius-direction dependence | Yes / E0 runner | Yes for ITOP Graph-t, ITOP Full-t, and unified dielectric | Verified E0 | Signed/axial Spearman max-statistic permutation test; server `uncertainty_root_cause_d945901` |
+| E0 stratification by ITOP visibility / dielectric descriptors | Yes / E0 runner | Yes, with insufficient-sample strata explicitly retained | Verified E0 | Semantic ITOP visibility bins and dielectric descriptor strata in `scripts/audit_elliptical_law.py`; released E0 JSON |
 | Dielectric fixed-ν frozen-family baseline | Yes | Yes | Verified | Unified three-stage Student-t artifact and current manuscript tables |
 | Strict matched spectral-window control | Required maps and covariance-only stage exist | No | Missing E1 control | Existing three saved runs differ in width/backend/precision/metric settings and are correctly labeled descriptive only |
 | Unbounded matrix-exp control on identical frozen H, μ | Map exists and trainer accepts it | No matching artifact | Missing E1 control | `spd_maps/matrix_exp.py`; `scripts/train_dielectric.py`; no server dielectric `args.json` uses `matrix_exp` |
@@ -48,15 +48,14 @@ Targeted regression tests executed during this audit and the minimal E0 addition
 `tests/test_distributions.py`, `tests/test_ensemble.py`,
 `tests/test_mathematical_contract.py`, and
 `tests/test_itop_training_control.py`, plus
-`tests/test_elliptical_diagnostics.py`: **33 passed**.
+`tests/test_elliptical_diagnostics.py`: **34 passed** after the tied-stratum
+regression gate was added.
 
 The E0 implementation was added only after the baseline audit established that
 the diagnostics were absent. It reuses the existing symmetric-whitening
-primitive and SciPy reference distributions, adds no new distribution or SPD
-parameterization, and has not yet been promoted to experimental evidence. A
-preliminary Graph-t JSON was generated during development, but must be rerun
-with the final semantic visibility strata and compared with Full-t before it is
-used for a root-cause conclusion.
+primitive and SciPy reference distributions and adds no new distribution or
+SPD parameterization. The preliminary Graph-t development JSON is superseded
+by the clean-worktree `d945901` Graph-t/Full-t/dielectric artifact set below.
 
 ## Already done that overlaps the proposed work
 
