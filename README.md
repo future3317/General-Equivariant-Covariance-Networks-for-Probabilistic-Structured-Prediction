@@ -663,8 +663,9 @@ centers only by the observable point-cloud centroid, filters invalid frames,
 and preserves joint visibility for visible/occluded calibration analysis. The
 controlled study trains a deterministic model, caches its frozen pooled
 features, then compares independent Gaussian, independent Student-t,
-parameter-matched low-rank Student-t, graph Gaussian, and graph Student-t
-operators behind the same frozen backbone and deterministic mean readout. It
+rank-4 low-rank Student-t, graph Gaussian, graph Student-t, and a 1,035-coordinate
+full Student-t control behind the same frozen backbone and deterministic mean
+readout. It
 reports side-view IID and side-to-top OOD accuracy, likelihood,
 calibration, risk--coverage, occlusion, and residual-correlation metrics. The
 default final decision uses the frozen-head comparison; joint fine-tuning is an
@@ -672,7 +673,28 @@ optional ablation because the completed side-only joint run harmed cross-view
 OOD likelihood. The
 development/final point budgets are 256/512; the development subset is only a
 configuration gate, while the final protocol uses all side-train frames. No
-ground-truth torso centering is used.
+ground-truth torso centering is used. Because the backbone and mean readout are
+frozen, all uncertainty heads have identical MPJPE by construction; this audit
+compares predictive-distribution families rather than point estimators.
+
+The completed three-seed family audit fixes the same deterministic checkpoint
+and pooled feature cache for Full-t, LR-t, and Graph-t. The checkpoint SHA-256 is
+`85e46daac36ea6fd04da518d4c86411e4add2723f62c57d933824433c137363a`;
+each head uses Student-t `nu=5`, seeds 42/43/44, validation-only NLL selection,
+and complete 4,863-frame side/top predictions. Audited summaries are under
+`results/itop_family_robustness_75b2ee1/audit/` and
+`results/itop_graph_t_robustness_ec25e58/audit/`:
+
+| Family | Active coordinates | Side NLL | Top NLL | Side/top AUROC |
+|---|---:|---:|---:|---:|
+| Full-t | 1,035 | -70.785 +/- 0.092 | 8.439 +/- 1.133 | 0.859 +/- 0.172 |
+| LR-t | 181 | -35.992 +/- 0.072 | 31.324 +/- 1.650 | 0.00025 +/- 0.00010 |
+| Graph-t | 174 | -55.936 +/- 0.010 | 4.067 +/- 1.895 | 0.475 +/- 0.387 |
+
+These are sample mean +/- standard deviation over head seeds. Full-t has the
+most stable IID fit, Graph-t has the best mean top-view NLL, and uncertainty
+ranking remains family- and seed-sensitive. None of these runs establishes
+cross-view calibration or a general OOD detector.
 
 Training writes an atomic `history.json` after every epoch with train/validation
 losses, proper-NLL components, learning rates, and gradient norms. Non-finite
