@@ -319,6 +319,9 @@ def test_final_evaluator_ignores_incomplete_stopped_ablation(tmp_path):
         "history.json",
         "predictions_side.pt",
         "predictions_top.pt",
+        "args.json",
+        "environment.json",
+        "train.log",
     ):
         (complete / filename).touch()
     (partial / "history.json").touch()

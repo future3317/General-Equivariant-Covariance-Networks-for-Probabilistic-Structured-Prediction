@@ -38,27 +38,27 @@ MODEL_INFO = OrderedDict(
         ("deterministic", ("Det.", "deterministic")),
         (
             "frozen_full_student_t",
-            ("Full-t (F)", "frozen"),
+            ("Full-t", "frozen"),
         ),
         (
             "frozen_independent_gaussian",
-            ("Indep-G (F)", "frozen"),
+            ("Indep-G", "frozen"),
         ),
         (
             "frozen_independent_student_t",
-            ("Indep-t (F)", "frozen"),
+            ("Indep-t", "frozen"),
         ),
         (
             "frozen_low_rank_student_t",
-            ("LR-t (F)", "frozen"),
+            ("LR-t", "frozen"),
         ),
-        ("frozen_graph_gaussian", ("Graph-G (F)", "frozen")),
-        ("frozen_graph_student_t", ("Graph-t (F)", "frozen")),
+        ("frozen_graph_gaussian", ("Graph-G", "frozen")),
+        ("frozen_graph_student_t", ("Graph-t", "frozen")),
         (
             "joint_independent_gaussian",
-            ("Indep-G (J)", "joint"),
+            ("Indep-G-Joint", "joint"),
         ),
-        ("joint_graph_student_t", ("Graph-t (J)", "joint")),
+        ("joint_graph_student_t", ("Graph-t-Joint", "joint")),
     )
 )
 
@@ -156,7 +156,15 @@ def _available_models(root: Path) -> tuple[str, ...]:
     no test predictions/metrics.  That artifact is useful provenance, not a
     valid row in the final comparison.
     """
-    required = ("metrics.json", "history.json", "predictions_side.pt", "predictions_top.pt")
+    required = (
+        "metrics.json",
+        "history.json",
+        "predictions_side.pt",
+        "predictions_top.pt",
+        "args.json",
+        "environment.json",
+        "train.log",
+    )
     return tuple(
         model
         for model in MODEL_INFO

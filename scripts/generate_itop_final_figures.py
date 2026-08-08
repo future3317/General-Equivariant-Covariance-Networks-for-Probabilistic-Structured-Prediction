@@ -19,6 +19,7 @@ from plotting import COLORS, cm2inch, label_panels, save_figure, setup_tpami_sty
 
 MODEL_LABELS = {
     "deterministic": "Det.",
+    "frozen_full_student_t": "Full-t",
     "frozen_independent_gaussian": "Indep-G",
     "frozen_independent_student_t": "Indep-t",
     "frozen_low_rank_student_t": "LR-t",
@@ -28,6 +29,7 @@ MODEL_LABELS = {
 
 METHOD_COLORS = {
     "deterministic": COLORS["dark_gray"],
+    "frozen_full_student_t": COLORS["violet"],
     "frozen_independent_gaussian": COLORS["red_strong"],
     "frozen_independent_student_t": COLORS["red_2"],
     "frozen_low_rank_student_t": COLORS["teal"],
