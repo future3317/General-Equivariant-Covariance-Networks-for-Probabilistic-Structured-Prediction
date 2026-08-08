@@ -85,15 +85,40 @@ def sample_ensemble(
 
 
 def energy_score_from_samples(
-    samples: torch.Tensor, target: torch.Tensor
+    samples: torch.Tensor,
+    target: torch.Tensor,
+    *,
+    sample_chunk_size: int = 4,
+    observation_chunk_size: int = 256,
 ) -> torch.Tensor:
-    """Energy Score from explicit predictive samples ``(S,N,d)``."""
+    """Exact Energy Score from predictive samples ``(S,N,d)``.
+
+    The all-pairs term is evaluated in bounded blocks. This changes only the
+    reduction schedule, not the all-pairs Monte Carlo estimator.
+    """
     if samples.ndim != 3 or target.shape != samples.shape[1:]:
         raise ValueError("samples must be (S,N,d) and target must be (N,d)")
+    if sample_chunk_size < 1 or observation_chunk_size < 1:
+        raise ValueError("Energy Score chunk sizes must be positive")
     first = torch.linalg.vector_norm(samples - target.unsqueeze(0), dim=-1).mean(0)
-    pairwise = torch.linalg.vector_norm(
-        samples[:, None] - samples[None, :], dim=-1
-    ).mean((0, 1))
+    num_samples, num_observations, _ = samples.shape
+    pairwise_parts = []
+    for observation_start in range(0, num_observations, observation_chunk_size):
+        observation_stop = min(
+            observation_start + observation_chunk_size, num_observations
+        )
+        observation_samples = samples[:, observation_start:observation_stop]
+        pairwise_sum = samples.new_zeros(observation_stop - observation_start)
+        for sample_start in range(0, num_samples, sample_chunk_size):
+            sample_stop = min(sample_start + sample_chunk_size, num_samples)
+            distances = torch.linalg.vector_norm(
+                observation_samples[sample_start:sample_stop, None]
+                - observation_samples[None, :],
+                dim=-1,
+            )
+            pairwise_sum = pairwise_sum + distances.sum((0, 1))
+        pairwise_parts.append(pairwise_sum / (num_samples * num_samples))
+    pairwise = torch.cat(pairwise_parts)
     return (first - 0.5 * pairwise).mean()
 
 

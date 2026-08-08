@@ -2,11 +2,38 @@ import torch
 
 from evaluation.ensemble import (
     combine_ensemble_moments,
+    energy_score_from_samples,
     ensemble_nll,
     finite_mixture_nll,
     sample_ensemble,
     variogram_score,
 )
+
+
+def test_chunked_energy_score_matches_dense_value_and_gradient():
+    torch.manual_seed(7)
+    target = torch.randn(5, 3, dtype=torch.float64)
+    chunked_samples = torch.randn(7, 5, 3, dtype=torch.float64, requires_grad=True)
+    dense_samples = chunked_samples.detach().clone().requires_grad_(True)
+
+    chunked = energy_score_from_samples(
+        chunked_samples,
+        target,
+        sample_chunk_size=2,
+        observation_chunk_size=3,
+    )
+    first = torch.linalg.vector_norm(dense_samples - target.unsqueeze(0), dim=-1).mean(
+        0
+    )
+    pairwise = torch.linalg.vector_norm(
+        dense_samples[:, None] - dense_samples[None, :], dim=-1
+    ).mean((0, 1))
+    dense = (first - 0.5 * pairwise).mean()
+
+    chunked_gradient = torch.autograd.grad(chunked, chunked_samples)[0]
+    dense_gradient = torch.autograd.grad(dense, dense_samples)[0]
+    torch.testing.assert_close(chunked, dense, rtol=1e-12, atol=1e-12)
+    torch.testing.assert_close(chunked_gradient, dense_gradient, rtol=1e-12, atol=1e-12)
 
 
 def test_total_covariance_separates_aleatoric_and_epistemic_terms():
