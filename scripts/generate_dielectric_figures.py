@@ -284,12 +284,12 @@ def plot_uncertainty_alignment(
     labels = [r"$c_{11}$", r"$c_{22}$", r"$c_{33}$", r"$c_{23}$", r"$c_{13}$", r"$c_{12}$"]
     distribution_label = r"Student-$t$" if distribution == "student_t" else "Gaussian"
     correlation_difference = predicted_corr - residual_corr
-    fig = plt.figure(figsize=cm2inch(18.2, 10.4))
+    fig = plt.figure(figsize=cm2inch(18.2, 11.6))
     grid = fig.add_gridspec(
         3,
         3,
-        height_ratios=(1.0, 0.055, 0.58),
-        hspace=0.46,
+        height_ratios=(1.0, 0.05, 0.60),
+        hspace=0.84,
         wspace=0.22,
     )
     heat_axes = [fig.add_subplot(grid[0, index]) for index in range(3)]
@@ -393,8 +393,8 @@ def plot_uncertainty_alignment(
     )
     coverage_axis.legend(
         fontsize=7,
-        loc="lower center",
-        bbox_to_anchor=(0.5, 1.01),
+        loc="center",
+        bbox_to_anchor=(0.58, 0.18),
         ncol=2,
     )
     coverage_axis.grid(axis="x", alpha=0.25)
