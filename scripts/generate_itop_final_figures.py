@@ -1,5 +1,7 @@
 """Generate the two compact ITOP figures used by the TPAMI manuscript."""
 
+# ruff: noqa: I001 -- torch must initialize before matplotlib on Windows.
+
 from __future__ import annotations
 
 import argparse
@@ -8,15 +10,18 @@ import sys
 from collections import deque
 from pathlib import Path
 
+# Import order avoids competing OpenMP runtimes when the certified map is evaluated.
+import torch
 import matplotlib.pyplot as plt
 import numpy as np
-import torch
 from matplotlib.lines import Line2D
+from matplotlib.patches import Ellipse, Patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from data.itop_dataset import ITOP_SKELETON_EDGES
-from plotting import COLORS, cm2inch, label_panels, save_figure, setup_tpami_style
+from data.itop_dataset import ITOP_OUTPUT_GRAPH, ITOP_SKELETON_EDGES
+from equivcompiler import FeatureSpec, GraphPrecision, plan_readout
+from plotting import COLORS, cm2inch, save_figure, setup_tpami_style
 
 MODEL_LABELS = {
     "deterministic": "Det.",
@@ -150,14 +155,18 @@ def _bootstrap_distance_intervals(
         indices = rng.integers(0, num_frames, size=num_frames)
         sample = residual[indices]
         centered = sample - sample.mean(axis=0, keepdims=True)
-        covariance = np.einsum("fja,fka->jk", centered, centered)
-        scale = np.sqrt(np.maximum(np.diag(covariance), np.finfo(float).eps))
-        correlation = covariance / (scale[:, None] * scale[None, :])
+        energy = np.sum(centered * centered, axis=(0, 2))
         bootstraps.append(
             [
                 np.mean(
                     [
-                        correlation[source, target]
+                        np.sum(centered[:, source] * centered[:, target])
+                        / np.sqrt(
+                            max(
+                                energy[source] * energy[target],
+                                np.finfo(float).eps,
+                            )
+                        )
                         for source, target in pairs[int(distance)]
                     ]
                 )
@@ -166,6 +175,187 @@ def _bootstrap_distance_intervals(
         )
     values = np.asarray(bootstraps)
     return np.percentile(values, 2.5, axis=0), np.percentile(values, 97.5, axis=0)
+
+
+def _representative_frame(side: dict, top: dict) -> tuple[int, int]:
+    """Select a deterministic paired frame with maximal top-view visibility."""
+    side_lookup = {
+        int(frame): index for index, frame in enumerate(side["frame_index"].tolist())
+    }
+    common = [
+        (side_lookup[int(frame)], top_index)
+        for top_index, frame in enumerate(top["frame_index"].tolist())
+        if int(frame) in side_lookup
+    ]
+    if not common:
+        raise ValueError("side and top predictions have no common frame identifiers")
+    visible = np.asarray(
+        [int(top["visible_joints"][top_index].sum()) for _, top_index in common]
+    )
+    candidates = np.flatnonzero(visible == visible.max())
+    uncertainty = np.asarray(
+        [float(top["frame_uncertainty"][common[index][1]]) for index in candidates]
+    )
+    median = float(np.median(uncertainty))
+    selected = int(candidates[np.argmin(np.abs(uncertainty - median))])
+    return common[selected]
+
+
+def _graph_spd_map(root: Path):
+    """Rebuild the exact certified parameter-layout transform saved with the run."""
+    seed_root = _seed_root(root)
+    candidates = (
+        root / "frozen_graph_student_t" / "compilation.json",
+        seed_root / "frozen_graph_student_t" / "compilation.json",
+    )
+    report_path = next((path for path in candidates if path.is_file()), None)
+    if report_path is None:
+        raise FileNotFoundError(
+            "A graph compilation report is required to interpret saved coordinates"
+        )
+    saved = json.loads(report_path.read_text(encoding="utf-8"))
+    plan = plan_readout(
+        FeatureSpec.from_irreps(saved["seed"]["irreps"], scope="node"),
+        output=ITOP_OUTPUT_GRAPH.output_irreps,
+        covariance=GraphPrecision(ITOP_OUTPUT_GRAPH),
+        distribution="student_t",
+        student_t_dof=float(saved["objective"]["degrees_of_freedom"]),
+        output_scope="global",
+    )
+    rebuilt = plan.report.as_dict()
+    saved_family = saved["family"]
+    rebuilt_family = rebuilt["family"]
+    if (
+        saved_family["operator_program_hash"]
+        != rebuilt_family["operator_program_hash"]
+        or saved_family["parameter_count"] != rebuilt_family["parameter_count"]
+        or saved_family["optimization"]["parameter_layout_transform"]
+        != rebuilt_family["optimization"]["parameter_layout_transform"]
+    ):
+        raise ValueError("saved graph coordinates do not match the current certified layout")
+    return plan.compilation.build_spd_map()
+
+
+def _scatter_ellipse(
+    center: np.ndarray,
+    scatter: torch.Tensor,
+    *,
+    color: str,
+) -> Ellipse:
+    """Return the 50% contour for a 2-D Student-t marginal with fixed nu=5."""
+    eigenvalues, eigenvectors = torch.linalg.eigh(scatter)
+    # q / 2 ~ F(2, 5), hence sqrt(q_0.5) = 1.263938113146554.
+    radial = 1.263938113146554
+    order = torch.argsort(eigenvalues, descending=True)
+    eigenvalues = eigenvalues[order].clamp_min(1e-12)
+    direction = eigenvectors[:, order[0]]
+    angle = np.degrees(np.arctan2(float(direction[1]), float(direction[0])))
+    return Ellipse(
+        center,
+        width=2.0 * radial * float(torch.sqrt(eigenvalues[0])),
+        height=2.0 * radial * float(torch.sqrt(eigenvalues[1])),
+        angle=angle,
+        facecolor=color,
+        edgecolor=color,
+        linewidth=0.8,
+        alpha=0.16,
+        zorder=2,
+    )
+
+
+def _plot_pose_distribution(
+    axis,
+    prediction: dict,
+    index: int,
+    *,
+    mapping,
+    color: str,
+    title: str,
+) -> None:
+    mean = prediction["mean"][index].reshape(15, 3).numpy()
+    target = prediction["target"][index].reshape(15, 3).numpy()
+    visible = prediction["visible_joints"][index].numpy()
+    params = prediction["params"][index].unsqueeze(0).float()
+    scatter = mapping(params)[0].detach().double()
+    precision = mapping.precision(params)[0].detach().double()
+    spans = np.ptp(target, axis=0)
+    vertical = int(np.argmax(spans))
+    horizontal = int(np.argmax(np.where(np.arange(3) == vertical, -np.inf, spans)))
+    projection = (horizontal, vertical)
+    mean_2d = mean[:, projection]
+    target_2d = target[:, projection]
+    edge_strength = torch.stack(
+        [
+            torch.linalg.matrix_norm(
+                precision[
+                    3 * source : 3 * source + 3,
+                    3 * target_node : 3 * target_node + 3,
+                ],
+                ord="fro",
+            )
+            for source, target_node in ITOP_SKELETON_EDGES
+        ]
+    ).numpy()
+    lower, upper = np.percentile(edge_strength, (10, 90))
+    scale = np.clip((edge_strength - lower) / max(upper - lower, 1e-12), 0, 1)
+    for (source, target_node), strength in zip(ITOP_SKELETON_EDGES, scale):
+        axis.plot(
+            *mean_2d[[source, target_node]].T,
+            color=color,
+            linewidth=0.8 + 2.2 * strength,
+            alpha=0.88,
+            zorder=3,
+        )
+        axis.plot(
+            *target_2d[[source, target_node]].T,
+            color=COLORS["gray"],
+            linestyle="--",
+            linewidth=0.8,
+            alpha=0.65,
+            zorder=1,
+        )
+    axis.scatter(
+        *mean_2d[visible].T,
+        color=color,
+        edgecolor="white",
+        linewidth=0.5,
+        s=20,
+        zorder=5,
+    )
+    axis.scatter(
+        *mean_2d[~visible].T,
+        facecolor="white",
+        edgecolor=color,
+        linewidth=0.9,
+        s=20,
+        zorder=5,
+    )
+    for joint in (0, 6, 7, 8, 13, 14):
+        coordinate_indices = [3 * joint + coordinate for coordinate in projection]
+        block = scatter[coordinate_indices][:, coordinate_indices]
+        axis.add_patch(
+            _scatter_ellipse(mean_2d[joint], block, color=color)
+        )
+    points = np.concatenate((mean_2d, target_2d), axis=0)
+    center = points.mean(axis=0)
+    radius = max(float(np.ptp(points, axis=0).max()) * 0.58, 0.35)
+    axis.set_xlim(center[0] - radius, center[0] + radius)
+    axis.set_ylim(center[1] - radius, center[1] + radius)
+    axis.set_aspect("equal", adjustable="box")
+    axis.set_title(title, loc="left", fontweight="bold", pad=0)
+    axis.set_xticks([])
+    axis.set_yticks([])
+    axis.grid(False)
+    for spine in axis.spines.values():
+        spine.set_visible(False)
+    axis.text(
+        0.03,
+        0.02,
+        f"visible {int(visible.sum())}/15 · camera-plane projection",
+        transform=axis.transAxes,
+        fontsize=7,
+        color=COLORS["dark_gray"],
+    )
 
 
 def _marker_area(model: str) -> float:
@@ -404,11 +594,56 @@ def plot_structure(root: Path, output: Path) -> None:
     )
     distance_values = [int(distance) for distance in distances]
 
-    fig, axes = plt.subplots(
-        1,
+    side_prediction = torch.load(
+        model_root / "predictions_side.pt", map_location="cpu", weights_only=True
+    )
+    top_prediction = torch.load(
+        model_root / "predictions_top.pt", map_location="cpu", weights_only=True
+    )
+    side_index, top_index = _representative_frame(side_prediction, top_prediction)
+    mapping = _graph_spd_map(root)
+    fig = plt.figure(figsize=cm2inch(18.0, 12.3))
+    grid = fig.add_gridspec(
         2,
-        figsize=cm2inch(18.0, 7.4),
-        gridspec_kw={"width_ratios": (1.05, 1.0)},
+        2,
+        height_ratios=(1.02, 0.88),
+        hspace=0.20,
+        wspace=0.25,
+    )
+    pose_axes = (fig.add_subplot(grid[0, 0]), fig.add_subplot(grid[0, 1]))
+    diagnostic_axes = (fig.add_subplot(grid[1, 0]), fig.add_subplot(grid[1, 1]))
+    _plot_pose_distribution(
+        pose_axes[0],
+        side_prediction,
+        side_index,
+        mapping=mapping,
+        color=COLORS["blue_main"],
+        title="(a) Side IID predictive pose",
+    )
+    _plot_pose_distribution(
+        pose_axes[1],
+        top_prediction,
+        top_index,
+        mapping=mapping,
+        color=COLORS["red_strong"],
+        title="(b) Top OOD predictive pose",
+    )
+    pose_handles = (
+        Line2D([], [], color=COLORS["dark_gray"], linewidth=2, label="Mean; edge width = relational precision"),
+        Line2D([], [], color=COLORS["gray"], linestyle="--", linewidth=1, label="Target"),
+        Patch(facecolor=COLORS["dark_gray"], alpha=0.16, label="50% Student-t scatter ellipse"),
+        Line2D([], [], marker="o", linestyle="none", markerfacecolor=COLORS["dark_gray"], markeredgecolor="white", label="Visible joint"),
+        Line2D([], [], marker="o", linestyle="none", markerfacecolor="white", markeredgecolor=COLORS["dark_gray"], label="Occluded joint"),
+    )
+    fig.legend(
+        handles=pose_handles,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.865),
+        fontsize=6.3,
+        handlelength=1.5,
+        ncol=5,
+        columnspacing=1.1,
+        frameon=False,
     )
     for view, color, label in (
         ("side", COLORS["blue_main"], "Side IID"),
@@ -427,7 +662,7 @@ def plot_structure(root: Path, output: Path) -> None:
             prediction["target"] - prediction["mean"]
         ).reshape(-1, 15, 3).numpy()
         lower, upper = _bootstrap_distance_intervals(residual, distances)
-        axes[0].errorbar(
+        diagnostic_axes[0].errorbar(
             distance_values,
             values,
             yerr=(np.asarray(values) - lower, upper - np.asarray(values)),
@@ -438,11 +673,11 @@ def plot_structure(root: Path, output: Path) -> None:
             markersize=5,
             label=label,
         )
-    axes[0].set_xlabel("Skeleton graph distance")
-    axes[0].set_ylabel("Residual correlation")
-    axes[0].set_title("Structured residual dependence", loc="left", fontweight="bold")
-    axes[0].set_ylim(-0.05, 0.95)
-    axes[0].set_xticks(
+    diagnostic_axes[0].set_xlabel("Skeleton graph distance")
+    diagnostic_axes[0].set_ylabel("Residual correlation")
+    diagnostic_axes[0].set_title("(c) Structured residual dependence", loc="left", fontweight="bold")
+    diagnostic_axes[0].set_ylim(-0.05, 0.95)
+    diagnostic_axes[0].set_xticks(
         distance_values, [f"{d}\n(n={counts[d]})" for d in distance_values]
     )
     fractions = np.linspace(0.1, 1.0, 10)
@@ -455,7 +690,7 @@ def plot_structure(root: Path, output: Path) -> None:
         error = payload["joint_errors"].float().mean(dim=-1).numpy() * 100.0
         curve = _risk_curve(uncertainty, error, fractions)
         lower, upper = _bootstrap_risk_band(uncertainty, error, fractions)
-        axes[1].plot(
+        diagnostic_axes[1].plot(
             fractions * 100,
             curve,
             "o-",
@@ -464,7 +699,7 @@ def plot_structure(root: Path, output: Path) -> None:
             markersize=4.5,
             label=label,
         )
-        axes[1].fill_between(
+        diagnostic_axes[1].fill_between(
             fractions * 100,
             lower,
             upper,
@@ -472,14 +707,14 @@ def plot_structure(root: Path, output: Path) -> None:
             alpha=0.16,
             linewidth=0,
         )
-    axes[1].set_xlabel("Retained coverage (%)")
-    axes[1].set_ylabel("Mean joint error (cm)")
-    axes[1].set_title("Selective risk with 95% bootstrap bands", loc="left", fontweight="bold")
-    axes[1].set_ylim(
+    diagnostic_axes[1].set_xlabel("Retained coverage (%)")
+    diagnostic_axes[1].set_ylabel("Mean joint error (cm)")
+    diagnostic_axes[1].set_title("(d) Selective risk (95% bootstrap)", loc="left", fontweight="bold")
+    diagnostic_axes[1].set_ylim(
         min(0.0, float(np.nanmin(lower)) - 1.0),
         float(np.nanmax(upper)) + 1.0,
     )
-    handles, labels = axes[1].get_legend_handles_labels()
+    handles, labels = diagnostic_axes[1].get_legend_handles_labels()
     fig.legend(
         handles,
         labels,
@@ -489,8 +724,7 @@ def plot_structure(root: Path, output: Path) -> None:
         handlelength=2.0,
         columnspacing=1.8,
     )
-    label_panels(axes, x=-0.14, y=1.07, fontsize=10)
-    fig.subplots_adjust(left=0.11, right=0.99, bottom=0.20, top=0.82, wspace=0.31)
+    fig.subplots_adjust(left=0.10, right=0.99, bottom=0.10, top=0.90)
     save_figure(fig, output / "itop_final_structure", formats=("pdf", "png"))
     plt.close(fig)
 
