@@ -29,8 +29,10 @@ three-seed logic is likewise not a continuous predictive density.
 The only code additions permitted for E3a are:
 
 1. `end_to_end` in the existing ITOP training state machine. It initializes the
-   Full Student-t model independently, trains all parameters, and rejects every
-   input checkpoint or frozen feature cache.
+   Full Student-t model independently, trains every active backbone/direct-mean/
+   uncertainty parameter, and rejects every input checkpoint or frozen feature
+   cache. The existing structurally bypassed compiler mean-projection is the
+   only permitted fixed parameter.
 2. A sequential single-GPU orchestration script for exactly three distinct
    seeds with identical Full Student-t fixed-nu controls.
 3. A probabilistic ensemble evaluator that validates member provenance and uses
@@ -50,4 +52,3 @@ between-member spread that relates to error without being one-member dominated.
 Top remains cross-view evaluation only. A failure of this gate stops the
 deep-ensemble line rather than increasing ensemble size or introducing learned
 weights.
-

@@ -364,11 +364,16 @@ def _freeze_record(model, args: argparse.Namespace) -> dict[str, Any]:
             )
         boundary = "all parameters trainable from the selected frozen checkpoint"
     else:
-        if frozen:
+        bypassed_mean_projection = "joint_head.operator_head.mean_projection.weight"
+        if frozen != [bypassed_mean_projection]:
             raise RuntimeError(
-                "end-to-end phase unexpectedly contains frozen parameters"
+                "end-to-end phase must freeze only the bypassed compiler mean projection"
             )
-        boundary = "all probabilistic parameters trainable from an independent initialization"
+        boundary = (
+            "all active backbone, direct mean, and uncertainty parameters trainable "
+            "from an independent initialization; the unused compiler mean projection "
+            "is structurally bypassed and fixed"
+        )
     return {
         "phase": args.phase,
         "boundary": boundary,

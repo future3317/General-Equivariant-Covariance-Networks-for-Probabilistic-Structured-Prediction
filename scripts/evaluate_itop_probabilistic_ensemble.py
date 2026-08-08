@@ -77,8 +77,11 @@ def _member_record(run_dir: Path) -> dict[str, Any]:
     if not isinstance(source, dict) or source.get("dirty"):
         raise ValueError(f"{run_dir} lacks clean-source provenance")
     freeze = provenance.get("freeze")
-    if not isinstance(freeze, dict) or int(freeze.get("frozen_parameter_count", -1)) != 0:
-        raise ValueError(f"{run_dir} did not train all parameters end-to-end")
+    permitted_frozen = ["joint_head.operator_head.mean_projection.weight"]
+    if not isinstance(freeze, dict) or freeze.get("frozen_parameter_names") != permitted_frozen:
+        raise ValueError(
+            f"{run_dir} did not train all active parameters from an independent initialization"
+        )
     artifact_hashes = provenance.get("artifacts", {})
     for name in (
         "best_model.pt",

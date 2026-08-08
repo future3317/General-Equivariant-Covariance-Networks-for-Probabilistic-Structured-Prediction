@@ -145,7 +145,10 @@ def main() -> None:
                 "frozen feature cache, bootstrap, or shared mean path"
             ),
         },
-        "model": "Full Student-t fixed nu=5, end-to-end, all parameters trainable",
+        "model": (
+            "Full Student-t fixed nu=5, end-to-end; all active parameters trainable "
+            "(the structurally bypassed compiler mean projection remains fixed)"
+        ),
         "selection": "Side validation NLL only; Side test and Top never select checkpoints",
         "controls": {
             "same_architecture_optimizer_schedule": True,
