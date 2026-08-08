@@ -11,6 +11,42 @@ from distributions.base import StructuredDistributionLoss, diagnostic_components
 from spd_maps.base import SPDMap
 
 
+def student_t_log_prob_from_statistics(
+    logdet: torch.Tensor,
+    mahalanobis2: torch.Tensor,
+    dimension: int,
+    nu: float | torch.Tensor,
+) -> torch.Tensor:
+    """Evaluate Student-t log density from existing SPD sufficient statistics.
+
+    ``nu`` may be a scalar or a tensor broadcastable to the sample shape.  This
+    is the single tensor-valued normalization path used by conditional-nu and
+    finite-mixture compositions; fixed-nu :class:`StudentTNLL` retains its
+    cached scalar normalization in ``forward``.
+    """
+    if dimension < 1:
+        raise ValueError("dimension must be positive")
+    nu_tensor = torch.as_tensor(
+        nu, dtype=mahalanobis2.dtype, device=mahalanobis2.device
+    )
+    if bool((nu_tensor <= 0).any()):
+        raise ValueError("Student-t degrees of freedom nu must be positive")
+    try:
+        _, nu_tensor = torch.broadcast_tensors(mahalanobis2, nu_tensor)
+    except RuntimeError as error:
+        raise ValueError("nu is not broadcastable to the sample shape") from error
+    normalization = (
+        torch.lgamma((nu_tensor + dimension) / 2.0)
+        - torch.lgamma(nu_tensor / 2.0)
+        - 0.5 * dimension * torch.log(nu_tensor * math.pi)
+    )
+    return (
+        normalization
+        - 0.5 * logdet
+        - 0.5 * (nu_tensor + dimension) * torch.log1p(mahalanobis2 / nu_tensor)
+    )
+
+
 class StudentTNLL(StructuredDistributionLoss):
     """Multivariate Student-t NLL with scale-matrix parameterization.
 
@@ -73,6 +109,28 @@ class StudentTNLL(StructuredDistributionLoss):
         components = diagnostic_components(fit, uncertainty, quad, logdet)
         components["nu"] = mu.new_tensor(nu)
         return loss, components
+
+    def log_prob(
+        self,
+        mu: torch.Tensor,
+        params: torch.Tensor,
+        target: torch.Tensor,
+        spd_map: SPDMap,
+        *,
+        nu: float | torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        """Return unreduced log probabilities, optionally with conditional nu."""
+        residual = target - mu
+        logdet, quad = spd_map.statistics(params, residual)
+        effective_nu: float | torch.Tensor = self.nu if nu is None else nu
+        log_prob = student_t_log_prob_from_statistics(
+            logdet, quad, residual.shape[-1], effective_nu
+        )
+        return log_prob, {
+            "mahalanobis2": quad,
+            "logdet": logdet,
+            "nu": torch.as_tensor(effective_nu, dtype=mu.dtype, device=mu.device),
+        }
 
     @staticmethod
     def scale_to_covariance(scale: torch.Tensor, nu: float) -> torch.Tensor:

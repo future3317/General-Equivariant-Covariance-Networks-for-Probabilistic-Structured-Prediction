@@ -41,6 +41,24 @@ def test_student_t_gradient_finite():
     assert torch.isfinite(A.grad).all()
 
 
+def test_student_t_log_prob_supports_conditional_nu_gradients():
+    mu, target, A = _make_test_tensors(dtype=torch.float64)
+    raw_nu = torch.randn(mu.shape[0], dtype=mu.dtype, requires_grad=True)
+    nu = 2.05 + torch.nn.functional.softplus(raw_nu)
+    log_prob, statistics = StudentTNLL(nu=5.0).log_prob(
+        mu,
+        A,
+        target,
+        MatrixExponentialMap(),
+        nu=nu,
+    )
+    assert log_prob.shape == (mu.shape[0],)
+    assert statistics["nu"].shape == (mu.shape[0],)
+    (-log_prob.mean()).backward()
+    assert torch.isfinite(raw_nu.grad).all()
+    assert torch.isfinite(A.grad).all()
+
+
 def test_student_t_approaches_gaussian():
     """Use float64 to avoid loss of precision in lgamma for large nu."""
     mu = torch.randn(8, 6, dtype=torch.float64)

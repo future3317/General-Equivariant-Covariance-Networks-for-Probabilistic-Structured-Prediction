@@ -19,6 +19,7 @@ from data.paths import dataset_dir
 from evaluation import (
     combine_ensemble_moments,
     empirical_coverage,
+    energy_score_from_samples,
     ensemble_nll,
     sample_ensemble,
     variogram_score,
@@ -30,14 +31,6 @@ from scripts.dielectric_runtime import (
     load_dielectric_data_args,
     load_run_record,
 )
-
-
-def _sample_energy_score(samples: torch.Tensor, target: torch.Tensor) -> float:
-    first = torch.linalg.vector_norm(samples - target.unsqueeze(0), dim=-1).mean(0)
-    pairwise = torch.linalg.vector_norm(
-        samples[:, None] - samples[None, :], dim=-1
-    ).mean((0, 1))
-    return float((first - 0.5 * pairwise).mean().item())
 
 
 @torch.inference_mode()
@@ -54,7 +47,9 @@ def evaluate_ensemble(
     if len(checkpoint_dirs) < 2:
         raise ValueError("ensemble evaluation requires at least two checkpoints")
     first_args = load_dielectric_data_args(checkpoint_dirs[0])
-    data_root = dataset_dir(data_dir or getattr(first_args, "data_dir", None), "mp_dielectric")
+    data_root = dataset_dir(
+        data_dir or getattr(first_args, "data_dir", None), "mp_dielectric"
+    )
     dataset = DielectricIrrepsDataset(
         data_root,
         split,
@@ -62,7 +57,9 @@ def evaluate_ensemble(
         storage=getattr(first_args, "dataset_storage", "files"),
         shard_cache_size=int(getattr(first_args, "shard_cache_size", 2)),
     )
-    loader = PyGDataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+    loader = PyGDataLoader(
+        dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers
+    )
     predictions = []
     contracts = []
     for checkpoint_dir in checkpoint_dirs:
@@ -94,15 +91,27 @@ def evaluate_ensemble(
         "split": split,
         "inference_contract_hash": contracts[0],
         "mixture_nll": float(
-            ensemble_nll(means, scales, target, distribution="student_t", student_t_dof=5.0).item()
+            ensemble_nll(
+                means, scales, target, distribution="student_t", student_t_dof=5.0
+            ).item()
         ),
-        "energy_score": _sample_energy_score(mixture_samples, target),
+        "energy_score": float(
+            energy_score_from_samples(mixture_samples, target).item()
+        ),
         "variogram_score": float(variogram_score(mixture_samples, target).item()),
         "moment_gaussian_coverage": empirical_coverage(
             moments["mean"], target, moments["total_covariance"], reference="gaussian"
         ),
-        "aleatoric_trace": float(torch.diagonal(moments["aleatoric_covariance"], dim1=-2, dim2=-1).sum(-1).mean()),
-        "epistemic_trace": float(torch.diagonal(moments["epistemic_covariance"], dim1=-2, dim2=-1).sum(-1).mean()),
+        "aleatoric_trace": float(
+            torch.diagonal(moments["aleatoric_covariance"], dim1=-2, dim2=-1)
+            .sum(-1)
+            .mean()
+        ),
+        "epistemic_trace": float(
+            torch.diagonal(moments["epistemic_covariance"], dim1=-2, dim2=-1)
+            .sum(-1)
+            .mean()
+        ),
     }
     return output
 

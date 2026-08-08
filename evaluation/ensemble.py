@@ -6,6 +6,8 @@ import math
 
 import torch
 
+from distributions.student_t import student_t_log_prob_from_statistics
+
 
 def combine_ensemble_moments(
     means: torch.Tensor,
@@ -52,7 +54,7 @@ def sample_ensemble(
     *,
     num_samples: int = 128,
     distribution: str = "gaussian",
-    student_t_dof: float = 5.0,
+    student_t_dof: float | torch.Tensor = 5.0,
 ) -> torch.Tensor:
     """Draw samples from the equally weighted predictive mixture."""
     if num_samples < 1:
@@ -65,29 +67,56 @@ def sample_ensemble(
     noise = torch.randn(num_samples, N, d, device=means.device, dtype=means.dtype)
     samples = selected_means + torch.einsum("snij,snj->sni", chol, noise)
     if distribution == "student_t":
-        if student_t_dof <= 0:
+        nu = torch.as_tensor(student_t_dof, dtype=means.dtype, device=means.device)
+        if bool((nu <= 0).any()):
             raise ValueError("student_t_dof must be positive")
-        chi = torch.distributions.Chi2(
-            torch.as_tensor(student_t_dof, dtype=means.dtype, device=means.device)
-        ).sample((num_samples, N))
-        samples = selected_means + (samples - selected_means) * torch.sqrt(
-            float(student_t_dof) / chi
-        ).unsqueeze(-1)
+        if nu.ndim == 0:
+            chi = torch.distributions.Chi2(nu).sample((num_samples, N))
+            factor = torch.sqrt(nu / chi)
+        elif nu.shape == (N,):
+            chi = torch.distributions.Chi2(nu).sample((num_samples,))
+            factor = torch.sqrt(nu.unsqueeze(0) / chi)
+        else:
+            raise ValueError("sampling degrees of freedom must be scalar or shape (N,)")
+        samples = selected_means + (samples - selected_means) * factor.unsqueeze(-1)
     elif distribution != "gaussian":
         raise ValueError("distribution must be gaussian or student_t")
     return samples
 
 
-def ensemble_nll(
+def energy_score_from_samples(
+    samples: torch.Tensor, target: torch.Tensor
+) -> torch.Tensor:
+    """Energy Score from explicit predictive samples ``(S,N,d)``."""
+    if samples.ndim != 3 or target.shape != samples.shape[1:]:
+        raise ValueError("samples must be (S,N,d) and target must be (N,d)")
+    first = torch.linalg.vector_norm(samples - target.unsqueeze(0), dim=-1).mean(0)
+    pairwise = torch.linalg.vector_norm(
+        samples[:, None] - samples[None, :], dim=-1
+    ).mean((0, 1))
+    return (first - 0.5 * pairwise).mean()
+
+
+def finite_mixture_nll(
     means: torch.Tensor,
     scales: torch.Tensor,
     target: torch.Tensor,
     *,
     distribution: str = "gaussian",
-    student_t_dof: float = 5.0,
+    student_t_dof: float | torch.Tensor = 5.0,
+    weights: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    """Exact negative log likelihood of the equally weighted member mixture."""
+    """Exact finite-mixture NLL without moment matching.
+
+    ``weights`` may be shared ``(M,)`` weights or sample-conditional ``(M,N)``
+    invariant weights.  The existing ensemble API delegates here with uniform
+    weights, so training and evaluation share one logsumexp implementation.
+    """
+    if means.ndim != 3 or scales.ndim != 4:
+        raise ValueError("expected means (M,N,d) and scales (M,N,d,d)")
     M, N, d = means.shape
+    if scales.shape != (M, N, d, d):
+        raise ValueError("mixture means/scales have incompatible shapes")
     if target.shape != (N, d):
         raise ValueError("target must have shape (N,d)")
     residual = target.unsqueeze(0) - means
@@ -98,20 +127,47 @@ def ensemble_nll(
     if distribution == "gaussian":
         component_log_prob = -0.5 * (d * math.log(2.0 * math.pi) + logdet + quadratic)
     elif distribution == "student_t":
-        nu = float(student_t_dof)
-        if nu <= 0:
-            raise ValueError("student_t_dof must be positive")
-        constant = (
-            math.lgamma((nu + d) / 2.0)
-            - math.lgamma(nu / 2.0)
-            - 0.5 * d * math.log(nu * math.pi)
-        )
-        component_log_prob = constant - 0.5 * logdet - 0.5 * (nu + d) * torch.log1p(
-            quadratic / nu
+        component_log_prob = student_t_log_prob_from_statistics(
+            logdet,
+            quadratic,
+            d,
+            student_t_dof,
         )
     else:
         raise ValueError("distribution must be gaussian or student_t")
-    return -torch.logsumexp(component_log_prob, dim=0).mean() + math.log(M)
+    if weights is None:
+        log_weights = component_log_prob.new_full((M, 1), -math.log(M))
+    else:
+        weights = weights.to(
+            device=component_log_prob.device, dtype=component_log_prob.dtype
+        )
+        if weights.shape not in {(M,), (M, N)}:
+            raise ValueError("weights must have shape (M,) or (M,N)")
+        if bool((weights <= 0).any()):
+            raise ValueError("mixture weights must be positive")
+        weights = weights / weights.sum(dim=0, keepdim=True)
+        log_weights = weights.log()
+        if log_weights.ndim == 1:
+            log_weights = log_weights[:, None]
+    return -torch.logsumexp(component_log_prob + log_weights, dim=0).mean()
+
+
+def ensemble_nll(
+    means: torch.Tensor,
+    scales: torch.Tensor,
+    target: torch.Tensor,
+    *,
+    distribution: str = "gaussian",
+    student_t_dof: float = 5.0,
+) -> torch.Tensor:
+    """Exact NLL of an equally weighted member mixture."""
+    return finite_mixture_nll(
+        means,
+        scales,
+        target,
+        distribution=distribution,
+        student_t_dof=student_t_dof,
+    )
 
 
 def variogram_score(
@@ -126,7 +182,9 @@ def variogram_score(
         raise ValueError("samples must be (S,N,d) and target must be (N,d)")
     if order <= 0:
         raise ValueError("order must be positive")
-    predicted = torch.abs(samples.unsqueeze(-1) - samples.unsqueeze(-2)).pow(order).mean(0)
+    predicted = (
+        torch.abs(samples.unsqueeze(-1) - samples.unsqueeze(-2)).pow(order).mean(0)
+    )
     observed = torch.abs(target.unsqueeze(-1) - target.unsqueeze(-2)).pow(order)
     if weights is None:
         weights = torch.ones_like(observed)

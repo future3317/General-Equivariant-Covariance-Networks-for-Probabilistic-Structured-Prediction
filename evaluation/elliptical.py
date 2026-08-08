@@ -33,6 +33,80 @@ def _uniformity_summary(values: np.ndarray) -> dict[str, Any]:
         "pooled_decile_l1_error": float(
             np.abs(histogram - expected).sum() / values.size
         ),
+        "pooled_decile_frequencies": (histogram / values.size).tolist(),
+    }
+
+
+def mixture_projection_pit(
+    component_means: torch.Tensor,
+    component_scales: torch.Tensor,
+    target: torch.Tensor,
+    *,
+    student_t_dof: float,
+    weights: torch.Tensor | None = None,
+    num_directions: int = 64,
+    seed: int = 0,
+) -> dict[str, Any]:
+    """Random-direction PIT under an exact finite Student-t mixture CDF.
+
+    Each projected component remains a univariate Student-t with projected
+    location and scale.  The predictive CDF is the weighted sum of those CDFs;
+    no moment-matched elliptical approximation is constructed.
+    """
+    if component_means.ndim != 3 or component_scales.ndim != 4:
+        raise ValueError("expected component means (K,N,d) and scales (K,N,d,d)")
+    components, samples, dimension = component_means.shape
+    if component_scales.shape != (components, samples, dimension, dimension):
+        raise ValueError("component means/scales have incompatible shapes")
+    if target.shape != (samples, dimension):
+        raise ValueError("target must have shape (N,d)")
+    if student_t_dof <= 0 or num_directions < 4:
+        raise ValueError("require positive nu and at least four directions")
+    if not all(
+        bool(torch.isfinite(value).all())
+        for value in (component_means, component_scales, target)
+    ):
+        raise ValueError("mixture projection inputs must be finite")
+    generator = torch.Generator(device="cpu").manual_seed(seed)
+    directions = torch.randn(
+        num_directions, dimension, generator=generator, dtype=torch.float64
+    )
+    directions /= torch.linalg.vector_norm(directions, dim=-1, keepdim=True)
+    means = component_means.detach().double().cpu()
+    scales = component_scales.detach().double().cpu()
+    observations = target.detach().double().cpu()
+    projected_mean = torch.einsum("knd,rd->knr", means, directions)
+    projected_variance = torch.einsum("rd,knde,re->knr", directions, scales, directions)
+    if bool((projected_variance <= 0).any()):
+        raise ValueError("component projected scales must be positive")
+    projected_target = torch.einsum("nd,rd->nr", observations, directions)
+    standardized = (
+        projected_target.unsqueeze(0) - projected_mean
+    ) / projected_variance.sqrt()
+    component_cdf = stats.t.cdf(standardized.numpy(), df=float(student_t_dof))
+    if weights is None:
+        normalized_weights = np.full((components, samples, 1), 1.0 / components)
+    else:
+        weight_tensor = weights.detach().double().cpu()
+        if weight_tensor.shape not in {(components,), (components, samples)}:
+            raise ValueError("weights must have shape (K,) or (K,N)")
+        if bool((weight_tensor <= 0).any()):
+            raise ValueError("mixture weights must be positive")
+        if weight_tensor.ndim == 1:
+            weight_tensor = weight_tensor[:, None].expand(components, samples)
+        weight_tensor = weight_tensor / weight_tensor.sum(dim=0, keepdim=True)
+        normalized_weights = weight_tensor.unsqueeze(-1).numpy()
+    pit = np.sum(normalized_weights * component_cdf, axis=0)
+    return {
+        "samples": int(samples),
+        "dimension": int(dimension),
+        "components": int(components),
+        "directions": int(num_directions),
+        "student_t_dof": float(student_t_dof),
+        "seed": int(seed),
+        "cdf_semantics": "weighted_component_student_t_projection_cdf",
+        "moment_matched": False,
+        **_uniformity_summary(pit),
     }
 
 
@@ -83,7 +157,7 @@ def elliptical_falsification_from_whitened(
     whitened: torch.Tensor,
     *,
     reference: str,
-    student_t_dof: float | None = None,
+    student_t_dof: float | torch.Tensor | None = None,
     num_directions: int = 64,
     permutations: int = 199,
     seed: int = 0,
@@ -100,8 +174,18 @@ def elliptical_falsification_from_whitened(
         raise ValueError("whitened residuals must have shape (N,d), N>=20, d>=2")
     if reference not in {"gaussian", "student_t"}:
         raise ValueError("reference must be gaussian or student_t")
-    if reference == "student_t" and (student_t_dof is None or student_t_dof <= 0):
-        raise ValueError("Student-t diagnostics require positive degrees of freedom")
+    if reference == "student_t":
+        if student_t_dof is None:
+            raise ValueError("Student-t diagnostics require degrees of freedom")
+        dof_tensor = torch.as_tensor(student_t_dof, dtype=torch.float64).reshape(-1)
+        if bool((dof_tensor <= 0).any()):
+            raise ValueError(
+                "Student-t diagnostics require positive degrees of freedom"
+            )
+        if dof_tensor.numel() not in {1, whitened.shape[0]}:
+            raise ValueError(
+                "degrees of freedom must be scalar or one value per sample"
+            )
     if num_directions < 4 or permutations < 19:
         raise ValueError("use at least four directions and 19 permutations")
     if not bool(torch.isfinite(whitened).all()):
@@ -115,6 +199,15 @@ def elliptical_falsification_from_whitened(
     z = z[nonzero]
     radius2 = radius2[nonzero]
     sample_count, dimension = z.shape
+    conditional_nu: np.ndarray | None = None
+    if reference == "student_t":
+        dof_tensor = torch.as_tensor(student_t_dof, dtype=torch.float64).reshape(-1)
+        if dof_tensor.numel() == 1:
+            nu: float | np.ndarray = float(dof_tensor.item())
+        else:
+            dof_tensor = dof_tensor[nonzero.cpu()]
+            conditional_nu = dof_tensor.numpy()
+            nu = conditional_nu
     generator = torch.Generator(device="cpu").manual_seed(seed)
     directions = torch.randn(
         num_directions, dimension, generator=generator, dtype=z.dtype
@@ -127,10 +220,12 @@ def elliptical_falsification_from_whitened(
         projection_pit = stats.norm.cdf(projections)
         expected_second_moment = 1.0
     else:
-        nu = float(student_t_dof)
         radial_pit = stats.f.cdf(radius2.numpy() / dimension, dimension, nu)
-        projection_pit = stats.t.cdf(projections, df=nu)
-        expected_second_moment = nu / (nu - 2.0) if nu > 2.0 else None
+        projection_dof = nu if isinstance(nu, float) else nu[:, None]
+        projection_pit = stats.t.cdf(projections, df=projection_dof)
+        expected_second_moment = (
+            nu / (nu - 2.0) if isinstance(nu, float) and nu > 2.0 else None
+        )
 
     radial_test = stats.kstest(radial_pit, "uniform")
     direction = z / radius2.sqrt().unsqueeze(-1)
@@ -148,7 +243,18 @@ def elliptical_falsification_from_whitened(
         "sample_count": int(sample_count),
         "dimension": int(dimension),
         "reference": reference,
-        "student_t_dof": None if reference == "gaussian" else float(student_t_dof),
+        "student_t_dof": (
+            None
+            if reference == "gaussian"
+            else float(nu)
+            if isinstance(nu, float)
+            else {
+                "kind": "conditional",
+                "min": float(np.min(nu)),
+                "median": float(np.median(nu)),
+                "max": float(np.max(nu)),
+            }
+        ),
         "seed": int(seed),
         "radial_pit": {
             "mean": float(np.mean(radial_pit)),
@@ -186,6 +292,17 @@ def elliptical_falsification_from_whitened(
             torch.linalg.matrix_norm(
                 second_moment / expected_second_moment
                 - torch.eye(dimension, dtype=z.dtype)
+            ).item()
+        )
+    elif conditional_nu is not None and bool((conditional_nu > 2.0).all()):
+        factors = torch.from_numpy(np.sqrt((conditional_nu - 2.0) / conditional_nu)).to(
+            dtype=z.dtype
+        )
+        standardized = z * factors.unsqueeze(-1)
+        second_moment = standardized.T @ standardized / sample_count
+        record["whitened_second_moment_defect"] = float(
+            torch.linalg.matrix_norm(
+                second_moment - torch.eye(dimension, dtype=z.dtype)
             ).item()
         )
     return record
