@@ -14,7 +14,9 @@ from torch.utils.data import DataLoader, RandomSampler, TensorDataset
 from scripts.evaluate_itop_final import _available_models
 from scripts.run_itop_study import (
     GEOMETRY_CACHE_FILES,
+    SELECTABLE_PROBABILISTIC_MODELS,
     _geometry_cache_complete,
+    _model_list,
     _parse_args,
     _training_command,
 )
@@ -238,6 +240,52 @@ def test_runner_exposes_explicit_joint_skip_flag(monkeypatch):
         ],
     )
     assert _parse_args().skip_joint_finetune is True
+
+
+def test_runner_accepts_a_minimal_full_student_t_pilot(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_itop_study",
+            "--data_dir",
+            "data",
+            "--study_dir",
+            "results",
+            "--gpu",
+            "2",
+            "--models",
+            "full_student_t",
+            "--joint_models",
+            "full_student_t",
+            "--deterministic_epochs",
+            "8",
+            "--frozen_epochs",
+            "5",
+            "--joint_epochs",
+            "3",
+            "--patience",
+            "2",
+        ],
+    )
+    args = _parse_args()
+    assert _model_list(args.models, option="--models") == ("full_student_t",)
+    assert _model_list(args.joint_models, option="--joint_models") == (
+        "full_student_t",
+    )
+    assert (args.deterministic_epochs, args.frozen_epochs, args.joint_epochs) == (
+        8,
+        5,
+        3,
+    )
+    assert "full_student_t" in SELECTABLE_PROBABILISTIC_MODELS
+
+
+def test_runner_rejects_unknown_or_repeated_model_filters():
+    with pytest.raises(ValueError, match="unsupported"):
+        _model_list("full_student_t,not_a_model", option="--models")
+    with pytest.raises(ValueError, match="distinct"):
+        _model_list("full_student_t,full_student_t", option="--models")
 
 
 def test_itop_factorial_exposes_radial_and_operator_controls():

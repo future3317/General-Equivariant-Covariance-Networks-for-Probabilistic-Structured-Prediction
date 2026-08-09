@@ -24,6 +24,7 @@ PROBABILISTIC_MODELS = (
     "graph_gaussian",
     "graph_student_t",
 )
+SELECTABLE_PROBABILISTIC_MODELS = ("full_student_t", *PROBABILISTIC_MODELS)
 TRAINING_ARTIFACTS = (
     "best_model.pt",
     "last_state.pt",
@@ -132,7 +133,7 @@ def _training_command(
         "--num_epochs",
         str(epochs),
         "--patience",
-        "5",
+        str(getattr(args, "patience", 5)),
         "--backbone_precision",
         "bf16",
         "--tp_backend",
@@ -177,6 +178,16 @@ def _best_graph_model(study_root: Path, seeds: tuple[int, ...]) -> tuple[str, di
     return selected, {"criterion": "mean_seed_validation_nll", "scores": candidates}
 
 
+def _model_list(value: str, *, option: str) -> tuple[str, ...]:
+    models = tuple(item.strip() for item in value.split(",") if item.strip())
+    if not models or len(set(models)) != len(models):
+        raise ValueError(f"{option} must contain distinct model names")
+    unknown = sorted(set(models) - set(SELECTABLE_PROBABILISTIC_MODELS))
+    if unknown:
+        raise ValueError(f"{option} contains unsupported models: {unknown}")
+    return models
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_dir", type=Path, required=True)
@@ -210,6 +221,26 @@ def _parse_args() -> argparse.Namespace:
         help="comma-separated seeds; default is the single controlled seed 42",
     )
     parser.add_argument(
+        "--models",
+        default=",".join(PROBABILISTIC_MODELS),
+        help=(
+            "comma-separated probabilistic stages; defaults to the historical "
+            "factorial, while pilots may select only full_student_t"
+        ),
+    )
+    parser.add_argument(
+        "--joint_models",
+        default=None,
+        help=(
+            "comma-separated selected models to joint-fine-tune; by default use "
+            "the historical independent Gaussian plus validation-selected graph"
+        ),
+    )
+    parser.add_argument("--deterministic_epochs", type=int, default=None)
+    parser.add_argument("--frozen_epochs", type=int, default=None)
+    parser.add_argument("--joint_epochs", type=int, default=None)
+    parser.add_argument("--patience", type=int, default=5)
+    parser.add_argument(
         "--skip_joint_finetune",
         action="store_true",
         help=(
@@ -232,12 +263,30 @@ def main() -> None:
         raise ValueError("--seeds must be comma-separated integers") from error
     if not seeds or len(set(seeds)) != len(seeds):
         raise ValueError("--seeds must contain at least one distinct seed")
+    models = _model_list(args.models, option="--models")
+    requested_joint_models = (
+        None
+        if args.joint_models is None
+        else _model_list(args.joint_models, option="--joint_models")
+    )
+    if requested_joint_models is not None:
+        missing_joint_models = sorted(set(requested_joint_models) - set(models))
+        if missing_joint_models:
+            raise ValueError(
+                "--joint_models must be a subset of --models: "
+                f"{missing_joint_models}"
+            )
     if args.profile == "development":
         args.num_points = 256
         deterministic_epochs, frozen_epochs, joint_epochs = 30, 20, 10
     else:
         args.num_points = 512
         deterministic_epochs, frozen_epochs, joint_epochs = 100, 60, 30
+    deterministic_epochs = args.deterministic_epochs or deterministic_epochs
+    frozen_epochs = args.frozen_epochs or frozen_epochs
+    joint_epochs = args.joint_epochs or joint_epochs
+    if min(deterministic_epochs, frozen_epochs, joint_epochs, args.patience) < 1:
+        raise ValueError("stage epochs and patience must be positive")
     if args.train_cache_sample_limit is not None and args.train_cache_sample_limit < 2:
         raise ValueError("--train_cache_sample_limit must be at least 2")
 
@@ -291,7 +340,13 @@ def main() -> None:
             "num_points": args.num_points,
             "train_cache_sample_limit": args.train_cache_sample_limit,
             "seeds": list(seeds),
-            "probabilistic_models": list(PROBABILISTIC_MODELS),
+            "probabilistic_models": list(models),
+            "stage_epochs": {
+                "deterministic": deterministic_epochs,
+                "frozen_head": frozen_epochs,
+                "joint_finetune": joint_epochs,
+            },
+            "early_stopping_patience": args.patience,
             "joint_finetune": (
                 "skipped_by_protocol" if args.skip_joint_finetune else "enabled"
             ),
@@ -355,7 +410,7 @@ def main() -> None:
             environment=environment,
             dry_run=args.dry_run,
         )
-        for model in PROBABILISTIC_MODELS:
+        for model in models:
             frozen = seed_root / f"frozen_{model}"
             _run(
                 _training_command(
@@ -373,9 +428,13 @@ def main() -> None:
                 dry_run=args.dry_run,
             )
 
-    if args.dry_run:
+    graph_candidates = tuple(
+        model for model in ("graph_gaussian", "graph_student_t") if model in models
+    )
+    graph_model = None
+    if args.dry_run and len(graph_candidates) == 2:
         graph_model = "graph_gaussian_or_student_t_selected_by_validation_nll"
-    else:
+    elif not args.dry_run and len(graph_candidates) == 2:
         graph_model, graph_selection = _best_graph_model(study_root, seeds)
         graph_selection["selected"] = graph_model
         graph_selection["joint_finetune"] = (
@@ -384,6 +443,8 @@ def main() -> None:
         (study_root / "graph_family_selection.json").write_text(
             json.dumps(graph_selection, indent=2) + "\n", encoding="utf-8"
         )
+    elif len(graph_candidates) == 1:
+        graph_model = graph_candidates[0]
 
     if args.skip_joint_finetune:
         print(
@@ -392,11 +453,18 @@ def main() -> None:
             flush=True,
         )
     else:
+        if requested_joint_models is None:
+            joint_models = tuple(
+                model
+                for model in ("independent_gaussian", graph_model)
+                if model is not None and model in models
+            )
+        else:
+            joint_models = requested_joint_models
         for seed in seeds:
             seed_root = study_root / f"seed_{seed}"
-            joint_models = ("independent_gaussian", graph_model)
             for model in joint_models:
-                if model not in PROBABILISTIC_MODELS:
+                if model not in SELECTABLE_PROBABILISTIC_MODELS:
                     print(
                         f"[deferred] select graph family after frozen-head runs for seed {seed}"
                     )
