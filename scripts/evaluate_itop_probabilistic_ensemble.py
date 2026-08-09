@@ -43,11 +43,12 @@ def _sample_id(record: dict[str, torch.Tensor]) -> torch.Tensor:
 def _canonical_contract(record: dict[str, Any]) -> dict[str, Any]:
     contract = json.loads(json.dumps(record["training_contract"]))
     contract["randomness"].pop("seed", None)
+    contract["freeze"].pop("input_checkpoint", None)
     return contract
 
 
-def _member_record(run_dir: Path) -> dict[str, Any]:
-    required = (
+def _member_record(run_dir: Path, *, member_protocol: str) -> dict[str, Any]:
+    required = [
         "best_model.pt",
         "last_state.pt",
         "metrics.json",
@@ -57,7 +58,9 @@ def _member_record(run_dir: Path) -> dict[str, Any]:
         "environment.json",
         "compilation.json",
         "provenance.json",
-    )
+    ]
+    if member_protocol == "staged_frozen_pilot":
+        required.append("feature_cache.json")
     missing = [name for name in required if not (run_dir / name).is_file()]
     if missing:
         raise FileNotFoundError(f"incomplete ensemble member {run_dir}: {missing}")
@@ -65,23 +68,69 @@ def _member_record(run_dir: Path) -> dict[str, Any]:
     environment = json.loads((run_dir / "environment.json").read_text(encoding="utf-8"))
     provenance = json.loads((run_dir / "provenance.json").read_text(encoding="utf-8"))
     compilation = json.loads((run_dir / "compilation.json").read_text(encoding="utf-8"))
-    if args["model"] != "full_student_t" or args["phase"] != "end_to_end":
-        raise ValueError(f"{run_dir} is not an E3a Full Student-t member")
+    if args["model"] != "full_student_t":
+        raise ValueError(f"{run_dir} is not a Full Student-t member")
     if float(args["student_t_dof"]) != STUDENT_T_DOF:
         raise ValueError(f"{run_dir} does not use fixed nu={STUDENT_T_DOF:g}")
-    if args.get("backbone_checkpoint") or args.get("resume_checkpoint"):
-        raise ValueError(f"{run_dir} has an input checkpoint and is not independent")
-    if args.get("feature_cache"):
-        raise ValueError(f"{run_dir} uses a frozen feature cache and is not E3a")
     source = environment.get("source")
     if not isinstance(source, dict) or source.get("dirty"):
         raise ValueError(f"{run_dir} lacks clean-source provenance")
     freeze = provenance.get("freeze")
-    permitted_frozen = ["joint_head.operator_head.mean_projection.weight"]
-    if not isinstance(freeze, dict) or freeze.get("frozen_parameter_names") != permitted_frozen:
-        raise ValueError(
-            f"{run_dir} did not train all active parameters from an independent initialization"
+    upstream_checkpoint_sha256 = None
+    if member_protocol == "end_to_end":
+        if args["phase"] != "end_to_end":
+            raise ValueError(f"{run_dir} is not an end-to-end E3a member")
+        if args.get("backbone_checkpoint") or args.get("resume_checkpoint"):
+            raise ValueError(f"{run_dir} has an input checkpoint and is not independent")
+        if args.get("feature_cache"):
+            raise ValueError(f"{run_dir} uses a frozen feature cache and is not E3a")
+        permitted_frozen = ["joint_head.operator_head.mean_projection.weight"]
+        if (
+            not isinstance(freeze, dict)
+            or freeze.get("frozen_parameter_names") != permitted_frozen
+        ):
+            raise ValueError(
+                f"{run_dir} did not train all active parameters from an independent initialization"
+            )
+    elif member_protocol == "staged_frozen_pilot":
+        if args["phase"] != "frozen_head" or args.get("resume_checkpoint"):
+            raise ValueError(f"{run_dir} is not a frozen-head staged pilot member")
+        checkpoint = Path(args.get("backbone_checkpoint") or "")
+        feature_cache = Path(args.get("feature_cache") or "")
+        if not checkpoint.is_file() or not feature_cache.is_dir():
+            raise ValueError(f"{run_dir} lacks its staged backbone or feature cache")
+        upstream_checkpoint_sha256 = sha256_file(checkpoint)
+        freeze_checkpoint = freeze.get("input_checkpoint") if isinstance(freeze, dict) else None
+        if (
+            not isinstance(freeze_checkpoint, dict)
+            or freeze_checkpoint.get("sha256") != upstream_checkpoint_sha256
+        ):
+            raise ValueError(f"{run_dir} frozen-boundary checkpoint provenance mismatch")
+        upstream_args = json.loads(
+            (checkpoint.parent / "args.json").read_text(encoding="utf-8")
         )
+        if (
+            upstream_args.get("model") != "deterministic"
+            or upstream_args.get("phase") != "deterministic"
+            or int(upstream_args.get("seed")) != int(args["seed"])
+            or upstream_args.get("backbone_checkpoint")
+            or upstream_args.get("resume_checkpoint")
+            or upstream_args.get("feature_cache")
+        ):
+            raise ValueError(f"{run_dir} does not descend from its own independent mean")
+        feature_record = json.loads(
+            (run_dir / "feature_cache.json").read_text(encoding="utf-8")
+        )
+        if (
+            feature_record.get("backbone_checkpoint_sha256")
+            != upstream_checkpoint_sha256
+            or feature_record.get("dataset_cache_hash")
+            != provenance.get("dataset_cache_hash")
+            or feature_record.get("source", {}).get("dirty")
+        ):
+            raise ValueError(f"{run_dir} feature-cache provenance mismatch")
+    else:
+        raise ValueError(f"unsupported member protocol: {member_protocol}")
     artifact_hashes = provenance.get("artifacts", {})
     for name in (
         "best_model.pt",
@@ -100,6 +149,7 @@ def _member_record(run_dir: Path) -> dict[str, Any]:
         "compilation": compilation,
         "contract": _canonical_contract(environment),
         "checkpoint_sha256": artifact_hashes["best_model.pt"],
+        "upstream_checkpoint_sha256": upstream_checkpoint_sha256,
         "checkpoint_chain_sha256": {
             "best_model.pt": artifact_hashes["best_model.pt"],
             "last_state.pt": artifact_hashes["last_state.pt"],
@@ -312,7 +362,7 @@ def _evaluate_split(
     return {
         "split": split,
         "individual_members": individual,
-        "three_member_ensemble": full,
+        "ensemble": full,
         "two_member_subsets": subsets,
         "spread_diagnostics": spread,
     }, {name: value.cpu() for name, value in artifact.items()}
@@ -320,7 +370,12 @@ def _evaluate_split(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--run_dirs", nargs=3, type=Path, required=True)
+    parser.add_argument("--run_dirs", nargs="+", type=Path, required=True)
+    parser.add_argument(
+        "--member_protocol",
+        choices=("end_to_end", "staged_frozen_pilot"),
+        default="end_to_end",
+    )
     parser.add_argument("--output_dir", type=Path, required=True)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--samples", type=int, default=128)
@@ -329,9 +384,21 @@ def main() -> None:
         raise FileExistsError(f"refusing to overwrite ensemble evaluation: {args.output_dir}")
     if args.samples < 16:
         raise ValueError("use at least 16 predictive samples for Energy Score")
-    members = [_member_record(path) for path in args.run_dirs]
+    expected_members = 3 if args.member_protocol == "end_to_end" else 2
+    if len(args.run_dirs) != expected_members:
+        raise ValueError(
+            f"{args.member_protocol} requires exactly {expected_members} members"
+        )
+    members = [
+        _member_record(path, member_protocol=args.member_protocol)
+        for path in args.run_dirs
+    ]
     if len({member["seed"] for member in members}) != len(members):
         raise ValueError("E3a members must use distinct initialization/sampler seeds")
+    if args.member_protocol == "staged_frozen_pilot" and len(
+        {member["upstream_checkpoint_sha256"] for member in members}
+    ) != len(members):
+        raise ValueError("staged pilot members share the same deterministic checkpoint")
     if len({json.dumps(member["contract"], sort_keys=True) for member in members}) != 1:
         raise ValueError("E3a member training contracts differ beyond randomness seed")
     if len({member["provenance"]["dataset_cache_hash"] for member in members}) != 1:
@@ -353,7 +420,8 @@ def main() -> None:
     )
     result = {
         "schema_version": 1,
-        "kind": "E3a_independent_end_to_end_full_student_t_ensemble",
+        "kind": f"E3a_{args.member_protocol}_full_student_t_ensemble",
+        "member_protocol": args.member_protocol,
         "density_semantics": "equal_weight_exact_finite_student_t_logsumexp",
         "student_t_dof": STUDENT_T_DOF,
         "selection": "each member selected by Side validation NLL; Top never used for selection",
@@ -362,6 +430,7 @@ def main() -> None:
                 "path": member["path"],
                 "seed": member["seed"],
                 "checkpoint_sha256": member["checkpoint_sha256"],
+                "upstream_checkpoint_sha256": member["upstream_checkpoint_sha256"],
                 "checkpoint_chain_sha256": member["checkpoint_chain_sha256"],
                 "prediction_sha256": member["prediction_sha256"],
                 "source": member["environment"]["source"],
