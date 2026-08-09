@@ -36,6 +36,24 @@ class ControlledMeanOperatorHead(torch.nn.Module):
         batch: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         return (
-            self.mean_head(node_features, batch),
+            self.forward_mean(node_features, batch),
             self.operator_head.forward_parameters(node_features, batch),
+        )
+
+    def forward_mean(
+        self,
+        node_features: torch.Tensor,
+        batch: torch.Tensor,
+    ) -> torch.Tensor:
+        """Evaluate the family-independent mean path."""
+        return self.mean_head(node_features, batch)
+
+    def forward_parameters_detached_features(
+        self,
+        node_features: torch.Tensor,
+        batch: torch.Tensor,
+    ) -> torch.Tensor:
+        """Evaluate compiled operator parameters behind the faithful boundary."""
+        return self.operator_head.forward_parameters_detached_features(
+            node_features, batch
         )

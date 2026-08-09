@@ -294,3 +294,22 @@ finite-mixture compiler primitive passes its E2 gate. Model/function
 uncertainty remains live, so the next experimental phase is E3 true
 end-to-end independent members with exact finite-mixture scoring. E3 has not
 been started, and the manuscript main results remain unchanged.
+
+## E3 fast-pilot addendum (2026-08-09)
+
+E3 was subsequently entered through the predeclared fast-iteration gate rather
+than an immediate full 512-point, three-seed run. Two independently initialized
+deterministic means and their own frozen Full Student-t heads were trained on a
+2,487-frame, 256-point development protocol. The exact two-member density
+slightly improved Side IID NLL, Energy Score, and ensemble-mean MPJPE, but
+between-member spread had near-zero frame-error correlation and the Top exact
+NLL was worse than the best member. A maximum three-epoch joint pilot then
+showed monotone NLL improvement coupled to severe mean degradation; a single
+ten-times-lower-learning-rate control slowed but did not remove this tradeoff.
+
+The strict E3 gate therefore failed. Full three-seed confirmation, E3b,
+dielectric ensemble training, and public mixture work remain stopped. Complete
+protocol, artifact checks, values, and interpretation boundaries are in
+`e3a_fast_pilot_results_20260809.md`; the consolidated current-state matrix is
+`uncertainty_root_cause_completion_matrix_20260809.md`. The manuscript main
+results remain unchanged.

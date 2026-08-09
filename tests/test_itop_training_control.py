@@ -342,10 +342,60 @@ def test_training_contract_records_effective_split_seed():
         tp_backend="e3nn",
         cueq_method="naive",
         compile_tp=False,
+        faithful_joint=True,
     )
     contract = training_contract(args, torch.device("cpu"), freeze={})
     assert contract["data"]["split_seed"] == 42
     assert contract["randomness"]["seed"] == 43
+    assert (
+        contract["optimization"]["training_objective"]
+        == "mse_mean_plus_detached_feature_residual_nll"
+    )
+
+
+def test_controlled_itop_faithful_objective_isolates_mean_gradient():
+    model, _ = _build_model(
+        SimpleNamespace(
+            model="full_student_t",
+            hidden_dim=16,
+            max_radius=0.5,
+            lmax=2,
+            num_layers=1,
+            num_basis=4,
+            tp_backend="e3nn",
+            cueq_method="naive",
+            student_t_dof=5.0,
+        )
+    )
+    features = torch.randn(8, model.backbone.irreps_out.dim, requires_grad=True)
+    batch = torch.arange(2).repeat_interleave(4)
+    target = torch.randn(2, 45)
+
+    result = model.forward_faithful_from_features(features, batch, target=target)
+    result["loss"].backward()
+    faithful_gradient = features.grad.detach().clone()
+    assert {"mean_mse", "covariance_nll"}.issubset(result["components"])
+    assert all(
+        parameter.grad is None
+        for parameter in model.joint_head.operator_head.lifting.parameters()
+    )
+    covariance_gradients = [
+        parameter.grad
+        for name, parameter in model.joint_head.operator_head.named_parameters()
+        if "lifting." not in name and "mean_projection." not in name
+    ]
+    assert any(
+        gradient is not None and torch.linalg.vector_norm(gradient) > 0
+        for gradient in covariance_gradients
+    )
+
+    model.zero_grad(set_to_none=True)
+    comparison_features = features.detach().clone().requires_grad_()
+    mean = model.joint_head.forward_mean(comparison_features, batch)
+    torch.nn.functional.mse_loss(mean, target).backward()
+    torch.testing.assert_close(
+        faithful_gradient, comparison_features.grad, atol=1e-6, rtol=1e-5
+    )
 
 
 def test_runner_rejects_unknown_or_repeated_model_filters():

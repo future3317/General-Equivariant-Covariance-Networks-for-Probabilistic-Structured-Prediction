@@ -212,6 +212,15 @@ def training_contract(
                 if args.model == "deterministic"
                 else "validation_nll"
             ),
+            "training_objective": (
+                "mse_mean_plus_detached_feature_residual_nll"
+                if getattr(args, "faithful_joint", False)
+                else (
+                    "mean_squared_error"
+                    if args.model == "deterministic"
+                    else "joint_negative_log_likelihood"
+                )
+            ),
         },
         "precision": {
             "backbone": "BF16 autocast on CUDA"

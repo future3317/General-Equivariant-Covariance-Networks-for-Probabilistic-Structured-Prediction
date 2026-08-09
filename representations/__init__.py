@@ -37,6 +37,10 @@ from representations.diagnostics import (
     UnreachableTargetError,
 )
 from representations.exterior_square import O3SkewOperatorBasis, exterior_square_irreps
+from representations.finite_precision import (
+    NumericalSPDCertificate,
+    certify_numerical_spd,
+)
 from representations.graph_structure import EquivariantOutputGraph
 from representations.o3_irreps import O3IrrepsSpec
 from representations.operator_ir import (
@@ -47,10 +51,6 @@ from representations.operator_ir import (
     OperatorVerificationContext,
     ParameterBinding,
     Positivity,
-)
-from representations.finite_precision import (
-    NumericalSPDCertificate,
-    certify_numerical_spd,
 )
 from representations.operator_lowering import OptimizationCertificate
 from representations.report import CompilationReport, build_compilation_report
@@ -83,8 +83,6 @@ __all__ = [
     "EquivariantOutputGraph",
     "ExteriorSquareExpr",
     "FamilyRelation",
-    "NumericalSPDCertificate",
-    "certify_numerical_spd",
     "InnerProductRep",
     "InvariantMetricSpec",
     "IrrepsExpr",
@@ -92,6 +90,7 @@ __all__ = [
     "LoweringConfig",
     "MultiplicityFirstCartesianTensorSquare",
     "MultiplicityFirstDenseTensorProduct",
+    "NumericalSPDCertificate",
     "O3AdaptiveLifting",
     "O3Compilation",
     "O3CompiledOutputHead",
@@ -118,6 +117,7 @@ __all__ = [
     "UnreachableTargetError",
     "analyze_lifting_graph",
     "build_compilation_report",
+    "certify_numerical_spd",
     "coverage_deficit",
     "direct_sum_irreps",
     "exterior_square_irreps",

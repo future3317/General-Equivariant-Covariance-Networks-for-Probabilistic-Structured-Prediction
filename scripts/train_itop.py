@@ -407,10 +407,17 @@ def _forward(
     target: torch.Tensor | None,
     return_scale: bool,
     use_bf16: bool,
+    faithful: bool = False,
 ):
+    if faithful and (target is None or return_scale):
+        raise ValueError("faithful objective is training-only and requires a target")
     if isinstance(batch, dict):
         features = batch["features"].float()
         graph_batch = torch.arange(features.shape[0], device=features.device)
+        if faithful:
+            return model.forward_faithful_from_features(
+                features, graph_batch, target=target
+            )
         return model.forward_from_features(
             features,
             graph_batch,
@@ -422,6 +429,10 @@ def _forward(
         device_type=batch.pos.device.type, dtype=torch.bfloat16, enabled=enabled
     ):
         node_features, graph_batch = model.backbone(batch)
+    if faithful:
+        return model.forward_faithful_from_features(
+            node_features.float(), graph_batch, target=target
+        )
     return model.forward_from_features(
         node_features.float(),
         graph_batch,
@@ -455,6 +466,7 @@ def train_epoch(
     *,
     frozen_backbone: bool,
     use_bf16: bool,
+    faithful: bool = False,
 ) -> dict[str, float]:
     model.train()
     if frozen_backbone:
@@ -476,6 +488,7 @@ def train_epoch(
             target=target,
             return_scale=False,
             use_bf16=use_bf16,
+            faithful=faithful,
         )
         loss = result["loss"]
         _require_finite_tensor("training loss", loss)
@@ -902,6 +915,14 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--patience", type=int, default=5)
     parser.add_argument("--lr", type=float, default=5e-4)
     parser.add_argument("--weight_decay", type=float, default=1e-5)
+    parser.add_argument(
+        "--faithful_joint",
+        action="store_true",
+        help=(
+            "train the joint stage with MSE mean gradients plus a detached-feature "
+            "residual NLL for the uncertainty projection"
+        ),
+    )
     parser.add_argument("--num_workers", type=int, default=8)
     parser.add_argument("--prefetch_factor", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
@@ -929,6 +950,8 @@ def main() -> None:
         raise ValueError(
             "ITOP variance metrics require Student-t degrees of freedom > 2"
         )
+    if args.faithful_joint and args.phase != "joint_finetune":
+        raise ValueError("--faithful_joint is valid only for phase=joint_finetune")
     args.data_dir = str(dataset_dir(args.data_dir, "ITOP"))
     device = torch.device(args.device)
     if device.type == "cuda":
@@ -1095,6 +1118,7 @@ def main() -> None:
             device,
             frozen_backbone=frozen_backbone,
             use_bf16=use_bf16,
+            faithful=args.faithful_joint,
         )
         validation, _ = evaluate(
             model,

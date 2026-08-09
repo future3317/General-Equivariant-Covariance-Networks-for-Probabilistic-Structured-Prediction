@@ -197,18 +197,22 @@ class StructuredProbabilisticPredictor(torch.nn.Module):
         if readout_parameter is not None and node_features.dtype != readout_parameter.dtype:
             node_features = node_features.to(dtype=readout_parameter.dtype)
         if self.joint_head is not None:
-            required = (
-                "_compiled_features",
-                "forward_parameters_detached_features",
-                "mean_projection",
-            )
-            if any(not hasattr(self.joint_head, name) for name in required):
-                raise TypeError("joint_head does not expose the faithful readout protocol")
-            compiled = self.joint_head._compiled_features(node_features, batch)
-            mu = self.joint_head.mean_projection(compiled)
-            # Detaching before the second lowering is essential: covariance
-            # gradients may update its projection but never the shared lifting
-            # or backbone parameters.
+            if hasattr(self.joint_head, "forward_mean"):
+                mu = self.joint_head.forward_mean(node_features, batch)
+            else:
+                required = ("_compiled_features", "mean_projection")
+                if any(not hasattr(self.joint_head, name) for name in required):
+                    raise TypeError(
+                        "joint_head does not expose the faithful mean protocol"
+                    )
+                compiled = self.joint_head._compiled_features(node_features, batch)
+                mu = self.joint_head.mean_projection(compiled)
+            if not hasattr(self.joint_head, "forward_parameters_detached_features"):
+                raise TypeError(
+                    "joint_head does not expose the faithful operator protocol"
+                )
+            # The covariance projection remains trainable, but its loss cannot
+            # rewrite the mean feature path or backbone.
             params = self.joint_head.forward_parameters_detached_features(
                 node_features.detach(), batch
             )
@@ -236,6 +240,11 @@ class StructuredProbabilisticPredictor(torch.nn.Module):
         covariance_loss, components = self.distribution(
             mu.detach(), params, covariance_target, self.spd_map
         )
+        components = {
+            **components,
+            "mean_mse": mean_loss.detach(),
+            "covariance_nll": covariance_loss.detach(),
+        }
         return {
             "mu": mu,
             "params": params,
