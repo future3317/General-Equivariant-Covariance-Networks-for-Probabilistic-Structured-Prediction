@@ -50,6 +50,17 @@ proper NLL improves and Energy Score does not worsen. Top remains OOD-only and
 must not select a checkpoint. Failure closes this objective intervention; do
 not sweep weights or learning rates.
 
+## Seed-43 confirmation gate
+
+Only if seed 42 passes the gate above, repeat the identical three-epoch
+intervention from seed 43's own frozen Full-t checkpoint. This is a paired
+development confirmation, not a return to the stopped full E3 ensemble. No
+hyperparameter changes are permitted. The mechanism is considered stable
+enough for method-level follow-up only if seed 43 also avoids mean collapse and
+improves Side NLL plus Energy Score without degrading Side MPJPE by more than
+1 cm. A failure stops the objective route; a success permits design of a formal
+full-data comparison, but does not launch it automatically.
+
 ## Interpretation
 
 A positive result supports gradient coupling as an actionable training cause,
