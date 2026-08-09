@@ -358,11 +358,16 @@ def _freeze_record(model, args: argparse.Namespace) -> dict[str, Any]:
             )
         boundary = "all deterministic parameters trainable"
     elif args.phase == "joint_finetune":
-        if frozen:
+        bypassed_mean_projection = "joint_head.operator_head.mean_projection.weight"
+        if frozen != [bypassed_mean_projection]:
             raise RuntimeError(
-                "joint fine-tuning unexpectedly contains frozen parameters"
+                "joint fine-tuning must freeze only the bypassed compiler "
+                "mean projection"
             )
-        boundary = "all parameters trainable from the selected frozen checkpoint"
+        boundary = (
+            "all active parameters trainable from the selected frozen checkpoint; "
+            "the unused compiler mean projection is structurally bypassed and fixed"
+        )
     else:
         bypassed_mean_projection = "joint_head.operator_head.mean_projection.weight"
         if frozen != [bypassed_mean_projection]:

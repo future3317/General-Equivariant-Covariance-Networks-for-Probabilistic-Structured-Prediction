@@ -403,6 +403,35 @@ def test_end_to_end_freeze_contract_allows_only_bypassed_mean_projection():
     ]
 
 
+def test_joint_freeze_contract_allows_only_bypassed_mean_projection():
+    model, _ = _build_model(
+        SimpleNamespace(
+            model="full_student_t",
+            hidden_dim=16,
+            max_radius=0.5,
+            lmax=2,
+            num_layers=1,
+            num_basis=4,
+            tp_backend="e3nn",
+            cueq_method="naive",
+            student_t_dof=5.0,
+        )
+    )
+    freeze = _freeze_record(
+        model,
+        SimpleNamespace(
+            phase="joint_finetune",
+            model="full_student_t",
+            backbone_checkpoint=None,
+            resume_checkpoint=None,
+        ),
+    )
+    assert freeze["frozen_parameter_names"] == [
+        "joint_head.operator_head.mean_projection.weight"
+    ]
+    assert freeze["boundary"].startswith("all active parameters trainable")
+
+
 @pytest.mark.parametrize(
     ("model", "covariance_mode"),
     (("independent_student_t", "graph"), ("low_rank_student_t", "low_rank")),
