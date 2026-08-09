@@ -2,10 +2,12 @@
 
 Date: 2026-08-09
 
-This document evaluates the recommendations in `不确定性建模意见.md` by
-scientific evidence state. "Stopped by gate" is a completed decision, not an
-implementation defect. The project should not run a rejected branch merely to
-turn every row into "trained".
+This document evaluates the recommendations in the user-provided uncertainty
+modelling brief (`不确定性建模意见.md`) by scientific evidence state. The brief is
+an external working requirement and is intentionally not tracked by Git.
+"Stopped by gate" is a completed decision, not an implementation defect. The
+project should not run a rejected branch merely to turn every row into
+"trained".
 
 | Requirement | Implemented | Experimentally verified | Decision | Evidence |
 |---|---|---|---|---|
@@ -29,8 +31,8 @@ turn every row into "trained".
 | Observation-aware predictive path | No public method | No | Correctly frozen by E2 gate | E2 result |
 | Conditional flow / evidential head | No | No | Not triggered by phase gates | E1--E3 decisions |
 | Repeated dielectric protocol labels | Not available | No | External evidence gap; cannot be manufactured | Dataset audit and E0/E1 reports |
-| Typed uncertainty-source/identifiability semantics | No source-level schema | No | Genuine engineering/method gap; design before implementation | Repository-wide search for `UncertaintyTarget`, `IdentifiabilityEvidence`, and `CalibrationScope` returned no implementation |
-| Objective-coupling control | Existing stages expose the pathology; no isolated-loss protocol | Pilot evidence only | **Next minimal experiment** | E3 default/low-LR joint histories |
+| Typed uncertainty-source/identifiability semantics | No source-level schema; design review complete | No | Genuine public-API gap; implementation awaits review | `docs/uncertainty_source_semantics_design_20260809.md` |
+| Objective-coupling control | Yes, by reusing the generic faithful objective | Yes, two-seed development pilot | Positive on Side IID; not stable on Top OOD; full-data confirmation deferred | `docs/objective_coupling_pilot_results_20260809.md`; `results/e3_pilot_c40898f` |
 
 ## What has actually been learned
 
@@ -47,8 +49,9 @@ turn every row into "trained".
 5. Independent ITOP means help through model averaging, while their spread is
    not an error-aligned epistemic score.
 6. Joint heteroscedastic NLL training can buy better density by degrading the
-   mean. This is the only currently supported, directly actionable training
-   mechanism.
+   mean. Reusing the faithful gradient boundary removes this collapse and
+   improves Side NLL, Energy Score, and MPJPE in two development seeds, while
+   Top behavior remains seed dependent.
 
 ## Work that must remain stopped
 
@@ -59,16 +62,17 @@ would add cost without distinguishing a live root cause.
 
 ## Minimal remaining work
 
-The scientific next step is one controlled objective-coupling falsification on
-the existing 2,487-frame/256-point seed-42 development protocol. Hold the
-Student-t distribution, Full SPD compiler, data, split, checkpoint, precision,
-and evaluation fixed. Change only gradient routing: retain a deterministic MSE
-mean objective while fitting scatter from residuals that do not send NLL
-gradients through the mean path. Stop after one to three epochs if mean MPJPE
-drifts or proper score and Energy Score do not jointly improve.
+The controlled objective-coupling falsification is complete and positive on
+Side IID. Before any manuscript update, define a formal full-data, 512-point
+matched comparison of frozen, ordinary-joint, and faithful-joint Full-t. Reuse
+existing checkpoints whenever their cache and training contracts match, and do
+not conflate seed-dependent Top behavior with OOD calibration.
 
 Separately, the typed uncertainty-source/identifiability schema is a real
 compiler-level gap. It should first receive a minimal interface design showing
 how a certificate records target, conditioning information, latent variables,
 identifiability evidence, and calibration scope without claiming that the
 compiler proves calibration. It does not require GPU training.
+The design review is recorded in
+`docs/uncertainty_source_semantics_design_20260809.md`; public implementation
+remains gated on API review.

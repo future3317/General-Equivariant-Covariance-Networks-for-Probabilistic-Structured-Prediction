@@ -313,3 +313,18 @@ protocol, artifact checks, values, and interpretation boundaries are in
 `e3a_fast_pilot_results_20260809.md`; the consolidated current-state matrix is
 `uncertainty_root_cause_completion_matrix_20260809.md`. The manuscript main
 results remain unchanged.
+
+## Objective-coupling follow-up (2026-08-09)
+
+The next minimal falsification reused the repository's existing faithful
+heteroscedastic objective rather than adding a new loss. Controlled ITOP
+readout plumbing was added so that MSE alone trains backbone/mean and detached
+residual NLL trains the covariance projection. Two development seeds both
+improved Side IID MPJPE, proper NLL, and Energy Score relative to their own
+frozen Full-t checkpoints, without the ordinary joint run's exploding gradient
+or mean collapse. Top improved for seed 42 and worsened for seed 43.
+
+This supports training-objective gradient coupling as an actionable IID root
+cause but not as a cross-view uncertainty solution. Full-data confirmation and
+manuscript updates remain deferred. Values, artifact hashes, and interpretation
+boundaries are in `objective_coupling_pilot_results_20260809.md`.

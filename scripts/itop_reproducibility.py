@@ -221,6 +221,15 @@ def training_contract(
                     else "joint_negative_log_likelihood"
                 )
             ),
+            "gradient_routing": (
+                {
+                    "backbone_and_mean": "mean_squared_error_only",
+                    "covariance_projection": "detached_feature_residual_nll_only",
+                    "compiled_operator_lifting": "no_gradient_in_faithful_objective",
+                }
+                if getattr(args, "faithful_joint", False)
+                else "ordinary_objective_autograd"
+            ),
         },
         "precision": {
             "backbone": "BF16 autocast on CUDA"

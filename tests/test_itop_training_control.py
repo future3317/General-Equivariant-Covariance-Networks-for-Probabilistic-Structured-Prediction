@@ -351,6 +351,11 @@ def test_training_contract_records_effective_split_seed():
         contract["optimization"]["training_objective"]
         == "mse_mean_plus_detached_feature_residual_nll"
     )
+    assert contract["optimization"]["gradient_routing"] == {
+        "backbone_and_mean": "mean_squared_error_only",
+        "covariance_projection": "detached_feature_residual_nll_only",
+        "compiled_operator_lifting": "no_gradient_in_faithful_objective",
+    }
 
 
 def test_controlled_itop_faithful_objective_isolates_mean_gradient():
@@ -480,6 +485,34 @@ def test_joint_freeze_contract_allows_only_bypassed_mean_projection():
         "joint_head.operator_head.mean_projection.weight"
     ]
     assert freeze["boundary"].startswith("all active parameters trainable")
+
+
+def test_faithful_joint_freeze_contract_records_gradient_routing():
+    model, _ = _build_model(
+        SimpleNamespace(
+            model="full_student_t",
+            hidden_dim=16,
+            max_radius=0.5,
+            lmax=2,
+            num_layers=1,
+            num_basis=4,
+            tp_backend="e3nn",
+            cueq_method="naive",
+            student_t_dof=5.0,
+        )
+    )
+    freeze = _freeze_record(
+        model,
+        SimpleNamespace(
+            phase="joint_finetune",
+            model="full_student_t",
+            faithful_joint=True,
+            backbone_checkpoint=None,
+            resume_checkpoint=None,
+        ),
+    )
+    assert freeze["boundary"].startswith("faithful objective")
+    assert "compiled operator lifting receives no gradient" in freeze["boundary"]
 
 
 @pytest.mark.parametrize(

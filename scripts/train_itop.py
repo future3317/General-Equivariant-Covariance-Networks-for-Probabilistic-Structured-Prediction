@@ -365,8 +365,15 @@ def _freeze_record(model, args: argparse.Namespace) -> dict[str, Any]:
                 "mean projection"
             )
         boundary = (
-            "all active parameters trainable from the selected frozen checkpoint; "
-            "the unused compiler mean projection is structurally bypassed and fixed"
+            "faithful objective: backbone and direct mean receive MSE gradients; "
+            "covariance projection receives detached-feature residual NLL gradients; "
+            "compiled operator lifting receives no gradient; unused compiler mean "
+            "projection is structurally bypassed and fixed"
+            if getattr(args, "faithful_joint", False)
+            else (
+                "all active parameters trainable from the selected frozen checkpoint; "
+                "the unused compiler mean projection is structurally bypassed and fixed"
+            )
         )
     else:
         bypassed_mean_projection = "joint_head.operator_head.mean_projection.weight"
