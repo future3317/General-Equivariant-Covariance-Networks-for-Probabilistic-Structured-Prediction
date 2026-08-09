@@ -29,6 +29,8 @@ Use the existing `scripts.run_itop_study` stages with only `full_student_t`:
 - Side/Top test: all 4,863 valid samples; Top never selects a checkpoint.
 - Points: 256; neighbors: 16.
 - Seeds: 42 and 43.
+- Shared train/validation split seed: 42.  Model seeds affect initialization,
+  shuffle, and worker RNGs, but not sample membership.
 - Stage 1: independent deterministic training, at most 8 epochs, patience 2.
 - Stage 2: each seed's own frozen Full Student-t head, fixed nu=5, at most
   5 epochs, patience 2.

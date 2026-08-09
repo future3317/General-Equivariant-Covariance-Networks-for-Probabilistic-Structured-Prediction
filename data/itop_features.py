@@ -51,12 +51,13 @@ def get_itop_feature_loaders(
     *,
     backbone_checkpoint: str | Path,
     seed: int,
+    split_seed: int | None = None,
     batch_size: int,
     num_workers: int,
     pin_memory: bool,
     val_fraction: float = 0.1,
 ) -> tuple[DataLoader, DataLoader, DataLoader, DataLoader, dict]:
-    """Load seed-split train/validation and aligned side/top test features."""
+    """Load fixed-split train/validation and aligned side/top test features."""
     root = Path(cache_dir)
     metadata = json.loads((root / "metadata.json").read_text(encoding="utf-8"))
     actual_hash = sha256_file(backbone_checkpoint)
@@ -68,7 +69,9 @@ def get_itop_feature_loaders(
     side_test = ITOPFeatureDataset(root / "side_test.pt")
     top_test = ITOPFeatureDataset(root / "top_test.pt")
     train_indices, validation_indices = itop_train_validation_indices(
-        len(train_full), seed=seed, val_fraction=val_fraction
+        len(train_full),
+        seed=seed if split_seed is None else split_seed,
+        val_fraction=val_fraction,
     )
     validation = Subset(train_full, validation_indices)
     train = Subset(train_full, train_indices)

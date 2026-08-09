@@ -300,6 +300,31 @@ def test_feature_cache_reuses_canonical_seed_split(tmp_path):
     assert len(top.dataset) == 3
 
 
+def test_feature_cache_separates_split_seed_from_sampler_seed(tmp_path):
+    checkpoint = tmp_path / "backbone.pt"
+    torch.save({"state": 1}, checkpoint)
+    cache = tmp_path / "features"
+    _write_feature_cache(cache, checkpoint, checkpoint_hash="actual")
+
+    loaders = []
+    for model_seed in (42, 43):
+        train, validation, *_ = get_itop_feature_loaders(
+            cache,
+            backbone_checkpoint=checkpoint,
+            seed=model_seed,
+            split_seed=17,
+            batch_size=4,
+            num_workers=0,
+            pin_memory=False,
+        )
+        loaders.append((train, validation))
+
+    (train_42, validation_42), (train_43, validation_43) = loaders
+    assert train_42.dataset.indices == train_43.dataset.indices
+    assert validation_42.dataset.indices == validation_43.dataset.indices
+    assert list(train_42.sampler) != list(train_43.sampler)
+
+
 def test_feature_cache_rejects_wrong_backbone_checkpoint(tmp_path):
     checkpoint = tmp_path / "backbone.pt"
     torch.save({"state": 1}, checkpoint)

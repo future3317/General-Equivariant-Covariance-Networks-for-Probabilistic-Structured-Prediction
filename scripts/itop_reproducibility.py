@@ -172,6 +172,9 @@ def training_contract(
     args, device: torch.device, *, freeze: dict[str, Any]
 ) -> dict[str, Any]:
     """Return the fixed ITOP training semantics for one stage."""
+    split_seed = getattr(args, "split_seed", None)
+    if split_seed is None:
+        split_seed = args.seed
     return {
         "version": CONTRACT_VERSION,
         "model": {
@@ -187,7 +190,8 @@ def training_contract(
         },
         "data": {
             "train_view": "side",
-            "validation": "seeded 90/10 split of side-train",
+            "validation": "fixed-seed 90/10 split of side-train",
+            "split_seed": split_seed,
             "test_views": ["side", "top"],
             "num_points": args.num_points,
             "num_neighbors": args.num_neighbors,

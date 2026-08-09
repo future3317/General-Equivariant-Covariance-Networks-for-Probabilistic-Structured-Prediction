@@ -12,6 +12,8 @@ import torch
 from torch.utils.data import DataLoader, RandomSampler, TensorDataset
 
 from scripts.evaluate_itop_final import _available_models
+from scripts.itop_reproducibility import training_contract
+from scripts.run_itop_e3a import _member_command
 from scripts.run_itop_study import (
     GEOMETRY_CACHE_FILES,
     SELECTABLE_PROBABILISTIC_MODELS,
@@ -254,6 +256,8 @@ def test_runner_accepts_a_minimal_full_student_t_pilot(monkeypatch):
             "results",
             "--gpu",
             "2",
+            "--split_seed",
+            "42",
             "--models",
             "full_student_t",
             "--joint_models",
@@ -278,7 +282,70 @@ def test_runner_accepts_a_minimal_full_student_t_pilot(monkeypatch):
         5,
         3,
     )
+    assert args.split_seed == 42
     assert "full_student_t" in SELECTABLE_PROBABILISTIC_MODELS
+
+
+def test_study_training_command_forwards_shared_split_seed(tmp_path):
+    args = SimpleNamespace(
+        data_dir=tmp_path / "ITOP",
+        num_points=256,
+        batch_size=4,
+        num_workers=0,
+        train_cache_sample_limit=2487,
+        split_seed=42,
+    )
+    command = _training_command(
+        args,
+        run_dir=tmp_path / "run",
+        model="deterministic",
+        phase="deterministic",
+        seed=43,
+        epochs=2,
+    )
+    assert command[command.index("--seed") + 1] == "43"
+    assert command[command.index("--split_seed") + 1] == "42"
+
+
+def test_e3a_member_command_keeps_model_and_split_seeds_distinct(tmp_path):
+    args = SimpleNamespace(
+        data_dir=tmp_path / "ITOP",
+        split_seed=42,
+        batch_size=16,
+        num_workers=8,
+        num_epochs=5,
+        tp_backend="e3nn",
+        cueq_method="naive",
+    )
+    command = _member_command(args, tmp_path / "member", seed=44)
+    assert command[command.index("--seed") + 1] == "44"
+    assert command[command.index("--split_seed") + 1] == "42"
+
+
+def test_training_contract_records_effective_split_seed():
+    args = SimpleNamespace(
+        model="deterministic",
+        phase="deterministic",
+        student_t_dof=5.0,
+        representation_metric="none",
+        seed=43,
+        split_seed=42,
+        num_points=256,
+        num_neighbors=16,
+        train_cache_sample_limit=2487,
+        lr=5e-4,
+        weight_decay=1e-5,
+        batch_size=16,
+        patience=2,
+        backbone_precision="bf16",
+        num_workers=8,
+        tp_backend="e3nn",
+        cueq_method="naive",
+        compile_tp=False,
+    )
+    contract = training_contract(args, torch.device("cpu"), freeze={})
+    assert contract["data"]["split_seed"] == 42
+    assert contract["randomness"]["seed"] == 43
 
 
 def test_runner_rejects_unknown_or_repeated_model_filters():

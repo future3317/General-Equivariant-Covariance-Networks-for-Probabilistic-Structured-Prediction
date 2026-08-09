@@ -53,6 +53,8 @@ def _member_command(args: argparse.Namespace, run_dir: Path, seed: int) -> list[
         "none",
         "--seed",
         str(seed),
+        "--split_seed",
+        str(args.split_seed),
         "--num_points",
         "512",
         "--num_neighbors",
@@ -101,6 +103,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--study_dir", type=Path, required=True)
     parser.add_argument("--gpu", required=True)
     parser.add_argument("--seeds", default="42,43,44")
+    parser.add_argument("--split_seed", type=int, default=42)
     parser.add_argument("--num_epochs", type=int, default=100)
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--num_workers", type=int, default=8)
@@ -153,6 +156,7 @@ def main() -> None:
         "controls": {
             "same_architecture_optimizer_schedule": True,
             "same_side_train_validation_split_policy": True,
+            "split_seed": args.split_seed,
             "same_geometry_cache_hash": cache["dataset_cache_hash"],
             "bootstrap_or_subsample": "not used in E3a",
         },

@@ -901,6 +901,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--prefetch_factor", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
+        "--split_seed",
+        type=int,
+        default=None,
+        help="fixed train/validation partition seed; defaults to --seed",
+    )
+    parser.add_argument(
         "--backbone_precision", choices=("bf16", "fp32"), default="bf16"
     )
     add_tensor_product_arguments(parser)
@@ -912,6 +918,8 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
+    if args.split_seed is None:
+        args.split_seed = args.seed
     if args.model.endswith("_student_t") and args.student_t_dof <= 2.0:
         raise ValueError(
             "ITOP variance metrics require Student-t degrees of freedom > 2"
@@ -964,13 +972,18 @@ def main() -> None:
             args.feature_cache,
             backbone_checkpoint=args.backbone_checkpoint,
             seed=args.seed,
+            split_seed=args.split_seed,
             batch_size=args.batch_size,
             num_workers=args.num_workers,
             pin_memory=device.type == "cuda",
         )
     else:
         train_loader, validation_loader, side_loader = get_itop_loaders(
-            train_view="side", test_view="side", seed=args.seed, **loader_kwargs
+            train_view="side",
+            test_view="side",
+            seed=args.seed,
+            split_seed=args.split_seed,
+            **loader_kwargs,
         )
         top_loader = get_itop_split_loader(
             view="top",

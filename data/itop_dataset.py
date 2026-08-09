@@ -435,6 +435,7 @@ def get_itop_loaders(
     num_neighbors: int = 16,
     val_fraction: float = 0.1,
     seed: int = 42,
+    split_seed: int | None = None,
     num_workers: int = 0,
     pin_memory: bool = False,
     persistent_workers: bool = False,
@@ -477,7 +478,9 @@ def get_itop_loaders(
     )
 
     train_indices, validation_indices = itop_train_validation_indices(
-        len(train_full), seed=seed, val_fraction=val_fraction
+        len(train_full),
+        seed=seed if split_seed is None else split_seed,
+        val_fraction=val_fraction,
     )
     train_dataset = Subset(train_full, train_indices)
     validation_dataset = Subset(validation_full, validation_indices)

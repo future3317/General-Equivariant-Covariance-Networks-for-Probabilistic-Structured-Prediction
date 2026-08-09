@@ -143,6 +143,9 @@ def _training_command(
         "--device",
         "cuda:0",
     ]
+    split_seed = getattr(args, "split_seed", None)
+    if split_seed is not None:
+        command.extend(("--split_seed", str(split_seed)))
     train_cache_sample_limit = getattr(args, "train_cache_sample_limit", None)
     if train_cache_sample_limit is not None:
         command.extend(
@@ -219,6 +222,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--seeds", default="42",
         help="comma-separated seeds; default is the single controlled seed 42",
+    )
+    parser.add_argument(
+        "--split_seed",
+        type=int,
+        default=None,
+        help="shared train/validation split seed across model seeds",
     )
     parser.add_argument(
         "--models",
@@ -340,6 +349,7 @@ def main() -> None:
             "num_points": args.num_points,
             "train_cache_sample_limit": args.train_cache_sample_limit,
             "seeds": list(seeds),
+            "split_seed": args.split_seed,
             "probabilistic_models": list(models),
             "stage_epochs": {
                 "deterministic": deterministic_epochs,
