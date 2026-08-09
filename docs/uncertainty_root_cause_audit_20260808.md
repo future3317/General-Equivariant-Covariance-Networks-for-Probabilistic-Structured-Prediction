@@ -324,7 +324,11 @@ improved Side IID MPJPE, proper NLL, and Energy Score relative to their own
 frozen Full-t checkpoints, without the ordinary joint run's exploding gradient
 or mean collapse. Top improved for seed 42 and worsened for seed 43.
 
-This supports training-objective gradient coupling as an actionable IID root
-cause but not as a cross-view uncertainty solution. Full-data confirmation and
-manuscript updates remain deferred. Values, artifact hashes, and interpretation
-boundaries are in `objective_coupling_pilot_results_20260809.md`.
+This supported training-objective gradient coupling as a development-scale IID
+mechanism but not as a cross-view uncertainty solution. The subsequent
+full-data, 512-point Stage A improved Side NLL by only 0.571 while Side MPJPE
+and Energy Score worsened, so it failed the predeclared promotion gate. The
+matched ordinary arm was not launched and manuscript main results remain
+unchanged. Values, artifact hashes, and interpretation boundaries are in
+`objective_coupling_pilot_results_20260809.md` and
+`objective_coupling_full_confirmation_results_20260809.md`.

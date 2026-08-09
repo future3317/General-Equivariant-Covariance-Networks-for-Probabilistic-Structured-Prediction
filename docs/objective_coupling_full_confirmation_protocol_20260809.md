@@ -2,9 +2,9 @@
 
 Date: 2026-08-09
 
-Status: predeclared staged confirmation. This protocol does not authorize
-additional uncertainty families, ensemble members, or manuscript claims before
-the gate is evaluated.
+Status: completed. Stage A failed the predeclared gate, so Stage B was not
+launched. Results are in
+`objective_coupling_full_confirmation_results_20260809.md`.
 
 ## Hypothesis
 

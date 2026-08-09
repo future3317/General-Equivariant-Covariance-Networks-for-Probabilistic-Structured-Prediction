@@ -32,7 +32,7 @@ project should not run a rejected branch merely to turn every row into
 | Conditional flow / evidential head | No | No | Not triggered by phase gates | E1--E3 decisions |
 | Repeated dielectric protocol labels | Not available | No | External evidence gap; cannot be manufactured | Dataset audit and E0/E1 reports |
 | Typed uncertainty-source/identifiability semantics | No source-level schema; design review complete | No | Genuine public-API gap; implementation awaits review | `docs/uncertainty_source_semantics_design_20260809.md` |
-| Objective-coupling control | Yes, by reusing the generic faithful objective | Yes, two-seed development pilot | Positive on Side IID; not stable on Top OOD; full-data confirmation deferred | `docs/objective_coupling_pilot_results_20260809.md`; `results/e3_pilot_c40898f` |
+| Objective-coupling control | Yes, by reusing the generic faithful objective | Yes, development pilot and full-data Stage A | Development gains did not pass the predeclared full-data gate; expansion stopped | `docs/objective_coupling_pilot_results_20260809.md`; `docs/objective_coupling_full_confirmation_results_20260809.md`; `results/objective_confirmation_7d42672` |
 
 ## What has actually been learned
 
@@ -49,9 +49,9 @@ project should not run a rejected branch merely to turn every row into
 5. Independent ITOP means help through model averaging, while their spread is
    not an error-aligned epistemic score.
 6. Joint heteroscedastic NLL training can buy better density by degrading the
-   mean. Reusing the faithful gradient boundary removes this collapse and
-   improves Side NLL, Energy Score, and MPJPE in two development seeds, while
-   Top behavior remains seed dependent.
+   mean. The faithful gradient boundary prevents that collapse and was positive
+   in two development seeds, but its full-data Side run improved NLL by only
+   0.571 while MPJPE and Energy Score worsened. It therefore failed promotion.
 
 ## Work that must remain stopped
 
@@ -62,11 +62,10 @@ would add cost without distinguishing a live root cause.
 
 ## Minimal remaining work
 
-The controlled objective-coupling falsification is complete and positive on
-Side IID. Before any manuscript update, define a formal full-data, 512-point
-matched comparison of frozen, ordinary-joint, and faithful-joint Full-t. Reuse
-existing checkpoints whenever their cache and training contracts match, and do
-not conflate seed-dependent Top behavior with OOD calibration.
+The formal full-data, 512-point faithful Stage A is complete and negative under
+its predeclared multi-score gate. The matched ordinary arm was therefore not
+launched, and no further GPU experiment is currently justified by the original
+brief. The manuscript main results remain unchanged.
 
 Separately, the typed uncertainty-source/identifiability schema is a real
 compiler-level gap. It should first receive a minimal interface design showing

@@ -104,12 +104,11 @@ or Top calibration. The opposite seed-43 Top response rejects any claim that
 the faithful boundary alone solves cross-view robustness. It also does not
 revive the stopped E3 ensemble, public mixture, or observation-aware branches.
 
-## Unresolved and next gate
+## Subsequent gate outcome
 
-The positive result needs a formal full-data, 512-point comparison before it
-can alter manuscript main results. That confirmation should compare frozen
-Full-t, ordinary joint, and faithful joint from the same deterministic seed(s),
-with Side validation-only selection and Top OOD evaluation. It should not be
-launched automatically: first define the exact seed count and compute budget,
-and reuse the existing deterministic/frozen checkpoints whenever their data and
-geometry contracts match.
+The formal full-data, 512-point faithful Stage A was subsequently run from the
+existing matched frozen Full-t checkpoint. It improved Side NLL by only 0.571
+while Side MPJPE and Energy Score worsened, so it failed the predeclared
+multi-score gate. The matched ordinary arm was not launched and these pilot
+results remain development-only. See
+`objective_coupling_full_confirmation_results_20260809.md`.
