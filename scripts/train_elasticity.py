@@ -17,14 +17,82 @@ from data.paths import dataset_dir
 from data.representation_metrics import infer_representation_block_metric
 from data.tensor_conversions import elasticity_21d_to_irreps, irreps_to_elasticity_21d
 from equivcompiler import FeatureSpec, plan_readout
-from models import EquivariantBackbone
-from representations import rank4_elasticity_irreps
+from models import (
+    DeterministicHead,
+    EquivariantBackbone,
+    StructuredProbabilisticPredictor,
+)
+from representations import O3IrrepsSpec, rank4_elasticity_irreps
 from scripts._common import (
     add_tensor_product_arguments,
     covariance_policy_from_cli,
     tensor_product_kwargs,
 )
 from spd_maps import RepresentationMetricMap
+
+ELASTICITY_ARMS = (
+    "deterministic",
+    "low_rank_student_t",
+    "full_student_t",
+)
+
+
+def elasticity_arm_configuration(arm: str) -> dict[str, str | None]:
+    """Map study-arm names to the smallest scientific intervention."""
+
+    configurations = {
+        "deterministic": {"objective": "deterministic", "covariance": None},
+        "low_rank_student_t": {
+            "objective": "student_t",
+            "covariance": "low_rank",
+        },
+        "full_student_t": {"objective": "student_t", "covariance": "full"},
+    }
+    try:
+        return configurations[arm]
+    except KeyError as error:
+        raise ValueError(f"unsupported elasticity arm: {arm}") from error
+
+
+def build_elasticity_model(args: argparse.Namespace):
+    """Build one matched elasticity arm and return its machine-readable schema."""
+
+    configuration = elasticity_arm_configuration(args.arm)
+    backbone = EquivariantBackbone(
+        hidden_dim=args.hidden_dim,
+        lmax=args.lmax,
+        num_layers=args.num_layers,
+        atom_feature_dim=49,
+        num_basis=args.num_basis,
+        atom_features=args.atom_features,
+        **tensor_product_kwargs(args),
+    )
+    output_spec = O3IrrepsSpec(rank4_elasticity_irreps())
+    if configuration["objective"] == "deterministic":
+        model = StructuredProbabilisticPredictor(
+            backbone=backbone,
+            output_spec=output_spec,
+            joint_head=DeterministicHead(backbone.irreps_out, output_spec, pool=True),
+        )
+        return model, {
+            "kind": "deterministic_mean",
+            "output_irreps": str(output_spec.irreps),
+            "output_dimension": output_spec.dim,
+        }
+
+    plan = plan_readout(
+        FeatureSpec.from_backbone(backbone),
+        output=rank4_elasticity_irreps(),
+        covariance=covariance_policy_from_cli(
+            str(configuration["covariance"]),
+            rank=args.rank,
+            parameter_budget=args.parameter_budget,
+        ),
+        distribution=str(configuration["objective"]),
+        student_t_dof=args.student_t_dof,
+        output_scope="global",
+    )
+    return plan.bind(backbone), plan.compilation.as_dict()
 
 
 def setup_logger(save_dir: str, experiment_name: str | None = None):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pickle
+import random
 from pathlib import Path
 
 import numpy as np
@@ -40,6 +41,14 @@ _ELASTICITY_21_INDICES = [
     (3, 5),
     (4, 5),
 ]
+
+
+def deterministic_subset_indices(length: int, count: int, *, seed: int) -> list[int]:
+    """Return a stable, sorted subset without mutating process-global RNG state."""
+
+    if length < 0 or count <= 0 or count > length:
+        raise ValueError("require 0 < count <= length")
+    return sorted(random.Random(seed).sample(range(length), count))
 
 
 def _matrix6x6_to_21d(C_6x6: np.ndarray) -> np.ndarray:
@@ -137,6 +146,7 @@ class ElasticityIrrepsDataset(Dataset):
         data.y = target_21d.unsqueeze(0)
         data.y_irreps = target_irreps
         data.y_km = target_21d.unsqueeze(0)
+        data.sample_id = torch.tensor([idx], dtype=torch.long)
         return data
 
     def _build_graph(self, structure, atom_features):
@@ -189,6 +199,7 @@ def get_elasticity_irreps_loaders(
     num_workers: int = 0,
     train_subset: int | None = None,
     eval_subset: int | None = None,
+    subset_seed: int = 42,
     max_radius: float = 5.0,
     persistent_workers: bool = False,
     pin_memory: bool = False,
@@ -231,9 +242,9 @@ def get_elasticity_irreps_loaders(
         test_dataset = torch.utils.data.Subset(test_dataset, range(min(eval_subset, len(test_dataset))))
 
     if train_subset is not None and train_subset < len(train_dataset):
-        import random
-
-        indices = random.sample(range(len(train_dataset)), train_subset)
+        indices = deterministic_subset_indices(
+            len(train_dataset), train_subset, seed=subset_seed
+        )
         train_dataset = torch.utils.data.Subset(train_dataset, indices)
 
     loader_kwargs: dict = {
