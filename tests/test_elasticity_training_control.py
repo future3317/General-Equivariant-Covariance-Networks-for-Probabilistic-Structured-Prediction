@@ -3,6 +3,7 @@ from __future__ import annotations
 from argparse import Namespace
 
 from data.elasticity_dataset import deterministic_subset_indices
+from scripts.run_elasticity_study import pilot_gate, study_arm_arguments
 from scripts.train_elasticity import (
     build_elasticity_model,
     elasticity_arm_configuration,
@@ -76,3 +77,32 @@ def test_model_builder_uses_mean_only_control_and_compiled_probabilistic_arms():
         "parameter_count"
     ]
     assert full_schema["covariance_representation"]["highest_angular_momentum"] == 8
+
+
+def test_study_arm_arguments_change_only_the_declared_family():
+    assert study_arm_arguments("deterministic") == ["--arm", "deterministic"]
+    assert study_arm_arguments("low_rank_student_t") == [
+        "--arm",
+        "low_rank_student_t",
+    ]
+    assert study_arm_arguments("full_student_t") == ["--arm", "full_student_t"]
+
+
+def test_pilot_gate_requires_all_arms_loss_improvement_and_resource_contract():
+    passing = {
+        arm: {
+            "required_artifacts_complete": True,
+            "finite": True,
+            "first_validation_criterion": 5.0,
+            "best_validation_criterion": 4.0,
+            "peak_allocated_gib": 2.0,
+            "schema_valid": True,
+        }
+        for arm in ("deterministic", "low_rank_student_t", "full_student_t")
+    }
+    assert pilot_gate(passing)["passed"] is True
+
+    passing["full_student_t"]["best_validation_criterion"] = 5.0
+    failed = pilot_gate(passing)
+    assert failed["passed"] is False
+    assert "validation criterion did not improve" in failed["reasons"][0]

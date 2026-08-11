@@ -6,8 +6,12 @@ import argparse
 import json
 import logging
 import os
+import random
+import time
 from datetime import datetime, timezone
+from pathlib import Path
 
+import numpy as np
 import torch
 from torch import optim
 from tqdm import tqdm
@@ -28,6 +32,8 @@ from scripts._common import (
     covariance_policy_from_cli,
     tensor_product_kwargs,
 )
+from scripts.evaluate_elasticity import evaluate_elasticity_predictions
+from scripts.itop_reproducibility import sha256_file, source_provenance
 from spd_maps import RepresentationMetricMap
 
 ELASTICITY_ARMS = (
@@ -99,7 +105,7 @@ def setup_logger(save_dir: str, experiment_name: str | None = None):
     if experiment_name is None:
         experiment_name = f"elasticity_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
     os.makedirs(save_dir, exist_ok=True)
-    log_file = os.path.join(save_dir, f"{experiment_name}.log")
+    log_file = os.path.join(save_dir, "train.log")
 
     logger = logging.getLogger(experiment_name)
     logger.setLevel(logging.INFO)
@@ -189,8 +195,34 @@ def validate(model, dataloader, device, mean_21d, std_21d, non_blocking: bool = 
     }
 
 
+@torch.inference_mode()
+def collect_predictions(model, dataloader, device, *, non_blocking: bool = False):
+    """Collect one compact test artifact and in-memory scatters for evaluation."""
+
+    records: dict[str, list[torch.Tensor]] = {
+        "sample_id": [],
+        "mean": [],
+        "target": [],
+    }
+    probabilistic = model.distribution is not None
+    if probabilistic:
+        records["params"] = []
+        records["scale"] = []
+    for batch in tqdm(dataloader, desc="Predictions", leave=False):
+        batch = batch.to(device, non_blocking=non_blocking)
+        output = model(batch, return_scale=probabilistic)
+        records["sample_id"].append(batch.sample_id.detach().cpu().reshape(-1))
+        records["mean"].append(output["mu"].detach().cpu())
+        records["target"].append(batch.y_irreps.detach().cpu())
+        if probabilistic:
+            records["params"].append(output["params"].detach().cpu())
+            records["scale"].append(output["scale"].detach().double().cpu())
+    return {name: torch.cat(values, dim=0) for name, values in records.items()}
+
+
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--arm", choices=ELASTICITY_ARMS, default=None)
     parser.add_argument("--data_dir", default=None)
     parser.add_argument("--save_dir", default="checkpoints_elasticity")
     parser.add_argument("--hidden_dim", type=int, default=48)
@@ -218,6 +250,7 @@ def main():
     parser.add_argument("--num_epochs", type=int, default=100)
     parser.add_argument("--patience", type=int, default=15)
     parser.add_argument("--warmup_epochs", type=int, default=3)
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--train_subset", type=int, default=None)
     parser.add_argument("--eval_subset", type=int, default=None)
     parser.add_argument("--num_workers", type=int, default=0)
@@ -232,7 +265,28 @@ def main():
         "--device", default="cuda" if torch.cuda.is_available() else "cpu"
     )
     args = parser.parse_args()
+    if args.arm is None:
+        legacy = (args.covariance, args.objective)
+        legacy_arms = {
+            ("low_rank", "student_t"): "low_rank_student_t",
+            ("full", "student_t"): "full_student_t",
+        }
+        if legacy not in legacy_arms:
+            parser.error(
+                "the audited trainer requires --arm; legacy Gaussian/Block commands "
+                "are no longer accepted by this evidence runner"
+            )
+        args.arm = legacy_arms[legacy]
+    configuration = elasticity_arm_configuration(args.arm)
+    args.objective = str(configuration["objective"])
+    args.covariance = configuration["covariance"]
     args.data_dir = str(dataset_dir(args.data_dir, "mp_elastic"))
+
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
 
     logger, _experiment_name = setup_logger(args.save_dir)
     logger.info("=" * 60)
@@ -247,6 +301,7 @@ def main():
         num_workers=args.num_workers,
         train_subset=args.train_subset,
         eval_subset=args.eval_subset,
+        subset_seed=args.seed,
         persistent_workers=args.persistent_workers,
         pin_memory=args.pin_memory,
         prefetch_factor=args.prefetch_factor,
@@ -262,30 +317,11 @@ def main():
     mean_21d = torch.tensor(train_dataset.mean_21d, dtype=torch.float32)
     std_21d = torch.tensor(train_dataset.std_21d, dtype=torch.float32)
 
-    backbone = EquivariantBackbone(
-        hidden_dim=args.hidden_dim,
-        lmax=args.lmax,
-        num_layers=args.num_layers,
-        atom_feature_dim=49,
-        num_basis=args.num_basis,
-        atom_features=args.atom_features,
-        **tensor_product_kwargs(args),
-    )
-    plan = plan_readout(
-        FeatureSpec.from_backbone(backbone),
-        output=rank4_elasticity_irreps(),
-        covariance=covariance_policy_from_cli(
-            args.covariance,
-            rank=args.rank,
-            parameter_budget=args.parameter_budget,
-        ),
-        distribution=args.objective,
-        student_t_dof=args.student_t_dof,
-        output_scope="global",
-    )
-    compilation = plan.compilation
-    model = plan.bind(backbone).to(args.device)
+    model, schema = build_elasticity_model(args)
+    model = model.to(args.device)
     if args.representation_metric == "block_auto":
+        if model.spd_map is None:
+            raise ValueError("representation metric requires a probabilistic arm")
         # Convert normalized Cartesian targets once; the metric is inferred
         # from representation blocks and is independent of the dataset name.
         target_irreps = elasticity_21d_to_irreps(
@@ -303,13 +339,16 @@ def main():
 
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(f"Model parameters: {num_params:,}")
-    logger.info(
-        "Compiled covariance: mode=%s, parameters=%d, canonical_depth=%d, active_depth=%d",
-        compilation.covariance_mode,
-        compilation.covariance_parameter_count,
-        compilation.canonical_plan.depth,
-        compilation.active_plan.depth,
-    )
+    if model.distribution is None:
+        logger.info("Deterministic mean control: output_dimension=%d", schema["output_dimension"])
+    else:
+        logger.info(
+            "Compiled scatter: mode=%s, coordinates=%d, canonical_depth=%d, active_depth=%d",
+            schema["family"]["kind"],
+            schema["family"]["parameter_count"],
+            schema["representation_reachability"]["canonical"]["depth"],
+            schema["representation_reachability"]["active"]["depth"],
+        )
 
     optimizer = optim.AdamW(
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay
@@ -319,12 +358,22 @@ def main():
     )
 
     best_val_loss = float("inf")
+    selected_epoch = 0
     patience_counter = 0
     history = []
 
     non_blocking = args.pin_memory and args.device.startswith("cuda")
+    using_cuda = args.device.startswith("cuda") and torch.cuda.is_available()
+    if using_cuda:
+        torch.cuda.reset_peak_memory_stats(args.device)
+        torch.cuda.synchronize(args.device)
+    started = time.perf_counter()
     for epoch in range(args.num_epochs):
-        warmup_mse = 0.1 if epoch < args.warmup_epochs else 0.0
+        warmup_mse = (
+            0.1
+            if model.distribution is not None and epoch < args.warmup_epochs
+            else 0.0
+        )
         train_loss = train_epoch(
             model,
             train_loader,
@@ -344,10 +393,18 @@ def main():
             f"val_mae={val_metrics['mae']:.4f}"
         )
 
-        history.append({"epoch": epoch + 1, "train_loss": train_loss, **val_metrics})
+        history.append(
+            {
+                "epoch": epoch + 1,
+                "train_loss": train_loss,
+                "validation_criterion": val_metrics["loss"],
+                **val_metrics,
+            }
+        )
 
         if val_metrics["loss"] < best_val_loss:
             best_val_loss = val_metrics["loss"]
+            selected_epoch = epoch + 1
             patience_counter = 0
             torch.save(model.state_dict(), os.path.join(args.save_dir, "best_model.pt"))
             logger.info("  -> Saved best model")
@@ -358,6 +415,10 @@ def main():
             logger.info(f"Early stopping at epoch {epoch + 1}")
             break
 
+    if using_cuda:
+        torch.cuda.synchronize(args.device)
+    elapsed_seconds = time.perf_counter() - started
+
     model.load_state_dict(
         torch.load(
             os.path.join(args.save_dir, "best_model.pt"), map_location=args.device
@@ -367,15 +428,70 @@ def main():
         model, test_loader, args.device, mean_21d, std_21d, non_blocking=non_blocking
     )
     logger.info(f"Test: loss={test_metrics['loss']:.4f}, mae={test_metrics['mae']:.4f}")
+    predictions = collect_predictions(
+        model, test_loader, args.device, non_blocking=non_blocking
+    )
+    evaluation = evaluate_elasticity_predictions(
+        predictions,
+        arm=args.arm,
+        student_t_dof=args.student_t_dof,
+        seed=args.seed,
+    )
+    evaluation["mae_gpa"] = float(test_metrics["mae"])
+    evaluation["selected_epoch"] = selected_epoch
+    evaluation["runtime"] = {
+        "wall_seconds": elapsed_seconds,
+        "examples_per_second": (
+            len(train_loader.dataset) * len(history) / max(elapsed_seconds, 1e-12)
+        ),
+        "peak_allocated_gib": (
+            torch.cuda.max_memory_allocated(args.device) / 1024**3 if using_cuda else 0.0
+        ),
+        "peak_reserved_gib": (
+            torch.cuda.max_memory_reserved(args.device) / 1024**3 if using_cuda else 0.0
+        ),
+    }
 
-    with open(os.path.join(args.save_dir, "args.json"), "w") as f:
-        json.dump(vars(args), f, indent=2)
-    with open(os.path.join(args.save_dir, "compilation.json"), "w") as f:
-        json.dump(compilation.as_dict(), f, indent=2)
-    with open(os.path.join(args.save_dir, "history.json"), "w") as f:
-        json.dump(history, f, indent=2)
-    with open(os.path.join(args.save_dir, "test_metrics.json"), "w") as f:
-        json.dump(test_metrics, f, indent=2)
+    run_dir = Path(args.save_dir)
+    compact_predictions = {
+        name: tensor
+        for name, tensor in predictions.items()
+        if name != "scale"
+    }
+    torch.save(compact_predictions, run_dir / "predictions.pt")
+    schema_valid = (
+        schema.get("kind") == "deterministic_mean"
+        if model.distribution is None
+        else bool(schema["family"]["certificates"]["valid"])
+        and bool(schema["representation_reachability"]["active"]["reachable"])
+        and schema["covariance_representation"]["highest_angular_momentum"] == 8
+    )
+    schema_record = {"schema_valid": schema_valid, "compiler": schema}
+    data_files = sorted(Path(args.data_dir).glob("*.pkl"))
+    environment = {
+        "source": source_provenance(Path(__file__).resolve().parents[1]),
+        "data_files": {path.name: sha256_file(path) for path in data_files},
+        "split": {
+            "seed": args.seed,
+            "train_samples": len(train_loader.dataset),
+            "validation_samples": len(val_loader.dataset),
+            "test_samples": len(test_loader.dataset),
+        },
+        "device": args.device,
+        "torch_version": torch.__version__,
+        "cuda_version": torch.version.cuda,
+    }
+
+    payloads = {
+        "args.json": vars(args),
+        "environment.json": environment,
+        "schema.json": schema_record,
+        "history.json": history,
+        "metrics.json": evaluation,
+    }
+    for name, payload in payloads.items():
+        with (run_dir / name).open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True)
 
 
 if __name__ == "__main__":
