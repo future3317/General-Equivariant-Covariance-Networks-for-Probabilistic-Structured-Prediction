@@ -11,6 +11,7 @@ from typing import Any
 
 import torch
 
+from evaluation import empirical_coverage
 from scripts.itop_reproducibility import atomic_write_json, sha256_file
 from scripts.run_dielectric_family_factorial import (
     DISTRIBUTIONS,
@@ -53,6 +54,7 @@ def _audit_arm(root: Path, family: str, distribution: str, seed: int) -> dict:
     args = json.loads((arm / "args.json").read_text())
     schema = json.loads((arm / "schema.json").read_text())
     metrics = json.loads((arm / "metrics.json").read_text())
+    diagnostics = json.loads((arm / "diagnostics.json").read_text())
     provenance = json.loads((arm / "provenance.json").read_text())
     if args["selection_split"] != "validation":
         raise ValueError(f"non-validation selection: {arm}")
@@ -80,11 +82,35 @@ def _audit_arm(root: Path, family: str, distribution: str, seed: int) -> dict:
     minimum = float(torch.linalg.eigvalsh(prediction["scale"].double()).min())
     if minimum <= 0.0:
         raise FloatingPointError(f"non-SPD predictions: {arm}")
+    coverage = empirical_coverage(
+        prediction["mean"],
+        prediction["target"],
+        prediction["scale"],
+        levels=[0.9, 0.95],
+        reference=distribution,
+        student_t_dof=5.0,
+    )
+    elliptical = diagnostics["elliptical_falsification"]
+    diagnostic_summary = {
+        "radial_ks": elliptical["radial_pit"]["ks"],
+        "projection_median_ks": elliptical["projection_pit"]["median_ks"],
+        "direction_second_moment_defect": elliptical["direction_sphericality"][
+            "second_moment_defect"
+        ],
+        "radius_direction_pvalue": elliptical["radius_direction_dependence"][
+            "max_statistic_permutation_pvalue"
+        ],
+        "whitened_second_moment_defect": elliptical[
+            "whitened_second_moment_defect"
+        ],
+    }
     return {
         "family": family,
         "distribution": distribution,
         "seed": seed,
         "metrics": metrics,
+        "coverage": coverage,
+        "diagnostic_summary": diagnostic_summary,
         "provenance": provenance,
         "sample_count": int(prediction["target"].shape[0]),
         "sample_id_sha256": _tensor_sha256(prediction["sample_id"]),

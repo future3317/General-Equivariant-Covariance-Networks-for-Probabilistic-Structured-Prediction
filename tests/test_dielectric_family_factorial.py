@@ -118,6 +118,10 @@ def test_smoke_factorial_writes_and_audits_all_arms(tmp_path):
     result = aggregate_factorial(root, stage="smoke", seeds=(42,))
     assert len(result["rows"]) == 8
     assert all(result["common_frozen_artifacts"].values())
+    assert all(
+        set(row["coverage"]) == {"coverage_90", "coverage_95"}
+        for row in result["rows"]
+    )
 
     metrics_path = root / "full" / "student_t" / "seed_42" / "metrics.json"
     metrics_path.write_text("{}", encoding="utf-8")
