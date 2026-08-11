@@ -41,6 +41,20 @@ def assign_devices(
     ]
 
 
+def stage_budget(
+    stage: str, num_epochs: int | None, patience: int | None
+) -> tuple[int, int]:
+    defaults = {"pilot": (6, 2), "formal": (30, 5)}
+    if stage not in defaults:
+        raise ValueError(f"unsupported stage: {stage}")
+    default_epochs, default_patience = defaults[stage]
+    epochs = default_epochs if num_epochs is None else num_epochs
+    effective_patience = default_patience if patience is None else patience
+    if epochs < 2 or effective_patience < 1:
+        raise ValueError("training budget requires at least two epochs and patience one")
+    return epochs, effective_patience
+
+
 def pilot_gate(records: dict[str, dict[str, Any]]) -> dict[str, Any]:
     """Apply the preregistered fast-pilot expansion gate."""
 
@@ -94,11 +108,14 @@ def main() -> None:
     parser.add_argument("--devices", nargs="+", default=["cuda:0"])
     parser.add_argument("--seeds", type=int, nargs="+", default=None)
     parser.add_argument("--num-workers", type=int, default=4)
+    parser.add_argument("--num-epochs", type=int, default=None)
+    parser.add_argument("--patience", type=int, default=None)
     args = parser.parse_args()
 
     seeds = args.seeds or ([42] if args.stage == "pilot" else [42, 43, 44])
     if args.stage == "pilot" and seeds != [42]:
         parser.error("pilot stage is fixed to seed 42")
+    num_epochs, patience = stage_budget(args.stage, args.num_epochs, args.patience)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     jobs = [(seed, arm) for seed in seeds for arm in ELASTICITY_ARMS]
     scheduled = assign_devices(jobs, args.devices)
@@ -137,13 +154,15 @@ def main() -> None:
                         "--eval_subset",
                         "256",
                         "--num_epochs",
-                        "6",
+                        str(num_epochs),
                         "--patience",
-                        "2",
+                        str(patience),
                 )
             )
         else:
-            command.extend(("--num_epochs", "30", "--patience", "5"))
+            command.extend(
+                ("--num_epochs", str(num_epochs), "--patience", str(patience))
+            )
         commands.append((run_dir, command))
 
     for start in range(0, len(commands), len(args.devices)):
@@ -164,6 +183,7 @@ def main() -> None:
         "seeds": seeds,
         "arms": list(ELASTICITY_ARMS),
         "devices": args.devices,
+        "budget": {"num_epochs": num_epochs, "patience": patience},
     }
     if args.stage == "pilot":
         manifest["records"] = records

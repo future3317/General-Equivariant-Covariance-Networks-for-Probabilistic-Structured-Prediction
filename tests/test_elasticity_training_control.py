@@ -3,7 +3,12 @@ from __future__ import annotations
 from argparse import Namespace
 
 from data.elasticity_dataset import deterministic_subset_indices
-from scripts.run_elasticity_study import assign_devices, pilot_gate, study_arm_arguments
+from scripts.run_elasticity_study import (
+    assign_devices,
+    pilot_gate,
+    stage_budget,
+    study_arm_arguments,
+)
 from scripts.train_elasticity import (
     build_elasticity_model,
     elasticity_arm_configuration,
@@ -115,3 +120,9 @@ def test_device_assignment_is_deterministic_and_balanced():
         (42, "low_rank_student_t", "cuda:1"),
         (42, "full_student_t", "cuda:0"),
     ]
+
+
+def test_stage_budget_has_fast_defaults_and_allows_stricter_formal_cap():
+    assert stage_budget("pilot", None, None) == (6, 2)
+    assert stage_budget("formal", None, None) == (30, 5)
+    assert stage_budget("formal", 12, 3) == (12, 3)
