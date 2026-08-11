@@ -1,11 +1,65 @@
+import pytest
 import torch
 
 from compatibility.e3nn import o3
+from distributions import GaussianNLL, StudentTNLL
 from models.frozen_distribution_readout import (
     FrozenConditionalStudentT,
+    FrozenMeanScatterElliptical,
+    FrozenMeanScatterStudentT,
     FrozenSymmetricStudentTMixture,
 )
-from spd_maps import MatrixExponentialMap
+from spd_maps import IsotropicMap, MatrixExponentialMap
+
+
+@pytest.mark.parametrize(
+    ("distribution", "objective_type"),
+    (("gaussian", GaussianNLL), ("student_t", StudentTNLL)),
+)
+def test_frozen_elliptical_readout_reuses_existing_objective(
+    distribution, objective_type
+):
+    torch.manual_seed(1)
+    model = FrozenMeanScatterElliptical(
+        "2x0e",
+        "0e",
+        IsotropicMap(dim=3),
+        distribution=distribution,
+        student_t_dof=5.0,
+    ).double()
+    features = torch.randn(9, 2, dtype=torch.float64)
+    mean = torch.randn(9, 3, dtype=torch.float64)
+    target = torch.randn_like(mean)
+
+    result = model(features, mean, target)
+    params = model.parameter_projection(features)
+    expected, _ = model.objective(mean, params, target, model.spd_map)
+
+    assert isinstance(model.objective, objective_type)
+    assert torch.isfinite(result["loss"])
+    torch.testing.assert_close(result["loss"], expected)
+    torch.testing.assert_close(result["params"], params)
+
+
+def test_frozen_elliptical_readout_rejects_invalid_distribution_contract():
+    with pytest.raises(ValueError, match="unsupported elliptical distribution"):
+        FrozenMeanScatterElliptical(
+            "0e", "0e", IsotropicMap(dim=1), distribution="laplace"
+        )
+    with pytest.raises(ValueError, match="nu > 2"):
+        FrozenMeanScatterElliptical(
+            "0e",
+            "0e",
+            IsotropicMap(dim=1),
+            distribution="student_t",
+            student_t_dof=2.0,
+        )
+
+
+def test_existing_frozen_student_t_readout_remains_compatible():
+    model = FrozenMeanScatterStudentT("0e", "0e", IsotropicMap(dim=1))
+    assert isinstance(model.objective, StudentTNLL)
+    assert model.schema()["kind"] == "single_elliptical_fixed_nu_student_t"
 
 
 def test_conditional_nu_is_invariant_and_above_finite_covariance_threshold():
