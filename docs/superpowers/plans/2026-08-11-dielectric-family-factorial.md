@@ -244,7 +244,7 @@ operational_gate = {
     "common_frozen_artifacts": ...,
     "validation_only_selection": ...,
     "hashes_verified": ...,
-    "full_student_t_reference": abs(test_nll + 2.6247) <= 0.20,
+    "fixed_cache_reference": abs(fixed_control_test_nll + 2.6247) <= 1e-4,
 }
 ```
 

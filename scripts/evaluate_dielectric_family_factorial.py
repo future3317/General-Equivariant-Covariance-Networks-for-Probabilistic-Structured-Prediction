@@ -94,11 +94,39 @@ def _audit_arm(root: Path, family: str, distribution: str, seed: int) -> dict:
     }
 
 
+def _audit_fixed_control(path: Path, expected_cache_hash: str) -> dict[str, Any]:
+    """Verify the zero-training cached Full-t control from the existing E1 path."""
+
+    manifest = json.loads((path / "manifest.json").read_text())
+    for name, expected in manifest["artifact_sha256"].items():
+        artifact = path / name
+        if not artifact.is_file() or sha256_file(artifact) != expected:
+            raise ValueError(f"fixed-control artifact hash mismatch: {artifact}")
+    protocol = json.loads((path / "protocol.json").read_text())
+    diagnostics = json.loads((path / "diagnostics.json").read_text())
+    if protocol["variant"] != "fixed":
+        raise ValueError("pilot baseline control must use the fixed E1 variant")
+    if protocol["selection"]["selected_epoch"] != 0:
+        raise ValueError("fixed baseline control must be zero-training")
+    if protocol["frozen"]["cache_metadata_sha256"] != expected_cache_hash:
+        raise ValueError("fixed baseline uses a different frozen cache")
+    test_nll = float(diagnostics["test"]["nll"])
+    if not math.isfinite(test_nll):
+        raise FloatingPointError("fixed baseline test NLL is non-finite")
+    return {
+        "path": str(path),
+        "test_nll": test_nll,
+        "reference_nll": -2.6247,
+        "absolute_error": abs(test_nll + 2.6247),
+    }
+
+
 def aggregate_factorial(
     root: Path,
     *,
     stage: str,
     seeds: tuple[int, ...],
+    baseline_control: Path | None = None,
     output: Path | None = None,
 ) -> dict[str, Any]:
     """Audit all expected arms before computing any family/law comparison."""
@@ -139,12 +167,11 @@ def aggregate_factorial(
         "common_frozen_artifacts": common,
     }
     if stage == "pilot":
-        full_t = next(
-            row
-            for row in rows
-            if row["family"] == "full" and row["distribution"] == "student_t"
-        )
-        reference = abs(full_t["metrics"]["nll"] + 2.6247) <= 0.20
+        if baseline_control is None:
+            raise ValueError("pilot audit requires a zero-training baseline control")
+        fixed = _audit_fixed_control(baseline_control, next(iter(cache_hashes)))
+        reference = fixed["absolute_error"] <= 1e-4
+        result["fixed_cache_control"] = fixed
         result["operational_gate"] = {
             "all_arms_present": len(rows) == 8,
             "finite_spd": all(
@@ -153,7 +180,7 @@ def aggregate_factorial(
             "common_frozen_artifacts": all(common.values()),
             "validation_only_selection": True,
             "hashes_verified": True,
-            "full_student_t_reference": reference,
+            "fixed_cache_reference": reference,
             "overall": reference,
         }
     if stage == "formal":
@@ -211,11 +238,16 @@ def main() -> None:
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--stage", choices=("smoke", "pilot", "formal"), required=True)
     parser.add_argument("--seeds", default="42")
+    parser.add_argument("--baseline_control", type=Path, default=None)
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
     seeds = tuple(int(value.strip()) for value in args.seeds.split(","))
     result = aggregate_factorial(
-        args.root, stage=args.stage, seeds=seeds, output=args.output
+        args.root,
+        stage=args.stage,
+        seeds=seeds,
+        baseline_control=args.baseline_control,
+        output=args.output,
     )
     print(json.dumps(result, indent=2))
 

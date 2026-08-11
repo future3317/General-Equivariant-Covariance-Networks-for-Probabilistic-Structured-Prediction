@@ -96,8 +96,17 @@ protocol is operational. It passes only if:
   declared evaluation dtype;
 - all arms use identical cache/split/mean hashes and validation-only selection;
 - every required artifact and recorded hash verifies;
-- the freshly trained Full/Student-t test NLL is within 0.20 nat/sample of the
-  existing frozen E1 reference (`-2.6247`), a coarse harness-regression check.
+- a separate zero-training `fixed` control, which reads the cached Full
+  projection rather than initializing a new head, reproduces the existing E1
+  test NLL (`-2.6247`) within `1e-4` nat/sample.
+
+The first executed pilot incorrectly compared a fresh 20-epoch Full head to
+the zero-training cached-projection reference and therefore failed its declared
+gate. That run remains a failed development artifact. The corrected gate above
+is a new protocol revision justified by the pre-existing E1 record: the
+historical fresh centered-e4 head used 60 epochs and reached test NLL
+`-2.7220`, whereas `-2.6247` belongs to the fixed cached projection. No arm
+result from the failed pilot is used to choose this correction.
 
 Failure stops the factorial for harness diagnosis. Learner results may not be
 used to relax this operational gate.

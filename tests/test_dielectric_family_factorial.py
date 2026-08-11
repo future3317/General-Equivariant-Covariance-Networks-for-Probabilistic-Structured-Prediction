@@ -6,7 +6,10 @@ import torch
 
 from equivcompiler import FullCovariance
 from representations import O3IrrepsSpec
-from scripts.evaluate_dielectric_family_factorial import aggregate_factorial
+from scripts.evaluate_dielectric_family_factorial import (
+    _audit_fixed_control,
+    aggregate_factorial,
+)
 from scripts.itop_reproducibility import sha256_file
 from scripts.run_dielectric_family_factorial import (
     DISTRIBUTIONS,
@@ -120,3 +123,30 @@ def test_smoke_factorial_writes_and_audits_all_arms(tmp_path):
     metrics_path.write_text("{}", encoding="utf-8")
     with pytest.raises(ValueError, match="artifact hash mismatch"):
         aggregate_factorial(root, stage="smoke", seeds=(42,))
+
+
+def test_fixed_control_requires_zero_training_and_matching_cache(tmp_path):
+    control = tmp_path / "fixed"
+    control.mkdir()
+    protocol = {
+        "variant": "fixed",
+        "selection": {"selected_epoch": 0},
+        "frozen": {"cache_metadata_sha256": "cache-hash"},
+    }
+    diagnostics = {"test": {"nll": -2.6246837924807944}}
+    (control / "protocol.json").write_text(json.dumps(protocol), encoding="utf-8")
+    (control / "diagnostics.json").write_text(
+        json.dumps(diagnostics), encoding="utf-8"
+    )
+    manifest = {
+        "artifact_sha256": {
+            "protocol.json": sha256_file(control / "protocol.json"),
+            "diagnostics.json": sha256_file(control / "diagnostics.json"),
+        }
+    }
+    (control / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    result = _audit_fixed_control(control, "cache-hash")
+    assert result["absolute_error"] < 1e-4
+    with pytest.raises(ValueError, match="different frozen cache"):
+        _audit_fixed_control(control, "other-cache")
