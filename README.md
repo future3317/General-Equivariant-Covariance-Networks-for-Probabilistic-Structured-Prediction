@@ -611,6 +611,17 @@ python -m scripts.train_dielectric \
 python -m scripts.train_dielectric \
   --save_dir /path/to/dielectric_run --evaluate_only --device cuda
 
+# Frozen-H,mu family/law factorial. The formal protocol requires all four
+# families, both laws, and seeds 42,43,44; its evaluator verifies common cached
+# means/targets/IDs and validation-only selection before aggregating results.
+python -m scripts.run_dielectric_family_factorial \
+  --cache_dir /path/to/dielectric_frozen_cache \
+  --output_root /path/to/factorial --stage formal --seeds 42,43,44 \
+  --max_epochs 60 --patience 5 --device cuda
+python -m scripts.evaluate_dielectric_family_factorial \
+  --root /path/to/factorial --stage formal --seeds 42,43,44 \
+  --output /path/to/factorial/factorial_result.json
+
 # Legacy runs are made compatible only through this explicit, audited migration.
 python -m scripts.migrate_dielectric_run_spec \
   --checkpoint_dir /path/to/legacy_dielectric_run
@@ -738,15 +749,20 @@ python -m scripts.benchmark_compiler_system \
 ```
 
 The statistical closure is a controlled ground-truth benchmark rather than a
-claim about physical aleatoric covariance. A compiler-produced teacher emits
-known Student-t scatter for full, low-rank, isotypic-block, and graph-precision
-families; repeated observations test recovery, Student-t radial coverage,
-equivariance, and arbitrary orthogonal coordinate-change invariance:
+claim about physical aleatoric covariance. An import-isolated NumPy/SciPy
+teacher independently emits known Student-t scatter for Full,
+low-rank-plus-isotropic, isotypic-block, and graph-precision families. The
+compiler is used only by the learner. Repeated observations test recovery,
+Student-t radial coverage, equivariance, and arbitrary orthogonal
+coordinate-change invariance:
 
 ```bash
 python -m experiments.synthetic_covariance_benchmark \
+  --teacher-backend independent_numpy \
+  --families full,low_rank,isotypic_block,graph_precision \
   --device cuda --contexts 128 --replicates 32 --steps 500 --seeds 0,1,2 \
-  --output results/synthetic_covariance_benchmark_cuda.json
+  --oracle-dir results/independent_teacher_oracles \
+  --output results/independent_teacher_recovery_cuda.json
 ```
 
 For the same rank-2 output type, the cross-family mode varies only the declared
@@ -756,8 +772,10 @@ non-shared cross-family row is not silently treated as a head-only ablation:
 
 ```bash
 python -m experiments.synthetic_covariance_benchmark \
-  --cross-family-matrix --families full,low_rank,isotypic_block \
+  --teacher-backend independent_numpy --cross-family-matrix \
+  --families full,low_rank,isotypic_block \
   --device cuda --contexts 128 --replicates 32 --steps 500 --seeds 0,1,2 \
+  --oracle-dir results/independent_teacher_cross_family_oracles \
   --output results/synthetic_cross_family_covariance_recovery_cuda.json
 ```
 
