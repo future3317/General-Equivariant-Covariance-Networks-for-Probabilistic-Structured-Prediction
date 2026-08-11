@@ -12,6 +12,47 @@ from compatibility.e3nn import o3
 from scripts.itop_reproducibility import sha256_file
 
 REQUIRED_FIELDS = ("features", "mean", "params", "target", "sample_id")
+_FORBIDDEN_OBSERVATION_DESCRIPTOR_TOKENS = (
+    "visible",
+    "target",
+    "label",
+    "ground_truth",
+)
+
+
+def validate_observation_descriptors(
+    descriptors: dict[str, torch.Tensor], *, count: int
+) -> tuple[str, ...]:
+    """Validate label-free invariant descriptor tensors before model use.
+
+    Descriptor names are intentionally checked here, at the cache boundary,
+    so an observation-aware uncertainty head cannot silently consume visibility
+    or target-derived fields.  The function returns insertion order, which is
+    the serialized feature contract used by the optional runner path.
+    """
+    if count < 1:
+        raise ValueError("descriptor count must be positive")
+    if not descriptors:
+        raise ValueError("at least one observation descriptor is required")
+    names: list[str] = []
+    for name, values in descriptors.items():
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("observation descriptor names must be non-empty strings")
+        normalized = name.lower()
+        if any(token in normalized for token in _FORBIDDEN_OBSERVATION_DESCRIPTOR_TOKENS):
+            raise ValueError(
+                f"observation descriptor {name!r} is label-derived or diagnostic-only"
+            )
+        if not isinstance(values, torch.Tensor) or values.ndim != 1:
+            raise ValueError(f"observation descriptor {name!r} must have shape (N,)")
+        if values.shape[0] != count:
+            raise ValueError(
+                f"observation descriptor {name!r} has count {values.shape[0]}, expected {count}"
+            )
+        if not bool(torch.isfinite(values).all()):
+            raise ValueError(f"observation descriptor {name!r} contains non-finite values")
+        names.append(name)
+    return tuple(names)
 
 
 def invariant_irrep_summary(
@@ -53,12 +94,55 @@ class FrozenDistributionDataset(Dataset):
             if not bool(torch.isfinite(payload[field]).all()):
                 raise ValueError(f"non-finite {field} in {self.path}")
         self.payload = payload
+        self._observation_descriptors: torch.Tensor | None = None
+
+    def attach_observation_descriptors(
+        self,
+        sample_ids: torch.Tensor,
+        descriptors: torch.Tensor,
+        names: list[str] | tuple[str, ...],
+    ) -> None:
+        """Attach an aligned, optional label-free descriptor matrix in memory."""
+        if sample_ids.ndim != 1 or descriptors.ndim != 2:
+            raise ValueError("descriptor sample IDs/matrix must have shapes (N,) and (N,M)")
+        if sample_ids.shape[0] != descriptors.shape[0]:
+            raise ValueError("descriptor sample IDs and values have inconsistent counts")
+        if len(names) != descriptors.shape[1]:
+            raise ValueError("descriptor names do not match descriptor width")
+        descriptor_columns = {
+            name: descriptors[:, index]
+            for index, name in enumerate(names)
+        }
+        validate_observation_descriptors(
+            descriptor_columns, count=int(sample_ids.shape[0])
+        )
+        if torch.unique(sample_ids).numel() != sample_ids.numel():
+            raise ValueError("descriptor sample IDs must be unique")
+        if torch.unique(self.payload["sample_id"]).numel() != len(self):
+            raise ValueError("frozen cache sample IDs must be unique")
+        descriptor_by_id = {
+            int(identifier): index for index, identifier in enumerate(sample_ids.tolist())
+        }
+        try:
+            indices = torch.tensor(
+                [descriptor_by_id[int(identifier)] for identifier in self.payload["sample_id"].tolist()],
+                dtype=torch.long,
+            )
+        except KeyError as error:
+            raise ValueError("descriptor sample IDs do not cover the frozen cache") from error
+        aligned = descriptors.index_select(0, indices).float().contiguous()
+        if not bool(torch.isfinite(aligned).all()):
+            raise ValueError("aligned observation descriptors are non-finite")
+        self._observation_descriptors = aligned
 
     def __len__(self) -> int:
         return int(self.payload["features"].shape[0])
 
     def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
-        return {field: self.payload[field][index] for field in REQUIRED_FIELDS}
+        result = {field: self.payload[field][index] for field in REQUIRED_FIELDS}
+        if self._observation_descriptors is not None:
+            result["observation_descriptors"] = self._observation_descriptors[index]
+        return result
 
 
 def load_frozen_distribution_cache(
@@ -91,8 +175,33 @@ def frozen_distribution_loaders(
     batch_size: int,
     num_workers: int,
     pin_memory: bool,
+    observation_descriptor_dir: str | Path | None = None,
 ) -> tuple[dict, dict[str, DataLoader]]:
     metadata, datasets = load_frozen_distribution_cache(cache_dir)
+    if observation_descriptor_dir is not None:
+        descriptor_root = Path(observation_descriptor_dir)
+        descriptor_metadata = json.loads(
+            (descriptor_root / "metadata.json").read_text(encoding="utf-8")
+        )
+        names = tuple(descriptor_metadata["descriptor_names"])
+        for split, dataset in datasets.items():
+            descriptor_path = descriptor_root / f"{split}.pt"
+            if not descriptor_path.is_file():
+                raise ValueError(f"missing observation descriptor split: {descriptor_path}")
+            descriptor_payload = torch.load(
+                descriptor_path, map_location="cpu", weights_only=True
+            )
+            dataset.attach_observation_descriptors(
+                descriptor_payload["sample_id"],
+                descriptor_payload["descriptors"],
+                names,
+            )
+        metadata = dict(metadata)
+        metadata["observation_descriptors"] = {
+            "directory": str(descriptor_root.resolve()),
+            "names": list(names),
+            "metadata_sha256": sha256_file(descriptor_root / "metadata.json"),
+        }
     common = {
         "batch_size": batch_size,
         "num_workers": num_workers,

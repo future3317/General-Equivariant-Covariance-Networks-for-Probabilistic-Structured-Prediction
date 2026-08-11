@@ -84,6 +84,90 @@ def sample_ensemble(
     return samples
 
 
+def sample_finite_mixture(
+    means: torch.Tensor,
+    scales: torch.Tensor,
+    *,
+    num_samples: int = 128,
+    weights: torch.Tensor | None = None,
+    distribution: str = "student_t",
+    student_t_dof: float | torch.Tensor = 5.0,
+) -> torch.Tensor:
+    """Sample an exact finite mixture with optional sample-conditional weights/nu."""
+    if means.ndim != 3 or scales.ndim != 4:
+        raise ValueError("expected means (K,N,d) and scales (K,N,d,d)")
+    components, observations, dimension = means.shape
+    if scales.shape != (components, observations, dimension, dimension):
+        raise ValueError("mixture means/scales have incompatible shapes")
+    if num_samples < 1:
+        raise ValueError("num_samples must be positive")
+    if weights is None:
+        normalized_weights = means.new_full(
+            (components, observations), 1.0 / components
+        )
+    else:
+        normalized_weights = weights.to(device=means.device, dtype=means.dtype)
+        if normalized_weights.shape == (components,):
+            normalized_weights = normalized_weights[:, None].expand(
+                components, observations
+            )
+        if normalized_weights.shape != (components, observations):
+            raise ValueError("weights must have shape (K,) or (K,N)")
+        if not bool(torch.isfinite(normalized_weights).all()) or bool(
+            (normalized_weights <= 0).any()
+        ):
+            raise ValueError("mixture weights must be finite and positive")
+        normalized_weights = normalized_weights / normalized_weights.sum(
+            dim=0, keepdim=True
+        )
+    indices = torch.multinomial(
+        normalized_weights.transpose(0, 1), num_samples, replacement=True
+    ).transpose(0, 1)
+    gather_mean = indices.unsqueeze(1).unsqueeze(-1).expand(
+        num_samples, 1, observations, dimension
+    )
+    selected_means = torch.gather(
+        means.unsqueeze(0).expand(num_samples, -1, -1, -1), 1, gather_mean
+    ).squeeze(1)
+    gather_scale = indices.unsqueeze(1).unsqueeze(-1).unsqueeze(-1).expand(
+        num_samples, 1, observations, dimension, dimension
+    )
+    selected_scales = torch.gather(
+        scales.unsqueeze(0).expand(num_samples, -1, -1, -1, -1),
+        1,
+        gather_scale,
+    ).squeeze(1)
+    chol = torch.linalg.cholesky(selected_scales)
+    noise = torch.randn_like(selected_means)
+    samples = selected_means + torch.einsum("snij,snj->sni", chol, noise)
+    if distribution == "student_t":
+        nu = torch.as_tensor(student_t_dof, dtype=means.dtype, device=means.device)
+        if nu.ndim == 0:
+            selected_nu = nu.expand(num_samples, observations)
+        else:
+            if nu.shape == (components,):
+                nu = nu[:, None].expand(components, observations)
+            elif nu.shape == (observations,):
+                nu = nu[None, :].expand(components, observations)
+            if nu.shape != (components, observations):
+                raise ValueError("student_t_dof must be scalar, (K,), (N,), or (K,N)")
+            selected_nu = torch.gather(
+                nu.unsqueeze(0).expand(num_samples, -1, -1),
+                1,
+                indices.unsqueeze(1),
+            )
+            selected_nu = selected_nu.squeeze(1)
+        if bool((selected_nu <= 0).any()):
+            raise ValueError("student_t_dof must be positive")
+        chi2 = torch.distributions.Chi2(selected_nu).sample()
+        samples = selected_means + (samples - selected_means) * torch.sqrt(
+            selected_nu / chi2
+        ).unsqueeze(-1)
+    elif distribution != "gaussian":
+        raise ValueError("distribution must be gaussian or student_t")
+    return samples
+
+
 def energy_score_from_samples(
     samples: torch.Tensor,
     target: torch.Tensor,

@@ -9,7 +9,7 @@ import torch
 import torch.nn.functional as F
 
 from compatibility.e3nn import o3
-from distributions import StudentTNLL
+from distributions import FiniteMixtureStudentTNLL, StudentTNLL
 from evaluation.ensemble import finite_mixture_nll
 from spd_maps.base import SPDMap
 
@@ -46,6 +46,61 @@ class InvariantDegreesOfFreedomReadout(torch.nn.Module):
             "output": "0e",
             "parameterization": "minimum_plus_softplus",
             "minimum": self.minimum,
+        }
+
+
+class GlobalDegreesOfFreedomReadout(torch.nn.Module):
+    """Train one invariant Student-t degrees-of-freedom scalar."""
+
+    def __init__(
+        self,
+        *,
+        minimum: float = 2.05,
+        initial: float = 5.0,
+    ) -> None:
+        super().__init__()
+        if not 2.0 < minimum < initial:
+            raise ValueError("require 2 < minimum < initial degrees of freedom")
+        self.minimum = float(minimum)
+        raw_initial = math.log(math.expm1(initial - minimum))
+        self.raw_intercept = torch.nn.Parameter(torch.tensor(raw_initial))
+
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
+        return self.minimum + F.softplus(self.raw_intercept).expand(features.shape[0])
+
+    def schema(self) -> dict[str, Any]:
+        return {
+            "kind": "global_student_t_degrees_of_freedom",
+            "parameterization": "minimum_plus_softplus",
+            "minimum": self.minimum,
+        }
+
+
+class InvariantMixtureLogitsReadout(torch.nn.Module):
+    """Map typed features to sample-conditional invariant mixture weights."""
+
+    def __init__(self, feature_irreps, *, components: int = 2) -> None:
+        super().__init__()
+        if components < 2:
+            raise ValueError("a finite mixture requires at least two components")
+        self.feature_irreps = o3.Irreps(feature_irreps)
+        self.components = int(components)
+        self.projection = o3.Linear(
+            self.feature_irreps, o3.Irreps(f"{components}x0e")
+        )
+        for parameter in self.projection.parameters():
+            torch.nn.init.zeros_(parameter)
+
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
+        logits = self.projection(features).reshape(features.shape[0], self.components)
+        return torch.softmax(logits, dim=-1).transpose(0, 1)
+
+    def schema(self) -> dict[str, Any]:
+        return {
+            "kind": "invariant_softmax_mixture_weights",
+            "input": str(self.feature_irreps),
+            "components": self.components,
+            "output": f"{self.components}x0e_logits",
         }
 
 
@@ -123,6 +178,53 @@ class FrozenConditionalStudentT(torch.nn.Module):
         }
 
 
+class FrozenGlobalStudentT(torch.nn.Module):
+    """Keep mean and scatter fixed while fitting one global finite-covariance nu."""
+
+    def __init__(
+        self,
+        spd_map: SPDMap,
+        *,
+        minimum_nu: float = 2.05,
+        initial_nu: float = 5.0,
+    ) -> None:
+        super().__init__()
+        self.spd_map = spd_map
+        self.objective = StudentTNLL(nu=initial_nu)
+        self.nu_readout = GlobalDegreesOfFreedomReadout(
+            minimum=minimum_nu, initial=initial_nu
+        )
+
+    def forward(
+        self,
+        features: torch.Tensor,
+        mean: torch.Tensor,
+        params: torch.Tensor,
+        target: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        nu = self.nu_readout(features)
+        log_prob, statistics = self.objective.log_prob(
+            mean, params, target, self.spd_map, nu=nu
+        )
+        return {
+            "loss": -log_prob.mean(),
+            "log_prob": log_prob,
+            "params": params,
+            "nu": nu,
+            "mahalanobis2": statistics["mahalanobis2"],
+            "logdet": statistics["logdet"],
+        }
+
+    def schema(self) -> dict[str, Any]:
+        return {
+            "kind": "single_elliptical_global_nu_student_t",
+            "mean": "frozen_artifact",
+            "scatter": "frozen_compiled_operator_artifact",
+            "degrees_of_freedom": self.nu_readout.schema(),
+            "objective": "exact_student_t_log_likelihood",
+        }
+
+
 class FrozenSymmetricStudentTMixture(torch.nn.Module):
     """K=2 fixed-weight Student-t mixture with frozen shared scatter."""
 
@@ -174,22 +276,181 @@ class FrozenSymmetricStudentTMixture(torch.nn.Module):
             "weights": mean.new_full((2, mean.shape[0]), 0.5),
         }
 
+
+class _FrozenStudentTMixtureBase(torch.nn.Module):
+    """Shared K-component frozen-feature Student-t head implementation."""
+
+    def __init__(
+        self,
+        feature_irreps,
+        parameter_irreps,
+        output_irreps,
+        spd_map: SPDMap,
+        *,
+        components: int = 2,
+        minimum_nu: float = 2.05,
+        initial_nu: float = 5.0,
+    ) -> None:
+        super().__init__()
+        if components < 2:
+            raise ValueError("a finite mixture requires at least two components")
+        self.feature_irreps = o3.Irreps(feature_irreps)
+        self.parameter_irreps = o3.Irreps(parameter_irreps)
+        self.output_irreps = o3.Irreps(output_irreps)
+        self.components = int(components)
+        self.spd_map = spd_map
+        self.component_projections = torch.nn.ModuleList(
+            [
+                o3.Linear(self.feature_irreps, self.parameter_irreps)
+                for _ in range(components)
+            ]
+        )
+        self.weight_readout = InvariantMixtureLogitsReadout(
+            self.feature_irreps, components=components
+        )
+        self.nu_readouts = torch.nn.ModuleList(
+            [
+                InvariantDegreesOfFreedomReadout(
+                    self.feature_irreps,
+                    minimum=minimum_nu,
+                    initial=initial_nu,
+                )
+                for _ in range(components)
+            ]
+        )
+        self.objective = FiniteMixtureStudentTNLL(
+            require_finite_covariance=True
+        )
+
+    def _component_params(self, features: torch.Tensor) -> torch.Tensor:
+        return torch.stack(
+            [projection(features) for projection in self.component_projections]
+        )
+
+    def _component_nu(self, features: torch.Tensor) -> torch.Tensor:
+        return torch.stack([readout(features) for readout in self.nu_readouts])
+
+    def _forward_components(
+        self,
+        features: torch.Tensor,
+        mean: torch.Tensor,
+        target: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        component_params = self._component_params(features)
+        weights = self.weight_readout(features)
+        component_nu = self._component_nu(features)
+        component_means = self._component_means(features, mean, weights)
+        loss, diagnostics = self.objective(
+            component_means,
+            component_params,
+            target,
+            self.spd_map,
+            weights=weights,
+            nu=component_nu,
+        )
+        result = {
+            "loss": loss,
+            "component_params": component_params,
+            "component_scales": self.spd_map(component_params),
+            "component_means": component_means,
+            "weights": weights,
+            "nu": component_nu,
+            **diagnostics,
+        }
+        return result
+
+    def _component_means(
+        self,
+        features: torch.Tensor,
+        mean: torch.Tensor,
+        weights: torch.Tensor,
+    ) -> torch.Tensor:
+        raise NotImplementedError
+
+
+class FrozenSharedMeanStudentTMixture(_FrozenStudentTMixtureBase):
+    """K-component mixture with the current frozen mean shared by all components."""
+
+    def _component_means(
+        self,
+        features: torch.Tensor,
+        mean: torch.Tensor,
+        weights: torch.Tensor,
+    ) -> torch.Tensor:
+        del features, weights
+        return mean.unsqueeze(0).expand(self.components, -1, -1)
+
+    def forward(
+        self,
+        features: torch.Tensor,
+        mean: torch.Tensor,
+        params: torch.Tensor,
+        target: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        del params
+        return self._forward_components(features, mean, target)
+
     def schema(self) -> dict[str, Any]:
         return {
             "kind": "finite_student_t_mixture",
-            "components": 2,
-            "base_mean": "frozen_artifact",
-            "component_location": self.offset_readout.schema(),
-            "scatter": "shared_frozen_compiled_operator_artifact",
-            "weights": {"kind": "fixed_invariant", "values": [0.5, 0.5]},
-            "degrees_of_freedom": {
-                "kind": "fixed",
-                "value": self.student_t_dof,
-            },
+            "components": self.components,
+            "component_location": "shared_frozen_mean",
+            "component_scatter": "independent_existing_typed_spd_map",
+            "weights": self.weight_readout.schema(),
+            "degrees_of_freedom": "sample_conditional_invariant",
             "objective": "exact_finite_mixture_logsumexp",
             "moment_matching": False,
         }
 
+
+class FrozenMultimodalStudentTMixture(_FrozenStudentTMixtureBase):
+    """K-component mixture with equivariant, weight-centered mean residuals."""
+
+    def __init__(self, *args, offset_initialization: float = 1e-3, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.offset_projections = torch.nn.ModuleList(
+            [
+                o3.Linear(self.feature_irreps, self.output_irreps)
+                for _ in range(self.components)
+            ]
+        )
+        for projection in self.offset_projections:
+            for parameter in projection.parameters():
+                torch.nn.init.normal_(parameter, mean=0.0, std=offset_initialization)
+
+    def _component_means(
+        self,
+        features: torch.Tensor,
+        mean: torch.Tensor,
+        weights: torch.Tensor,
+    ) -> torch.Tensor:
+        deltas = torch.stack([projection(features) for projection in self.offset_projections])
+        centered = deltas - (
+            weights.unsqueeze(-1) * deltas
+        ).sum(0, keepdim=True)
+        return mean.unsqueeze(0) + centered
+
+    def forward(
+        self,
+        features: torch.Tensor,
+        mean: torch.Tensor,
+        params: torch.Tensor,
+        target: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        del params
+        return self._forward_components(features, mean, target)
+
+    def schema(self) -> dict[str, Any]:
+        return {
+            "kind": "finite_student_t_mixture",
+            "components": self.components,
+            "component_location": "equivariant_weight_centered_residual",
+            "component_scatter": "independent_existing_typed_spd_map",
+            "weights": self.weight_readout.schema(),
+            "degrees_of_freedom": "sample_conditional_invariant",
+            "objective": "exact_finite_mixture_logsumexp",
+            "moment_matching": False,
+        }
 
 class FrozenMeanScatterStudentT(torch.nn.Module):
     """Retrain one typed operator projection while H and mu stay frozen."""

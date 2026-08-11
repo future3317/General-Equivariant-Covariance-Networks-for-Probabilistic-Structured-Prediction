@@ -25,6 +25,7 @@ from evaluation.ensemble import (
     finite_mixture_log_prob,
     finite_mixture_nll,
     sample_ensemble,
+    sample_finite_mixture,
     variogram_score,
 )
 from evaluation.equivariance import (
@@ -121,6 +122,7 @@ __all__ = [
     "risk_coverage_auc",
     "root_mean_squared_error",
     "sample_ensemble",
+    "sample_finite_mixture",
     "scale_equivariance_error",
     "scale_nll",
     "sharpness",

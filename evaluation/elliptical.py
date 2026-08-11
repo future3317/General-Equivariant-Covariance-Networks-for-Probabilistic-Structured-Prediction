@@ -60,7 +60,8 @@ def mixture_projection_pit(
         raise ValueError("component means/scales have incompatible shapes")
     if target.shape != (samples, dimension):
         raise ValueError("target must have shape (N,d)")
-    if student_t_dof <= 0 or num_directions < 4:
+    dof_tensor = torch.as_tensor(student_t_dof, dtype=torch.float64)
+    if bool((dof_tensor <= 0).any()) or num_directions < 4:
         raise ValueError("require positive nu and at least four directions")
     if not all(
         bool(torch.isfinite(value).all())
@@ -83,7 +84,24 @@ def mixture_projection_pit(
     standardized = (
         projected_target.unsqueeze(0) - projected_mean
     ) / projected_variance.sqrt()
-    component_cdf = stats.t.cdf(standardized.numpy(), df=float(student_t_dof))
+    if dof_tensor.ndim == 0:
+        degrees = float(dof_tensor.item())
+        dof_record: Any = degrees
+    else:
+        if dof_tensor.shape == (components,):
+            dof_tensor = dof_tensor[:, None].expand(components, samples)
+        elif dof_tensor.shape == (samples,):
+            dof_tensor = dof_tensor[None, :].expand(components, samples)
+        if dof_tensor.shape != (components, samples):
+            raise ValueError("student_t_dof must be scalar, (K,), (N,), or (K,N)")
+        degrees = dof_tensor.detach().cpu().numpy()[:, :, None]
+        dof_record = {
+            "kind": "component_conditional",
+            "min": float(degrees.min()),
+            "median": float(np.median(degrees)),
+            "max": float(degrees.max()),
+        }
+    component_cdf = stats.t.cdf(standardized.numpy(), df=degrees)
     if weights is None:
         normalized_weights = np.full((components, samples, 1), 1.0 / components)
     else:
@@ -102,7 +120,7 @@ def mixture_projection_pit(
         "dimension": int(dimension),
         "components": int(components),
         "directions": int(num_directions),
-        "student_t_dof": float(student_t_dof),
+        "student_t_dof": dof_record,
         "seed": int(seed),
         "cdf_semantics": "weighted_component_student_t_projection_cdf",
         "moment_matched": False,

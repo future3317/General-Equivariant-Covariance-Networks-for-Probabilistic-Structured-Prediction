@@ -30,10 +30,14 @@ from evaluation import (
     falsification_decision,
     mixture_projection_pit,
     sample_ensemble,
+    sample_finite_mixture,
 )
 from models.frozen_distribution_readout import (
     FrozenConditionalStudentT,
+    FrozenGlobalStudentT,
     FrozenMeanScatterStudentT,
+    FrozenMultimodalStudentTMixture,
+    FrozenSharedMeanStudentTMixture,
     FrozenSymmetricStudentTMixture,
 )
 from scripts.itop_reproducibility import (
@@ -43,7 +47,19 @@ from scripts.itop_reproducibility import (
 )
 from spd_maps import RepresentationMetricMap
 
-DISTRIBUTION_VARIANTS = ("fixed", "conditional_nu", "symmetric_mixture")
+DISTRIBUTION_VARIANTS = (
+    "fixed",
+    "global_nu",
+    "conditional_nu",
+    "shared_mean_mixture",
+    "multimodal_mean_mixture",
+    "symmetric_mixture",
+)
+MIXTURE_VARIANTS = {
+    "shared_mean_mixture",
+    "multimodal_mean_mixture",
+    "symmetric_mixture",
+}
 SPECTRAL_VARIANTS = ("centered_e4", "centered_e8", "matrix_exp")
 VARIANTS = DISTRIBUTION_VARIANTS + SPECTRAL_VARIANTS
 
@@ -58,6 +74,15 @@ def _set_seed(seed: int) -> None:
 
 def _to_device(batch: dict[str, torch.Tensor], device: torch.device) -> dict:
     return {key: value.to(device, non_blocking=True) for key, value in batch.items()}
+
+
+def _model_features(batch: dict[str, torch.Tensor]) -> torch.Tensor:
+    """Return H or H concatenated with explicitly enabled invariant observations."""
+    features = batch["features"]
+    descriptors = batch.get("observation_descriptors")
+    if descriptors is None:
+        return features
+    return torch.cat((features, descriptors), dim=-1)
 
 
 def _covariance_policy(metadata: dict, variant: str):
@@ -118,15 +143,45 @@ def _build_spd_map(metadata: dict, variant: str, device: torch.device):
 def _build_model(metadata: dict, variant: str, spd_map, device: torch.device):
     if variant == "fixed":
         return None
+    if variant == "global_nu":
+        return FrozenGlobalStudentT(spd_map).to(device)
     if variant == "conditional_nu":
         return FrozenConditionalStudentT(metadata["feature_irreps"], spd_map).to(device)
-    if variant == "symmetric_mixture":
+    if variant == "shared_mean_mixture":
+        model = FrozenSharedMeanStudentTMixture(
+            metadata["feature_irreps"],
+            metadata["parameter_irreps"],
+            metadata["output_irreps"],
+            spd_map,
+            components=2,
+        ).to(device)
+    elif variant == "multimodal_mean_mixture":
+        model = FrozenMultimodalStudentTMixture(
+            metadata["feature_irreps"],
+            metadata["parameter_irreps"],
+            metadata["output_irreps"],
+            spd_map,
+            components=2,
+        ).to(device)
+    elif variant == "symmetric_mixture":
         return FrozenSymmetricStudentTMixture(
             metadata["feature_irreps"],
             metadata["output_irreps"],
             spd_map,
             student_t_dof=float(metadata["student_t_dof"]),
         ).to(device)
+    else:
+        model = None
+    if model is not None:
+        projection_record = metadata["operator_projection"]
+        projection_path = Path(metadata["cache_dir"]) / projection_record["path"]
+        if sha256_file(projection_path) != projection_record["sha256"]:
+            raise ValueError("cached operator projection hash mismatch")
+        state = torch.load(projection_path, map_location=device, weights_only=True)
+        if "observation_descriptors" not in metadata:
+            for projection in model.component_projections:
+                projection.load_state_dict(state, strict=True)
+        return model
     model = FrozenMeanScatterStudentT(
         metadata["feature_irreps"],
         metadata["parameter_irreps"],
@@ -148,14 +203,20 @@ def _forward(model, variant: str, batch: dict, spd_map, objective: StudentTNLL):
             batch["mean"], batch["params"], batch["target"], spd_map
         )
         return {"loss": loss, "params": batch["params"], **components}
-    if variant in {"conditional_nu", "symmetric_mixture"}:
+    if variant in {
+        "global_nu",
+        "conditional_nu",
+        "shared_mean_mixture",
+        "multimodal_mean_mixture",
+        "symmetric_mixture",
+    }:
         return model(
-            batch["features"],
+            _model_features(batch),
             batch["mean"],
             batch["params"],
             batch["target"],
         )
-    return model(batch["features"], batch["mean"], batch["target"])
+    return model(_model_features(batch), batch["mean"], batch["target"])
 
 
 @torch.inference_mode()
@@ -226,25 +287,34 @@ def _predict(model, variant: str, loader, device, spd_map, objective):
             "target": batch["target"],
             "sample_id": batch["sample_id"],
         }
-        if variant == "symmetric_mixture":
+        if variant in MIXTURE_VARIANTS:
             output = {
                 **common,
                 "component_means": result["component_means"],
                 "component_scales": result["component_scales"],
                 "weights": result["weights"],
-                "delta": result["delta"],
             }
+            if "nu" in result:
+                output["nu"] = result["nu"]
+            if "delta" in result:
+                output["delta"] = result["delta"]
         else:
             params = result["params"]
             output = {**common, "params": params, "scale": spd_map(params)}
             if variant == "conditional_nu":
+                output["nu"] = result["nu"]
+            if variant == "global_nu":
                 output["nu"] = result["nu"]
         for key, value in output.items():
             records.setdefault(key, []).append(value.detach().cpu())
     concatenated = {}
     for key, values in records.items():
         dimension = (
-            1 if key in {"component_means", "component_scales", "weights"} else 0
+            1
+            if key
+            in {"component_means", "component_scales", "component_params", "weights", "nu"}
+            and values[0].ndim > 1
+            else 0
         )
         concatenated[key] = torch.cat(values, dim=dimension)
     return total / count, concatenated
@@ -259,25 +329,33 @@ def _diagnostics(
     spd_map,
 ):
     torch.manual_seed(seed + 7001)
-    if variant == "symmetric_mixture":
+    if variant in MIXTURE_VARIANTS:
+        mixture_nu = prediction.get("nu", dof)
         projection = mixture_projection_pit(
             prediction["component_means"],
             prediction["component_scales"],
             prediction["target"],
-            student_t_dof=dof,
+            student_t_dof=mixture_nu,
             weights=prediction["weights"],
             seed=seed + 7002,
         )
-        samples = sample_ensemble(
+        samples = sample_finite_mixture(
             prediction["component_means"],
             prediction["component_scales"],
             num_samples=128,
             distribution="student_t",
-            student_t_dof=dof,
+            student_t_dof=mixture_nu,
+            weights=prediction["weights"],
         )
         return {
             "nll": nll,
             "nll_semantics": "exact_finite_mixture_logsumexp",
+            "degrees_of_freedom": {
+                "kind": "component_conditional",
+                "min": float(torch.as_tensor(mixture_nu).min()),
+                "median": float(torch.as_tensor(mixture_nu).median()),
+                "max": float(torch.as_tensor(mixture_nu).max()),
+            },
             "energy_score": float(
                 energy_score_from_samples(samples, prediction["target"]).item()
             ),
@@ -375,6 +453,12 @@ def main() -> None:
     parser.add_argument("--weight_decay", type=float, default=1e-5)
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--device", default="cuda")
+    parser.add_argument(
+        "--observation_descriptor_dir",
+        type=Path,
+        default=None,
+        help="optional aligned label-free invariant descriptor payload",
+    )
     args = parser.parse_args()
     if args.run_dir.exists():
         raise FileExistsError(f"refusing to overwrite E1 run: {args.run_dir}")
@@ -394,9 +478,16 @@ def main() -> None:
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=device.type == "cuda",
+        observation_descriptor_dir=args.observation_descriptor_dir,
     )
     metadata = dict(metadata)
     metadata["cache_dir"] = str(args.cache_dir.resolve())
+    if args.observation_descriptor_dir is not None:
+        descriptor_names = metadata["observation_descriptors"]["names"]
+        metadata["base_feature_irreps"] = metadata["feature_irreps"]
+        metadata["feature_irreps"] = (
+            f"{len(descriptor_names)}x0e + {metadata['feature_irreps']}"
+        )
     spd_map, compilation = _build_spd_map(metadata, args.variant, device)
     model = _build_model(metadata, args.variant, spd_map, device)
     objective = StudentTNLL(nu=float(metadata["student_t_dof"]))
@@ -434,6 +525,7 @@ def main() -> None:
                 batch_size=args.batch_size,
                 num_workers=args.num_workers,
                 pin_memory=device.type == "cuda",
+                observation_descriptor_dir=args.observation_descriptor_dir,
             )
             train = _train_epoch(
                 model,
@@ -500,6 +592,7 @@ def main() -> None:
                 batch_size=args.batch_size,
                 num_workers=args.num_workers,
                 pin_memory=device.type == "cuda",
+                observation_descriptor_dir=args.observation_descriptor_dir,
             )
             loader = evaluation_loaders[split]
         nll, prediction = _predict(
@@ -540,7 +633,9 @@ def main() -> None:
             "cache_metadata_sha256": sha256_file(args.cache_dir / "metadata.json"),
             "mean": True,
             "features": True,
-            "shared_scatter": args.variant in DISTRIBUTION_VARIANTS,
+            "observation_descriptors": bool(args.observation_descriptor_dir),
+            "shared_scatter": args.variant
+            in {"fixed", "global_nu", "conditional_nu", "symmetric_mixture"},
         },
         "splits": metadata["splits"],
         "selection": {
@@ -579,7 +674,7 @@ def main() -> None:
         "compilation": compilation.as_dict(),
         "nll_semantics": (
             "exact_finite_mixture_logsumexp"
-            if args.variant == "symmetric_mixture"
+            if args.variant in MIXTURE_VARIANTS
             else "exact_single_student_t_log_likelihood"
         ),
     }
