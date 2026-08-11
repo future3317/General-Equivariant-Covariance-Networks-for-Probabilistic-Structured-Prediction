@@ -3,7 +3,7 @@ from __future__ import annotations
 from argparse import Namespace
 
 from data.elasticity_dataset import deterministic_subset_indices
-from scripts.run_elasticity_study import pilot_gate, study_arm_arguments
+from scripts.run_elasticity_study import assign_devices, pilot_gate, study_arm_arguments
 from scripts.train_elasticity import (
     build_elasticity_model,
     elasticity_arm_configuration,
@@ -106,3 +106,12 @@ def test_pilot_gate_requires_all_arms_loss_improvement_and_resource_contract():
     failed = pilot_gate(passing)
     assert failed["passed"] is False
     assert "validation criterion did not improve" in failed["reasons"][0]
+
+
+def test_device_assignment_is_deterministic_and_balanced():
+    jobs = [(42, arm) for arm in ("deterministic", "low_rank_student_t", "full_student_t")]
+    assert assign_devices(jobs, ["cuda:0", "cuda:1"]) == [
+        (42, "deterministic", "cuda:0"),
+        (42, "low_rank_student_t", "cuda:1"),
+        (42, "full_student_t", "cuda:0"),
+    ]

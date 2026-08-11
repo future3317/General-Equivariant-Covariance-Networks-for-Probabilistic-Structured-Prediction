@@ -30,6 +30,17 @@ def study_arm_arguments(arm: str) -> list[str]:
     return ["--arm", arm]
 
 
+def assign_devices(
+    jobs: list[tuple[int, str]], devices: list[str]
+) -> list[tuple[int, str, str]]:
+    if not devices:
+        raise ValueError("at least one device is required")
+    return [
+        (seed, arm, devices[index % len(devices)])
+        for index, (seed, arm) in enumerate(jobs)
+    ]
+
+
 def pilot_gate(records: dict[str, dict[str, Any]]) -> dict[str, Any]:
     """Apply the preregistered fast-pilot expansion gate."""
 
@@ -80,7 +91,7 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--stage", choices=("pilot", "formal"), required=True)
     parser.add_argument("--data-dir", type=Path, default=None)
-    parser.add_argument("--device", default="cuda")
+    parser.add_argument("--devices", nargs="+", default=["cuda:0"])
     parser.add_argument("--seeds", type=int, nargs="+", default=None)
     parser.add_argument("--num-workers", type=int, default=4)
     args = parser.parse_args()
@@ -89,11 +100,12 @@ def main() -> None:
     if args.stage == "pilot" and seeds != [42]:
         parser.error("pilot stage is fixed to seed 42")
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    records: dict[str, dict[str, Any]] = {}
-    for seed in seeds:
-        for arm in ELASTICITY_ARMS:
-            run_dir = args.output_dir / f"seed_{seed}" / arm
-            command = [
+    jobs = [(seed, arm) for seed in seeds for arm in ELASTICITY_ARMS]
+    scheduled = assign_devices(jobs, args.devices)
+    commands: list[tuple[Path, list[str]]] = []
+    for seed, arm, device in scheduled:
+        run_dir = args.output_dir / f"seed_{seed}" / arm
+        command = [
                 sys.executable,
                 "-m",
                 "scripts.train_elasticity",
@@ -103,16 +115,23 @@ def main() -> None:
                 "--seed",
                 str(seed),
                 "--device",
-                args.device,
+                device,
                 "--num_workers",
                 str(args.num_workers),
                 "--pin_memory",
-            ]
-            if args.data_dir is not None:
-                command.extend(("--data_dir", str(args.data_dir)))
-            if args.stage == "pilot":
-                command.extend(
-                    (
+                "--persistent_workers",
+                "--prefetch_factor",
+                "2",
+                "--batch_size",
+                "16",
+                "--rank",
+                "2",
+        ]
+        if args.data_dir is not None:
+            command.extend(("--data_dir", str(args.data_dir)))
+        if args.stage == "pilot":
+            command.extend(
+                (
                         "--train_subset",
                         "1024",
                         "--eval_subset",
@@ -121,18 +140,30 @@ def main() -> None:
                         "6",
                         "--patience",
                         "2",
-                    )
                 )
-            else:
-                command.extend(("--num_epochs", "30", "--patience", "5"))
-            subprocess.run(command, check=True)
-            if args.stage == "pilot":
-                records[arm] = _arm_gate_record(run_dir)
+            )
+        else:
+            command.extend(("--num_epochs", "30", "--patience", "5"))
+        commands.append((run_dir, command))
+
+    for start in range(0, len(commands), len(args.devices)):
+        wave = commands[start : start + len(args.devices)]
+        processes = [subprocess.Popen(command) for _, command in wave]
+        for (run_dir, command), process in zip(wave, processes, strict=True):
+            return_code = process.wait()
+            if return_code:
+                raise subprocess.CalledProcessError(return_code, command)
+
+    records: dict[str, dict[str, Any]] = {}
+    if args.stage == "pilot":
+        for arm in ELASTICITY_ARMS:
+            records[arm] = _arm_gate_record(args.output_dir / "seed_42" / arm)
 
     manifest: dict[str, Any] = {
         "stage": args.stage,
         "seeds": seeds,
         "arms": list(ELASTICITY_ARMS),
+        "devices": args.devices,
     }
     if args.stage == "pilot":
         manifest["records"] = records
@@ -143,4 +174,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
