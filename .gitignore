@@ -65,3 +65,4 @@ Thumbs.db
 wandb/
 results/
 tmp/
+.worktrees/
