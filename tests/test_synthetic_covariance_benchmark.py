@@ -1,5 +1,6 @@
 """Regression gates for the controlled statistical-closure benchmark."""
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -156,3 +157,64 @@ def test_independent_evaluation_does_not_build_an_equivariance_graph(tmp_path):
         )
     messages = [str(item.message) for item in caught]
     assert not any("requires_grad=True" in message for message in messages)
+
+
+def test_independent_cli_writes_formal_contract_and_row_accounting(tmp_path):
+    output = tmp_path / "result.json"
+    command = [
+        sys.executable,
+        "-m",
+        "experiments.synthetic_covariance_benchmark",
+        "--teacher-backend",
+        "independent_numpy",
+        "--families",
+        "full,low_rank,isotypic_block,graph_precision",
+        "--seeds",
+        "0",
+        "--contexts",
+        "3",
+        "--replicates",
+        "2",
+        "--validation-contexts",
+        "2",
+        "--validation-replicates",
+        "2",
+        "--test-contexts",
+        "3",
+        "--test-replicates",
+        "2",
+        "--calibration-draws",
+        "64",
+        "--calibration-trials",
+        "16",
+        "--steps",
+        "1",
+        "--patience",
+        "1",
+        "--device",
+        "cpu",
+        "--oracle-dir",
+        str(tmp_path / "oracles"),
+        "--output",
+        str(output),
+    ]
+    subprocess.run(command, check=True, capture_output=True, text=True)
+    result = json.loads(output.read_text(encoding="utf-8"))
+    assert result["kind"] == "independent_numpy_teacher_scatter_recovery"
+    assert result["contract"]["teacher_side"] == "numpy_scipy_only"
+    assert result["contract"]["learner_side"] == "public_compiler"
+    assert result["formal_gate"]["required_matched_rows"] == 4
+    assert len(result["matched_rows"]) == 4
+    assert len(result["diagnostic_rows"]) == 6
+    for row in result["matched_rows"]:
+        checkpoint = Path(row["checkpoint_path"])
+        predictions = Path(row["prediction_path"])
+        assert checkpoint.is_file()
+        assert predictions.is_file()
+        assert hashlib.sha256(checkpoint.read_bytes()).hexdigest() == row[
+            "checkpoint_sha256"
+        ]
+        assert hashlib.sha256(predictions.read_bytes()).hexdigest() == row[
+            "prediction_sha256"
+        ]
+        assert row["history"]

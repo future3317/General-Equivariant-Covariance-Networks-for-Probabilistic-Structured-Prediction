@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import math
@@ -521,3 +522,46 @@ def load_oracle_artifact(npz_path: Path, manifest_path: Path) -> OracleDataset:
         arrays=arrays,
         metadata=dict(manifest["dataset_metadata"]),
     )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Generate one independent NumPy/SciPy teacher artifact."
+    )
+    parser.add_argument("--family", choices=SUPPORTED_FAMILIES, required=True)
+    parser.add_argument("--seed", type=int, required=True)
+    parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--source-commit", required=True)
+    parser.add_argument("--source-dirty", action="store_true")
+    parser.add_argument("--train-contexts", type=int, default=128)
+    parser.add_argument("--train-replicates", type=int, default=32)
+    parser.add_argument("--validation-contexts", type=int, default=64)
+    parser.add_argument("--validation-replicates", type=int, default=64)
+    parser.add_argument("--test-contexts", type=int, default=128)
+    parser.add_argument("--test-replicates", type=int, default=128)
+    parser.add_argument("--calibration-draws", type=int, default=65_536)
+    parser.add_argument("--calibration-trials", type=int, default=2_048)
+    parser.add_argument("--nu", type=float, default=5.0)
+    args = parser.parse_args()
+    protocol = OracleProtocol(
+        train_contexts=args.train_contexts,
+        train_replicates=args.train_replicates,
+        validation_contexts=args.validation_contexts,
+        validation_replicates=args.validation_replicates,
+        test_contexts=args.test_contexts,
+        test_replicates=args.test_replicates,
+        calibration_draws=args.calibration_draws,
+        calibration_trials=args.calibration_trials,
+        nu=args.nu,
+    )
+    dataset = build_oracle_dataset(args.family, args.seed, protocol)
+    artifact = write_oracle_artifact(
+        dataset,
+        args.output_dir,
+        {"commit": args.source_commit, "dirty": bool(args.source_dirty)},
+    )
+    print(json.dumps(artifact, sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()

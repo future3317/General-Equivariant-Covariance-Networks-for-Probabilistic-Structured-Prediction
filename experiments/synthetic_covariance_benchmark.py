@@ -14,6 +14,8 @@ import argparse
 import hashlib
 import json
 import math
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -174,6 +176,13 @@ def _orthogonal_scatter_invariance_error(scatter: torch.Tensor) -> float:
     )
 
 
+def _atomic_torch_save(value: Any, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    torch.save(value, temporary)
+    temporary.replace(path)
+
+
 def run_independent_pair(
     artifact: dict[str, Any],
     learner_name: str,
@@ -181,6 +190,7 @@ def run_independent_pair(
     steps: int,
     patience: int,
     device: str,
+    output_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Train one compiler learner on a pre-generated independent oracle artifact."""
     if steps < 1 or patience < 1:
@@ -223,6 +233,7 @@ def run_independent_pair(
     selected_epoch = -1
     stale_epochs = 0
     last_epoch = -1
+    history: list[dict[str, float | int]] = []
     for epoch in range(steps):
         last_epoch = epoch
         learner.train()
@@ -243,6 +254,13 @@ def run_independent_pair(
                 validation_targets,
             )
         validation_value = float(validation_loss)
+        history.append(
+            {
+                "epoch": epoch,
+                "train_nll": float(loss.detach()),
+                "validation_nll": validation_value,
+            }
+        )
         if validation_value < best_validation:
             best_validation = validation_value
             best_state = {
@@ -372,7 +390,7 @@ def run_independent_pair(
             numeric_pass and recovery_pass and coverage_pass if matched else None
         ),
     }
-    return {
+    result: dict[str, Any] = {
         "teacher_backend": "independent_numpy_scipy",
         "teacher_family": teacher_name,
         "learner_family": learner_name,
@@ -384,6 +402,7 @@ def run_independent_pair(
         "selected_epoch": selected_epoch,
         "last_epoch": last_epoch,
         "best_validation_nll": best_validation,
+        "history": history,
         "primary_operator": primary_name,
         "primary_relative_error_mean": primary_mean,
         "primary_relative_error_p90": primary_p90,
@@ -398,6 +417,42 @@ def run_independent_pair(
         "compiler_report": learner_plan.report.as_dict(),
         "gate": gate,
     }
+    if output_dir is not None:
+        output_dir = Path(output_dir)
+        checkpoint_path = output_dir / "selected_checkpoint.pt"
+        prediction_path = output_dir / "test_predictions.pt"
+        _atomic_torch_save(
+            {
+                "state_dict": best_state,
+                "selected_epoch": selected_epoch,
+                "teacher_family": teacher_name,
+                "learner_family": learner_name,
+                "oracle_npz_sha256": manifest["npz_sha256"],
+                "compiler_report": learner_plan.report.as_dict(),
+            },
+            checkpoint_path,
+        )
+        _atomic_torch_save(
+            {
+                "context_ids": torch.from_numpy(arrays["test_context_ids"]),
+                "mean": predicted_mean.detach().cpu(),
+                "parameters": predicted_parameters.detach().cpu(),
+                "scatter": predicted_scatter.detach().cpu(),
+                "target_mean": torch.from_numpy(arrays["test_mean"]),
+                "target_scatter": torch.from_numpy(arrays["test_scatter"]),
+                "observations": torch.from_numpy(arrays["test_observations"]),
+            },
+            prediction_path,
+        )
+        result.update(
+            {
+                "checkpoint_path": str(checkpoint_path.resolve()),
+                "checkpoint_sha256": _file_sha256(checkpoint_path),
+                "prediction_path": str(prediction_path.resolve()),
+                "prediction_sha256": _file_sha256(prediction_path),
+            }
+        )
+    return result
 
 
 def _prepare_head(head, teacher, *, scale: float = 0.15) -> bool:
@@ -632,8 +687,209 @@ def run_case(
     )
 
 
+def _source_provenance() -> dict[str, Any]:
+    commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    dirty = bool(
+        subprocess.run(
+            ["git", "status", "--porcelain"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    )
+    return {"commit": commit, "dirty": dirty}
+
+
+def _oracle_artifact(
+    family: str,
+    seed: int,
+    args: argparse.Namespace,
+    source: dict[str, Any],
+) -> dict[str, Any]:
+    output_dir = Path(args.oracle_dir)
+    stem = f"{family}_seed_{seed}"
+    npz_path = output_dir / f"{stem}.npz"
+    manifest_path = output_dir / f"{stem}.manifest.json"
+    if args.reuse_oracle_artifacts:
+        if not npz_path.is_file() or not manifest_path.is_file():
+            raise FileNotFoundError(f"missing reusable oracle artifact: {stem}")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        expected_protocol = {
+            "train_contexts": args.contexts,
+            "train_replicates": args.replicates,
+            "validation_contexts": args.validation_contexts,
+            "validation_replicates": args.validation_replicates,
+            "test_contexts": args.test_contexts,
+            "test_replicates": args.test_replicates,
+            "calibration_draws": args.calibration_draws,
+            "calibration_trials": args.calibration_trials,
+            "nu": NU,
+        }
+        if (
+            manifest.get("oracle_version") != INDEPENDENT_ORACLE_VERSION
+            or manifest.get("family") != family
+            or int(manifest.get("seed", -1)) != seed
+            or manifest.get("protocol") != expected_protocol
+        ):
+            raise ValueError("reused oracle artifact contract mismatch")
+        if _file_sha256(npz_path) != manifest.get("npz_sha256"):
+            raise ValueError("oracle artifact hash mismatch")
+        return {
+            "npz_path": str(npz_path),
+            "manifest_path": str(manifest_path),
+            "npz_sha256": manifest["npz_sha256"],
+            "manifest_sha256": _file_sha256(manifest_path),
+        }
+
+    command = [
+        sys.executable,
+        "-m",
+        "experiments.independent_teacher_oracle",
+        "--family",
+        family,
+        "--seed",
+        str(seed),
+        "--output-dir",
+        str(output_dir),
+        "--source-commit",
+        str(source["commit"]),
+        "--train-contexts",
+        str(args.contexts),
+        "--train-replicates",
+        str(args.replicates),
+        "--validation-contexts",
+        str(args.validation_contexts),
+        "--validation-replicates",
+        str(args.validation_replicates),
+        "--test-contexts",
+        str(args.test_contexts),
+        "--test-replicates",
+        str(args.test_replicates),
+        "--calibration-draws",
+        str(args.calibration_draws),
+        "--calibration-trials",
+        str(args.calibration_trials),
+        "--nu",
+        str(NU),
+    ]
+    if source["dirty"]:
+        command.append("--source-dirty")
+    completed = subprocess.run(
+        command,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(completed.stdout)
+
+
+def _atomic_json(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(
+        json.dumps(value, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+
+
+def _run_independent_study(args: argparse.Namespace) -> dict[str, Any]:
+    cases = _cases()
+    selected = [item.strip() for item in args.families.split(",")]
+    unknown = sorted(set(selected) - set(cases))
+    if unknown:
+        raise ValueError(f"unknown families: {unknown}")
+    seeds = [int(item) for item in args.seeds.split(",") if item.strip()]
+    source = _source_provenance()
+    matched_rows: list[dict[str, Any]] = []
+    diagnostic_rows: list[dict[str, Any]] = []
+    rank2_learners = [name for name in selected if name != "graph_precision"]
+    for seed in seeds:
+        for teacher_name in selected:
+            artifact = _oracle_artifact(teacher_name, seed, args, source)
+            learners = (
+                ["graph_precision"]
+                if teacher_name == "graph_precision"
+                else rank2_learners
+            )
+            for learner_name in learners:
+                row = run_independent_pair(
+                    artifact,
+                    learner_name,
+                    steps=args.steps,
+                    patience=args.patience,
+                    device=args.device,
+                    output_dir=(
+                        Path(args.output).parent
+                        / "learner_artifacts"
+                        / f"seed_{seed}"
+                        / teacher_name
+                        / learner_name
+                    ),
+                )
+                if learner_name == teacher_name:
+                    matched_rows.append(row)
+                else:
+                    diagnostic_rows.append(row)
+    required_matched = len(seeds) * len(selected)
+    result = {
+        "kind": "independent_numpy_teacher_scatter_recovery",
+        "contract": {
+            "teacher_side": "numpy_scipy_only",
+            "learner_side": "public_compiler",
+            "teacher_compiler_imports": False,
+            "distribution": "Student-t",
+            "student_t_dof": NU,
+            "scale_semantics": "scatter S; covariance nu/(nu-2) S",
+            "selection_split": "validation",
+        },
+        "source": source,
+        "protocol": {
+            "families": selected,
+            "seeds": seeds,
+            "train_contexts": args.contexts,
+            "train_replicates": args.replicates,
+            "validation_contexts": args.validation_contexts,
+            "validation_replicates": args.validation_replicates,
+            "test_contexts": args.test_contexts,
+            "test_replicates": args.test_replicates,
+            "calibration_draws": args.calibration_draws,
+            "calibration_trials": args.calibration_trials,
+            "steps": args.steps,
+            "patience": args.patience,
+            "device": args.device,
+        },
+        "matched_rows": matched_rows,
+        "diagnostic_rows": diagnostic_rows,
+        "formal_gate": {
+            "required_matched_rows": required_matched,
+            "actual_matched_rows": len(matched_rows),
+            "all_matched_pass": bool(
+                len(matched_rows) == required_matched
+                and all(row["gate"]["overall"] for row in matched_rows)
+            ),
+            "dielectric_factorial_permitted": bool(
+                len(matched_rows) == required_matched
+                and all(row["gate"]["overall"] for row in matched_rows)
+            ),
+        },
+    }
+    _atomic_json(Path(args.output), result)
+    return result
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--teacher-backend",
+        choices=("compiler_legacy", "independent_numpy"),
+        default="compiler_legacy",
+    )
     parser.add_argument("--families", default=",".join(_cases()))
     parser.add_argument(
         "--cross-family-matrix",
@@ -642,12 +898,24 @@ def main() -> None:
     )
     parser.add_argument("--contexts", type=int, default=128)
     parser.add_argument("--replicates", type=int, default=32)
+    parser.add_argument("--validation-contexts", type=int, default=64)
+    parser.add_argument("--validation-replicates", type=int, default=64)
     parser.add_argument("--test-contexts", type=int, default=64)
+    parser.add_argument("--test-replicates", type=int, default=128)
+    parser.add_argument("--calibration-draws", type=int, default=65_536)
+    parser.add_argument("--calibration-trials", type=int, default=2_048)
     parser.add_argument("--steps", type=int, default=500)
+    parser.add_argument("--patience", type=int, default=25)
     parser.add_argument("--seeds", default="0,1,2")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--oracle-dir", type=Path, default=Path("results/oracle"))
+    parser.add_argument("--reuse-oracle-artifacts", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    if args.teacher_backend == "independent_numpy":
+        result = _run_independent_study(args)
+        print(json.dumps(result, indent=2))
+        return
     cases = _cases()
     selected = [item.strip() for item in args.families.split(",")]
     unknown = sorted(set(selected) - set(cases))
