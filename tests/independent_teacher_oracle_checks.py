@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import math
+import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 import numpy as np
+from scipy import stats
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -16,7 +20,9 @@ from experiments.independent_teacher_oracle import (
     OracleProtocol,
     build_oracle_dataset,
     construct_distribution,
+    load_oracle_artifact,
     rank2_cartesian_basis,
+    write_oracle_artifact,
 )
 
 SMOKE_PROTOCOL = OracleProtocol(
@@ -189,6 +195,79 @@ class IndependentTeacherOracleChecks(unittest.TestCase):
                 ]
                 self.assertLess(abs(coverage["coverage_90"] - 0.90), 0.025)
                 self.assertLess(abs(coverage["coverage_95"] - 0.95), 0.025)
+
+    def test_calibration_coverage_uses_each_draws_matching_scatter(self):
+        dataset = build_oracle_dataset("full", 17, SMOKE_PROTOCOL)
+        observations = dataset.arrays["calibration_observations"]
+        mean = dataset.arrays["calibration_mean"]
+        scatter = dataset.arrays["calibration_scatter"]
+        residual = observations - mean
+        solved = np.linalg.solve(scatter, residual[..., None])[..., 0]
+        q = np.einsum("ni,ni->n", residual, solved)
+        dimension = mean.shape[-1]
+        expected = {
+            f"coverage_{int(level * 100)}": float(
+                np.mean(q <= dimension * stats.f.ppf(level, dimension, 5.0))
+            )
+            for level in (0.90, 0.95)
+        }
+        self.assertEqual(dataset.metadata["teacher_coverage"], expected)
+
+    def test_artifacts_are_reproducible_hash_verified_and_complete(self):
+        dataset = build_oracle_dataset("full", 4, SMOKE_PROTOCOL)
+        source = {"commit": "abc123", "dirty": False}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = write_oracle_artifact(dataset, root / "first", source)
+            second = write_oracle_artifact(dataset, root / "second", source)
+            self.assertEqual(first["npz_sha256"], second["npz_sha256"])
+
+            loaded = load_oracle_artifact(
+                Path(first["npz_path"]), Path(first["manifest_path"])
+            )
+            self.assertEqual(loaded.family, "full")
+            for key, value in dataset.arrays.items():
+                np.testing.assert_array_equal(loaded.arrays[key], value)
+
+            manifest = json.loads(Path(first["manifest_path"]).read_text("utf-8"))
+            self.assertEqual(manifest["source"], source)
+            self.assertEqual(manifest["npz_sha256"], first["npz_sha256"])
+            self.assertEqual(
+                manifest["oracle_version"], "independent_numpy_scipy_v1"
+            )
+            self.assertEqual(
+                set(manifest["split_id_sha256"]),
+                {"train", "validation", "test", "calibration"},
+            )
+            self.assertGreater(
+                manifest["sampling_tolerance"]["coverage_90"], 0.0
+            )
+            self.assertGreater(
+                manifest["sampling_tolerance"]["coverage_95"], 0.0
+            )
+            self.assertNotIn("learner", manifest)
+
+            corrupted = root / "corrupted.npz"
+            shutil.copyfile(first["npz_path"], corrupted)
+            with corrupted.open("r+b") as handle:
+                handle.seek(-1, 2)
+                final_byte = handle.read(1)
+                handle.seek(-1, 2)
+                handle.write(bytes([final_byte[0] ^ 0x01]))
+            with self.assertRaisesRegex(
+                ValueError, "oracle artifact hash mismatch"
+            ):
+                load_oracle_artifact(corrupted, Path(first["manifest_path"]))
+
+    def test_split_and_calibration_ids_are_disjoint(self):
+        dataset = build_oracle_dataset("graph_precision", 23, SMOKE_PROTOCOL)
+        ids = [
+            set(dataset.arrays[f"{split}_context_ids"].tolist())
+            for split in ("train", "validation", "test", "calibration")
+        ]
+        for left in range(len(ids)):
+            for right in range(left + 1, len(ids)):
+                self.assertTrue(ids[left].isdisjoint(ids[right]))
 
 
 if __name__ == "__main__":

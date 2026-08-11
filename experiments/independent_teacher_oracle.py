@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -15,6 +18,32 @@ SUPPORTED_FAMILIES = (
     "isotypic_block",
     "graph_precision",
 )
+ORACLE_VERSION = "independent_numpy_scipy_v1"
+FAMILY_PARAMETER_RECORDS: dict[str, dict[str, Any]] = {
+    "full": {
+        "construction": "scipy_expm_of_direct_cartesian_equivariant_log_scatter",
+        "scalar_base": -0.35,
+        "cross_scale": 0.11,
+        "stf_action_scale": 0.055,
+        "quadratic_scale": 0.045,
+    },
+    "low_rank": {
+        "construction": "sigma2_identity_plus_rank2_gram",
+        "rank": 2,
+        "first_factor_scale": 0.14,
+        "second_factor_scale": 0.12,
+    },
+    "isotypic_block": {
+        "construction": "diag_k0_and_k2_identity5",
+        "multiplicities": {"0e": 1, "2e": 1},
+    },
+    "graph_precision": {
+        "construction": "direct_unary_plus_incidence_pullback_precision",
+        "num_nodes": 3,
+        "edges": [[0, 1], [1, 2]],
+        "node_irrep": "1o",
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -257,6 +286,21 @@ def _coverage(
     return float(np.mean(q <= threshold))
 
 
+def _paired_coverage_tolerances(
+    sample_count: int,
+    trials: int,
+    rng: np.random.Generator,
+) -> dict[str, float]:
+    tolerances: dict[str, float] = {}
+    for level in (0.90, 0.95):
+        counts = rng.binomial(sample_count, level, size=(trials, 2))
+        differences = np.abs(counts[:, 0] - counts[:, 1]) / sample_count
+        tolerances[f"coverage_{int(level * 100)}"] = float(
+            np.quantile(differences, 0.99, method="higher")
+        )
+    return tolerances
+
+
 def _equivariance_self_check(family: str, contexts: np.ndarray) -> float:
     rotation = np.array(
         [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
@@ -296,7 +340,7 @@ def build_oracle_dataset(
     """Generate deterministic repeated Student-t observations for one family."""
     if family not in SUPPORTED_FAMILIES:
         raise ValueError(f"unsupported oracle family: {family}")
-    streams = np.random.SeedSequence(seed).spawn(4)
+    streams = np.random.SeedSequence(seed).spawn(5)
     generators = [np.random.default_rng(stream) for stream in streams]
     input_dim = 9 if family == "graph_precision" else 6
     split_specs = (
@@ -322,32 +366,62 @@ def build_oracle_dataset(
             arrays[f"{split}_precision"] = precision
 
     calibration_rng = generators[3]
-    test_mean = arrays["test_mean"]
-    test_scatter = arrays["test_scatter"]
-    calibration_replicates = math.ceil(protocol.calibration_draws / len(test_mean))
-    calibration = _sample_student_t(
-        test_mean,
-        test_scatter,
+    calibration_context_count = min(256, protocol.calibration_draws)
+    calibration_inputs = 0.65 * calibration_rng.standard_normal(
+        (calibration_context_count, input_dim)
+    )
+    calibration_mean, calibration_scatter, calibration_precision = (
+        construct_distribution(family, calibration_inputs)
+    )
+    calibration_replicates = math.ceil(
+        protocol.calibration_draws / calibration_context_count
+    )
+    calibration_observations = _sample_student_t(
+        calibration_mean,
+        calibration_scatter,
         calibration_replicates,
         protocol.nu,
         calibration_rng,
-    ).reshape(-1, test_mean.shape[-1])[: protocol.calibration_draws]
-    calibration_context = np.arange(protocol.calibration_draws) % len(test_mean)
-    calibration = calibration.reshape(protocol.calibration_draws, 1, -1)
-    calibration_mean = test_mean[calibration_context]
-    calibration_scatter = test_scatter[calibration_context]
+    ).reshape(-1, calibration_mean.shape[-1])[: protocol.calibration_draws]
+    calibration_context = np.repeat(
+        np.arange(calibration_context_count), calibration_replicates
+    )[: protocol.calibration_draws]
+    arrays["calibration_context_ids"] = 3_000_000 + np.arange(
+        protocol.calibration_draws, dtype=np.int64
+    )
+    arrays["calibration_inputs"] = calibration_inputs[calibration_context]
+    arrays["calibration_mean"] = calibration_mean[calibration_context]
+    arrays["calibration_scatter"] = calibration_scatter[calibration_context]
+    arrays["calibration_observations"] = calibration_observations
+    if calibration_precision is not None:
+        arrays["calibration_precision"] = calibration_precision[calibration_context]
     coverage90 = _coverage(
-        calibration, calibration_mean, calibration_scatter, protocol.nu, 0.90
+        calibration_observations[:, None, :],
+        arrays["calibration_mean"],
+        arrays["calibration_scatter"],
+        protocol.nu,
+        0.90,
     )
     coverage95 = _coverage(
-        calibration, calibration_mean, calibration_scatter, protocol.nu, 0.95
+        calibration_observations[:, None, :],
+        arrays["calibration_mean"],
+        arrays["calibration_scatter"],
+        protocol.nu,
+        0.95,
     )
     metadata: dict[str, Any] = {
-        "oracle_version": "independent_numpy_scipy_v1",
+        "oracle_version": ORACLE_VERSION,
         "family": family,
         "seed": int(seed),
         "nu": float(protocol.nu),
+        "protocol": asdict(protocol),
+        "family_parameters": FAMILY_PARAMETER_RECORDS[family],
         "teacher_coverage": {"coverage_90": coverage90, "coverage_95": coverage95},
+        "sampling_tolerance": _paired_coverage_tolerances(
+            protocol.test_contexts * protocol.test_replicates,
+            protocol.calibration_trials,
+            generators[4],
+        ),
         "self_checks": {
             "minimum_scatter_eigenvalue": float(
                 np.linalg.eigvalsh(arrays["test_scatter"]).min()
@@ -358,3 +432,92 @@ def build_oracle_dataset(
         },
     }
     return OracleDataset(family=family, seed=int(seed), arrays=arrays, metadata=metadata)
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _array_sha256(array: np.ndarray) -> str:
+    canonical = np.ascontiguousarray(array)
+    digest = hashlib.sha256()
+    digest.update(str(canonical.dtype).encode("ascii"))
+    digest.update(str(canonical.shape).encode("ascii"))
+    digest.update(canonical.tobytes(order="C"))
+    return digest.hexdigest()
+
+
+def write_oracle_artifact(
+    dataset: OracleDataset,
+    output_dir: Path,
+    source: dict[str, Any],
+) -> dict[str, Any]:
+    """Atomically serialize one immutable oracle dataset and its manifest."""
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    stem = f"{dataset.family}_seed_{dataset.seed}"
+    npz_path = output_dir / f"{stem}.npz"
+    npz_temporary = output_dir / f".{stem}.npz.tmp"
+    with npz_temporary.open("wb") as handle:
+        np.savez_compressed(
+            handle,
+            **{key: dataset.arrays[key] for key in sorted(dataset.arrays)},
+        )
+    npz_temporary.replace(npz_path)
+    npz_sha256 = _sha256(npz_path)
+
+    split_hashes = {
+        split: _array_sha256(dataset.arrays[f"{split}_context_ids"])
+        for split in ("train", "validation", "test", "calibration")
+    }
+    manifest = {
+        "oracle_version": ORACLE_VERSION,
+        "family": dataset.family,
+        "seed": dataset.seed,
+        "source": source,
+        "npz_file": npz_path.name,
+        "npz_sha256": npz_sha256,
+        "split_id_sha256": split_hashes,
+        "protocol": dataset.metadata["protocol"],
+        "family_parameters": dataset.metadata["family_parameters"],
+        "teacher_coverage": dataset.metadata["teacher_coverage"],
+        "sampling_tolerance": dataset.metadata["sampling_tolerance"],
+        "self_checks": dataset.metadata["self_checks"],
+        "dataset_metadata": dataset.metadata,
+    }
+    manifest_path = output_dir / f"{stem}.manifest.json"
+    manifest_temporary = output_dir / f".{stem}.manifest.json.tmp"
+    manifest_temporary.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    manifest_temporary.replace(manifest_path)
+    return {
+        "npz_path": str(npz_path),
+        "manifest_path": str(manifest_path),
+        "npz_sha256": npz_sha256,
+        "manifest_sha256": _sha256(manifest_path),
+    }
+
+
+def load_oracle_artifact(npz_path: Path, manifest_path: Path) -> OracleDataset:
+    """Load an oracle artifact only after schema and SHA-256 verification."""
+    npz_path = Path(npz_path)
+    manifest_path = Path(manifest_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("oracle_version") != ORACLE_VERSION:
+        raise ValueError("unsupported oracle artifact version")
+    if _sha256(npz_path) != manifest.get("npz_sha256"):
+        raise ValueError("oracle artifact hash mismatch")
+    with np.load(npz_path, allow_pickle=False) as archive:
+        arrays = {key: archive[key] for key in archive.files}
+    return OracleDataset(
+        family=str(manifest["family"]),
+        seed=int(manifest["seed"]),
+        arrays=arrays,
+        metadata=dict(manifest["dataset_metadata"]),
+    )
