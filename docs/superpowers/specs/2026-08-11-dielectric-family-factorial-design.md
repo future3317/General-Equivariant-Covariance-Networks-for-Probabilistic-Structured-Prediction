@@ -66,7 +66,7 @@ initialization and train-loader order.
 Common controls are:
 
 - batch size 128;
-- Adam, learning rate `5e-4`, weight decay `1e-5`;
+- AdamW, learning rate `5e-4`, weight decay `1e-5`;
 - at most 60 epochs;
 - `ReduceLROnPlateau(factor=0.5, patience=2)`;
 - early-stopping patience 5;

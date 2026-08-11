@@ -13,7 +13,7 @@
 - Freeze the exact cached `H`, `mu`, train/validation/test tensors, and sample IDs from `dielectric_unified_full_cache`.
 - Families are isotropic=`LowRankCovariance(0)`, block=`IsotypicBlockCovariance()`, low-rank=`LowRankCovariance(2)`, and full=`CenteredSpectralWindowCovariance(-2,2,-8,8)`.
 - Laws are existing Gaussian and fixed-`nu=5` Student-t; do not implement another density or SPD map.
-- Formal seeds are `42,43,44`; all arms use batch size 128, Adam `lr=5e-4`, weight decay `1e-5`, scheduler factor 0.5/patience 2, and early-stopping patience 5.
+- Formal seeds are `42,43,44`; all arms use batch size 128, AdamW `lr=5e-4`, weight decay `1e-5`, scheduler factor 0.5/patience 2, and early-stopping patience 5.
 - Validation NLL is the only model-selection quantity. Test results never change training or arm selection.
 - Stage 1 uses the complete splits, seed 42, at most 20 epochs, and must pass the operational gate before Stage 2.
 - Stage 2 reruns all 24 arms fresh with at most 60 epochs; Stage-1 artifacts are development-only.
@@ -108,9 +108,7 @@ Stage only the two files and commit `generalize frozen elliptical scatter readou
 
 **Files:**
 - Create: `experiments/frozen_operator_arm.py`
-- Modify: `scripts/run_frozen_distribution_e1.py`
 - Create: `tests/test_frozen_operator_arm.py`
-- Modify: `tests/test_run_frozen_distribution_e1.py`
 
 **Interfaces:**
 - Consumes: `FrozenMeanScatterElliptical`, frozen cache loaders, one compiler-built SPD map and compilation record, optimizer settings, and a run directory.
@@ -155,12 +153,11 @@ checkpoint handling. Keep mixture and conditional-`nu` logic in the E1 script.
 batch size, learning rate, weight decay, law, `nu`, cache metadata hash, and
 run directory. The engine must never inspect test metrics during training.
 
-- [ ] **Step 4: Make existing E1 ordinary spectral arms use the engine**
+- [ ] **Step 4: Keep completed E1 evidence immutable**
 
-Route `centered_e4`, `centered_e8`, and `matrix_exp` through the extracted
-engine without changing their CLI, output metric names, or numerical
-semantics. Leave `fixed`, `conditional_nu`, and `symmetric_mixture` behavior
-unchanged.
+Do not rewrite the historical E1 runner after its phase gate has closed. The
+new factorial and future ordinary frozen-head experiments use the generic
+engine; existing E1 artifacts and their original runner remain reproducible.
 
 - [ ] **Step 5: Run regression tests and lint**
 
@@ -168,7 +165,7 @@ Run:
 
 ```text
 python -m pytest tests/test_frozen_operator_arm.py tests/test_run_frozen_distribution_e1.py -q
-python -m ruff check experiments/frozen_operator_arm.py scripts/run_frozen_distribution_e1.py tests/test_frozen_operator_arm.py tests/test_run_frozen_distribution_e1.py
+python -m ruff check experiments/frozen_operator_arm.py tests/test_frozen_operator_arm.py
 ```
 
 Expected: all pass and existing E1 output-contract tests remain unchanged.
