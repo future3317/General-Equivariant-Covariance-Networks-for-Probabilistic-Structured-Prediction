@@ -23,19 +23,21 @@ ORACLE_VERSION = "independent_numpy_scipy_v1"
 FAMILY_PARAMETER_RECORDS: dict[str, dict[str, Any]] = {
     "full": {
         "construction": "scipy_expm_of_direct_cartesian_equivariant_log_scatter",
-        "scalar_base": -0.35,
-        "cross_scale": 0.11,
-        "stf_action_scale": 0.055,
-        "quadratic_scale": 0.045,
+        "maximum_polynomial_degree": 2,
+        "cross_linear_scale": 0.04,
+        "stf_action_scale": 0.025,
+        "quadratic_scale": 0.02,
     },
     "low_rank": {
         "construction": "sigma2_identity_plus_rank2_gram",
         "rank": 2,
-        "first_factor_scale": 0.14,
-        "second_factor_scale": 0.12,
+        "maximum_polynomial_degree": 1,
+        "first_factor_stf_scale": 0.10,
+        "second_factor_stf_scale": 0.06,
     },
     "isotypic_block": {
         "construction": "diag_k0_and_k2_identity5",
+        "maximum_polynomial_degree": 1,
         "multiplicities": {"0e": 1, "2e": 1},
     },
     "graph_precision": {
@@ -43,6 +45,7 @@ FAMILY_PARAMETER_RECORDS: dict[str, dict[str, Any]] = {
         "num_nodes": 3,
         "edges": [[0, 1], [1, 2]],
         "node_irrep": "1o",
+        "maximum_polynomial_degree": 2,
     },
 }
 
@@ -118,10 +121,60 @@ def _stf_coordinates(tensor: np.ndarray) -> np.ndarray:
     return np.einsum("nij,aij->na", tensor, rank2_cartesian_basis()[1:])
 
 
-def _full_scatter(contexts: np.ndarray) -> np.ndarray:
+def construct_family_generators(
+    family: str, contexts: np.ndarray
+) -> dict[str, np.ndarray]:
+    """Return pre-SPD-map generators with degree matched to compiler lifting."""
+    contexts = np.asarray(contexts, dtype=np.float64)
+    if family not in SUPPORTED_FAMILIES:
+        raise ValueError(f"unsupported oracle family: {family}")
+    if family == "graph_precision":
+        if contexts.ndim != 2 or contexts.shape[1] != 9:
+            raise ValueError("graph oracle contexts must have shape (n, 9)")
+        nodes = contexts.reshape(-1, 3, 3)
+        unary_scales = (0.05, 0.07, 0.09)
+        unary = np.stack(
+            [
+                scale * np.einsum("ni,nj->nij", nodes[:, node], nodes[:, node])
+                for node, scale in enumerate(unary_scales)
+            ],
+            axis=1,
+        )
+        edges = ((0, 1), (1, 2))
+        edge_scales = (0.04, 0.06)
+        relational = np.stack(
+            [
+                scale
+                * np.einsum(
+                    "ni,nj->nij",
+                    nodes[:, target] - nodes[:, source],
+                    nodes[:, target] - nodes[:, source],
+                )
+                for (source, target), scale in zip(edges, edge_scales)
+            ],
+            axis=1,
+        )
+        return {
+            "unary_log_precision": unary,
+            "edge_log_precision": relational,
+        }
+
     scalar, coefficients, tensor = _rank2_parts(contexts)
-    norm = np.linalg.norm(coefficients, axis=-1)
-    normalized = coefficients / (1.0 + norm[:, None])
+    if family == "low_rank":
+        first = np.concatenate(
+            [0.12 * scalar[:, None], 0.10 * coefficients], axis=-1
+        )
+        second = np.concatenate(
+            [-0.08 * scalar[:, None], 0.06 * coefficients], axis=-1
+        )
+        return {
+            "factor": np.stack([first, second], axis=-1),
+            "raw_sigma2": 0.25 * scalar,
+        }
+    if family == "isotypic_block":
+        return {"raw_blocks": np.stack([0.30 * scalar, -0.20 * scalar], axis=-1)}
+
+    norm2 = np.einsum("ni,ni->n", coefficients, coefficients)
     stf_basis = rank2_cartesian_basis()[1:]
     products = (
         np.einsum("nij,ajk->naik", tensor, stf_basis)
@@ -129,76 +182,48 @@ def _full_scatter(contexts: np.ndarray) -> np.ndarray:
     )
     stf_action = np.einsum("bij,naij->nab", stf_basis, products)
     stf_action = 0.5 * (stf_action + stf_action.transpose(0, 2, 1))
-
     log_scatter = np.zeros((contexts.shape[0], 6, 6), dtype=np.float64)
-    log_scatter[:, 0, 0] = -0.35 + 0.12 * np.tanh(scalar)
-    coupling = 0.11 * normalized
+    log_scatter[:, 0, 0] = 0.08 * scalar + 0.015 * norm2
+    coupling = 0.04 * coefficients + 0.01 * scalar[:, None] * coefficients
     log_scatter[:, 0, 1:] = coupling
     log_scatter[:, 1:, 0] = coupling
-    block_scale = -0.08 + 0.08 * np.tanh(0.4 * scalar + 0.2 * norm**2)
+    block_scale = -0.03 * scalar + 0.01 * norm2
     log_scatter[:, 1:, 1:] = (
         block_scale[:, None, None] * np.eye(5)[None]
-        + 0.055 * stf_action
-        + 0.045 * np.einsum("ni,nj->nij", normalized, normalized)
+        + 0.025 * stf_action
+        + 0.02 * np.einsum("ni,nj->nij", coefficients, coefficients)
     )
-    return _matrix_exponential(log_scatter)
+    return {"log_scatter": log_scatter}
+
+
+def _full_scatter(contexts: np.ndarray) -> np.ndarray:
+    generators = construct_family_generators("full", contexts)
+    return _matrix_exponential(generators["log_scatter"])
 
 
 def _low_rank_scatter(contexts: np.ndarray) -> np.ndarray:
-    scalar, coefficients, tensor = _rank2_parts(contexts)
-    norm2 = np.einsum("ni,ni->n", coefficients, coefficients)
-    normalized = coefficients / (1.0 + np.sqrt(norm2)[:, None])
-    tensor_square = tensor @ tensor
-    tensor_square -= (
-        np.trace(tensor_square, axis1=-2, axis2=-1)[:, None, None]
-        * np.eye(3)[None]
-        / 3.0
-    )
-    square_coordinates = _stf_coordinates(tensor_square)
-    square_coordinates /= 1.0 + np.linalg.norm(square_coordinates, axis=-1)[:, None]
-
-    first = np.concatenate(
-        [0.18 * np.tanh(scalar)[:, None], 0.14 * normalized], axis=-1
-    )
-    second = np.concatenate(
-        [
-            (0.13 * np.tanh(norm2 - 1.0))[:, None],
-            0.12 * square_coordinates,
-        ],
-        axis=-1,
-    )
-    factor = np.stack([first, second], axis=-1)
-    sigma2 = np.exp(-0.28 + 0.10 * np.tanh(scalar) + 0.025 * norm2)
+    generators = construct_family_generators("low_rank", contexts)
+    factor = generators["factor"]
+    sigma2 = np.logaddexp(0.0, generators["raw_sigma2"]) + 1e-4
     return sigma2[:, None, None] * np.eye(6)[None] + factor @ factor.transpose(0, 2, 1)
 
 
 def _isotypic_block_scatter(contexts: np.ndarray) -> np.ndarray:
-    scalar, coefficients, _ = _rank2_parts(contexts)
-    norm2 = np.einsum("ni,ni->n", coefficients, coefficients)
-    scalar_scale = np.exp(-0.30 + 0.18 * np.tanh(scalar))
-    stf_scale = np.exp(0.05 + 0.12 * np.tanh(0.3 * norm2 - 0.5))
+    generators = construct_family_generators("isotypic_block", contexts)
+    block_scales = np.logaddexp(0.0, generators["raw_blocks"]) ** 2
     scatter = np.zeros((contexts.shape[0], 6, 6), dtype=np.float64)
-    scatter[:, 0, 0] = scalar_scale
-    scatter[:, 1:, 1:] = stf_scale[:, None, None] * np.eye(5)[None]
+    scatter[:, 0, 0] = block_scales[:, 0]
+    scatter[:, 1:, 1:] = block_scales[:, 1, None, None] * np.eye(5)[None]
     return scatter
-
-
-def _local_log_precision(vectors: np.ndarray, offset: float, shape: float) -> np.ndarray:
-    norm2 = np.einsum("ni,ni->n", vectors, vectors)
-    normalized_outer = np.einsum("ni,nj->nij", vectors, vectors) / (
-        1.0 + norm2[:, None, None]
-    )
-    scalar = offset + 0.08 * np.tanh(norm2 - 1.0)
-    return scalar[:, None, None] * np.eye(3)[None] + shape * normalized_outer
 
 
 def _graph_precision_scatter(contexts: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     if contexts.ndim != 2 or contexts.shape[1] != 9:
         raise ValueError("graph oracle contexts must have shape (n, 9)")
-    nodes = contexts.reshape(-1, 3, 3)
+    generators = construct_family_generators("graph_precision", contexts)
     unary = np.stack(
         [
-            _matrix_exponential(_local_log_precision(nodes[:, node], 0.20, 0.10))
+            _matrix_exponential(generators["unary_log_precision"][:, node])
             for node in range(3)
         ],
         axis=1,
@@ -206,10 +231,8 @@ def _graph_precision_scatter(contexts: np.ndarray) -> tuple[np.ndarray, np.ndarr
     edges = ((0, 1), (1, 2))
     relational = np.stack(
         [
-            _matrix_exponential(
-                _local_log_precision(nodes[:, target] - nodes[:, source], -0.15, 0.07)
-            )
-            for source, target in edges
+            _matrix_exponential(generators["edge_log_precision"][:, edge])
+            for edge in range(2)
         ],
         axis=1,
     )

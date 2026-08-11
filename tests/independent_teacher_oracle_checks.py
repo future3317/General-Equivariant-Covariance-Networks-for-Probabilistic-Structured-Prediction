@@ -20,6 +20,7 @@ from experiments.independent_teacher_oracle import (
     OracleProtocol,
     build_oracle_dataset,
     construct_distribution,
+    construct_family_generators,
     load_oracle_artifact,
     rank2_cartesian_basis,
     write_oracle_artifact,
@@ -121,6 +122,35 @@ class IndependentTeacherOracleChecks(unittest.TestCase):
             atol=1e-14,
         )
         np.testing.assert_allclose(graph[:, :3, 6:9], 0.0, atol=1e-14)
+
+    def test_raw_generators_match_the_compiler_lifting_degree(self):
+        rank2_direction = np.array(
+            [[0.4, 0.2, -0.1, 0.3, 0.15, -0.2]], dtype=np.float64
+        )
+        graph_direction = np.arange(9, dtype=np.float64).reshape(1, 9) / 10.0
+        for family in ("full", "low_rank", "isotypic_block", "graph_precision"):
+            direction = (
+                graph_direction if family == "graph_precision" else rank2_direction
+            )
+            values = [
+                construct_family_generators(family, scale * direction)
+                for scale in (0.0, 1.0, 2.0, 3.0)
+            ]
+            for key in values[0]:
+                stacked = [value[key] for value in values]
+                third_difference = (
+                    stacked[3] - 3.0 * stacked[2] + 3.0 * stacked[1] - stacked[0]
+                )
+                np.testing.assert_allclose(third_difference, 0.0, atol=1e-12)
+
+        for family in ("low_rank", "isotypic_block"):
+            values = [
+                construct_family_generators(family, scale * rank2_direction)
+                for scale in (0.0, 1.0, 2.0)
+            ]
+            for key in values[0]:
+                second_difference = values[2][key] - 2.0 * values[1][key] + values[0][key]
+                np.testing.assert_allclose(second_difference, 0.0, atol=1e-12)
 
     def test_rank2_distributions_are_equivariant(self):
         contexts = np.array(
