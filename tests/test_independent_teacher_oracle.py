@@ -130,7 +130,7 @@ def test_production_student_t_nll_matches_scipy_reference():
         "import json,math,numpy as np; from scipy.special import gammaln; "
         "r=np.array([[0.25,-0.4]],dtype=np.float64); "
         "s=np.array([[[1.2,0.15],[0.15,0.8]]],dtype=np.float64); "
-        "nu=5.; d=2; q=float(r@np.linalg.solve(s[0],r[0])); "
+        "nu=5.; d=2; q=float(r[0]@np.linalg.solve(s[0],r[0])); "
         "v=-gammaln((nu+d)/2)+gammaln(nu/2)+0.5*d*math.log(nu*math.pi)"
         "+0.5*np.linalg.slogdet(s[0])[1]+0.5*(nu+d)*math.log1p(q/nu); "
         "print(json.dumps(float(v)))"
