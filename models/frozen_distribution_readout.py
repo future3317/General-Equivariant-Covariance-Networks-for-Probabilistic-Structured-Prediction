@@ -177,6 +177,71 @@ class FrozenConditionalStudentT(torch.nn.Module):
             "objective": "exact_student_t_log_likelihood",
         }
 
+class FrozenUncertaintyBranchConditionalStudentT(torch.nn.Module):
+    """Train only an equivariant scatter residual and conditional radial law."""
+
+    def __init__(
+        self,
+        feature_irreps,
+        parameter_irreps,
+        spd_map: SPDMap,
+        *,
+        minimum_nu: float = 2.05,
+        initial_nu: float = 5.0,
+    ) -> None:
+        super().__init__()
+        self.feature_irreps = o3.Irreps(feature_irreps)
+        self.parameter_irreps = o3.Irreps(parameter_irreps)
+        self.spd_map = spd_map
+        self.objective = StudentTNLL(nu=initial_nu)
+        self.residual_projection = o3.Linear(
+            self.feature_irreps, self.parameter_irreps
+        )
+        for parameter in self.residual_projection.parameters():
+            torch.nn.init.zeros_(parameter)
+        self.nu_readout = InvariantDegreesOfFreedomReadout(
+            self.feature_irreps, minimum=minimum_nu, initial=initial_nu
+        )
+
+    def forward(
+        self,
+        features: torch.Tensor,
+        mean: torch.Tensor,
+        params: torch.Tensor,
+        target: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        residual = self.residual_projection(features)
+        updated_params = params.detach() + residual
+        frozen_mean = mean.detach()
+        nu = self.nu_readout(features)
+        log_prob, statistics = self.objective.log_prob(
+            frozen_mean, updated_params, target, self.spd_map, nu=nu
+        )
+        return {
+            "loss": -log_prob.mean(),
+            "log_prob": log_prob,
+            "mean": frozen_mean,
+            "params": updated_params,
+            "nu": nu,
+            "residual_params": residual,
+            "mahalanobis2": statistics["mahalanobis2"],
+            "logdet": statistics["logdet"],
+        }
+
+    def schema(self) -> dict[str, Any]:
+        return {
+            "kind": "uncertainty_only_equivariant_branch_conditional_nu_student_t",
+            "mean": "frozen_artifact_detached",
+            "base_scatter": "frozen_compiled_operator_artifact",
+            "residual": {
+                "input": str(self.feature_irreps),
+                "output": str(self.parameter_irreps),
+                "initialization": "zero",
+            },
+            "degrees_of_freedom": self.nu_readout.schema(),
+            "objective": "exact_student_t_log_likelihood",
+        }
+
 
 class FrozenGlobalStudentT(torch.nn.Module):
     """Keep mean and scatter fixed while fitting one global finite-covariance nu."""

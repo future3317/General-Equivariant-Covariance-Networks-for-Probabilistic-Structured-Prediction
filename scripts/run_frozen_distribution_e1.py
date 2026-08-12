@@ -39,6 +39,7 @@ from models.frozen_distribution_readout import (
     FrozenMultimodalStudentTMixture,
     FrozenSharedMeanStudentTMixture,
     FrozenSymmetricStudentTMixture,
+    FrozenUncertaintyBranchConditionalStudentT,
 )
 from scripts.itop_reproducibility import (
     atomic_write_json,
@@ -51,6 +52,7 @@ DISTRIBUTION_VARIANTS = (
     "fixed",
     "global_nu",
     "conditional_nu",
+    "uncertainty_branch_conditional_nu",
     "shared_mean_mixture",
     "multimodal_mean_mixture",
     "symmetric_mixture",
@@ -147,6 +149,10 @@ def _build_model(metadata: dict, variant: str, spd_map, device: torch.device):
         return FrozenGlobalStudentT(spd_map).to(device)
     if variant == "conditional_nu":
         return FrozenConditionalStudentT(metadata["feature_irreps"], spd_map).to(device)
+    if variant == "uncertainty_branch_conditional_nu":
+        return FrozenUncertaintyBranchConditionalStudentT(
+            metadata["feature_irreps"], metadata["parameter_irreps"], spd_map
+        ).to(device)
     if variant == "shared_mean_mixture":
         model = FrozenSharedMeanStudentTMixture(
             metadata["feature_irreps"],
@@ -206,6 +212,7 @@ def _forward(model, variant: str, batch: dict, spd_map, objective: StudentTNLL):
     if variant in {
         "global_nu",
         "conditional_nu",
+        "uncertainty_branch_conditional_nu",
         "shared_mean_mixture",
         "multimodal_mean_mixture",
         "symmetric_mixture",
@@ -301,7 +308,7 @@ def _predict(model, variant: str, loader, device, spd_map, objective):
         else:
             params = result["params"]
             output = {**common, "params": params, "scale": spd_map(params)}
-            if variant == "conditional_nu":
+            if variant in {"conditional_nu", "uncertainty_branch_conditional_nu"}:
                 output["nu"] = result["nu"]
             if variant == "global_nu":
                 output["nu"] = result["nu"]
@@ -454,6 +461,10 @@ def main() -> None:
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--device", default="cuda")
     parser.add_argument(
+        "--init_model", type=Path, default=None,
+        help="optional compatible uncertainty-law checkpoint initialization",
+    )
+    parser.add_argument(
         "--observation_descriptor_dir",
         type=Path,
         default=None,
@@ -490,6 +501,17 @@ def main() -> None:
         )
     spd_map, compilation = _build_spd_map(metadata, args.variant, device)
     model = _build_model(metadata, args.variant, spd_map, device)
+    if args.init_model is not None:
+        if args.variant != "uncertainty_branch_conditional_nu":
+            raise ValueError("--init_model is only supported for the uncertainty branch")
+        checkpoint = torch.load(args.init_model, map_location=device, weights_only=True)
+        if checkpoint.get("variant") != "conditional_nu":
+            raise ValueError("uncertainty branch initialization requires conditional_nu")
+        incompatible = model.load_state_dict(checkpoint["model_state"], strict=False)
+        if incompatible.unexpected_keys:
+            raise ValueError(
+                f"unexpected initialization keys: {incompatible.unexpected_keys}"
+            )
     objective = StudentTNLL(nu=float(metadata["student_t_dof"]))
     args.run_dir.mkdir(parents=True)
     history = []
@@ -645,6 +667,16 @@ def main() -> None:
             "ood_used_for_selection": False,
         },
         "seed": args.seed,
+        "initialization": (
+            {
+                "path": str(args.init_model.resolve()),
+                "sha256": sha256_file(args.init_model),
+                "source_variant": "conditional_nu",
+                "residual_projection": "zero_initialized",
+            }
+            if args.init_model is not None
+            else None
+        ),
         "optimizer": {
             "kind": "AdamW" if model is not None else "none_baseline_evaluation",
             "learning_rate": args.lr,
