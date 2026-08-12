@@ -10,6 +10,7 @@ import torch
 from compatibility.torch_geometric import PyGDataLoader
 from data.itop_dataset import (
     ITOP_OUTPUT_GRAPH,
+    ITOP_SHUFFLED_TREE_GRAPH,
     ITOPCachedDataset,
     ITOPData,
     ITOPDepthDataset,
@@ -111,6 +112,18 @@ def test_itop_skeleton_has_tree_complexity():
     assert ITOP_OUTPUT_GRAPH.num_nodes == 15
     assert ITOP_OUTPUT_GRAPH.num_edges == 14
     assert ITOP_OUTPUT_GRAPH.num_potentials * 6 == 174
+
+
+def test_itop_shuffled_tree_matches_degree_budget_without_skeleton_edges():
+    skeleton = {tuple(sorted(edge)) for edge in ITOP_OUTPUT_GRAPH.edges}
+    shuffled = {tuple(sorted(edge)) for edge in ITOP_SHUFFLED_TREE_GRAPH.edges}
+
+    def degree_sequence(edges):
+        return sorted(sum(node in edge for edge in edges) for node in range(15))
+
+    assert ITOP_SHUFFLED_TREE_GRAPH.num_edges == ITOP_OUTPUT_GRAPH.num_edges == 14
+    assert degree_sequence(shuffled) == degree_sequence(skeleton)
+    assert not skeleton & shuffled
 
 
 def test_itop_frame_metadata_is_not_node_offset_during_batching():

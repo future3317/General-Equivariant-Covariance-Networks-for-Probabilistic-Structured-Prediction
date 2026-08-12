@@ -20,6 +20,7 @@ from tqdm import tqdm
 from data.itop_dataset import (
     ITOP_INDEPENDENT_GRAPH,
     ITOP_OUTPUT_GRAPH,
+    ITOP_SHUFFLED_TREE_GRAPH,
     get_itop_loaders,
     get_itop_split_loader,
 )
@@ -46,11 +47,17 @@ from evaluation import (
     risk_coverage_auc,
     visible_occluded_mpjpe,
 )
+from distributions import StudentTNLL
 from models import (
     ControlledMeanOperatorHead,
     DeterministicHead,
     EquivariantBackbone,
     StructuredProbabilisticPredictor,
+)
+from models.controlled_readout import ControlledMeanPooledParameterHead
+from models.fixed_coordinate_baseline import (
+    FixedCoordinateDiagonalMap,
+    FixedCoordinateDiagonalReadout,
 )
 from representations import O3IrrepsSpec, certify_numerical_spd
 from scripts._common import add_tensor_product_arguments, tensor_product_kwargs
@@ -74,6 +81,8 @@ MODEL_KINDS = (
     "low_rank_student_t",
     "graph_gaussian",
     "graph_student_t",
+    "shuffled_graph_student_t",
+    "fixed_coordinate_diagonal_student_t",
 )
 PHASES = ("deterministic", "frozen_head", "joint_finetune", "end_to_end")
 
@@ -155,6 +164,18 @@ def _build_model(args: argparse.Namespace):
         )
         return model, None
 
+    if args.model == "fixed_coordinate_diagonal_student_t":
+        mean_head = DeterministicHead(backbone.irreps_out, output, pool=True)
+        parameter_head = FixedCoordinateDiagonalReadout(backbone.irreps_out.dim, 45)
+        model = StructuredProbabilisticPredictor(
+            backbone,
+            output,
+            joint_head=ControlledMeanPooledParameterHead(mean_head, parameter_head),
+            spd_map=FixedCoordinateDiagonalMap(),
+            distribution=StudentTNLL(nu=args.student_t_dof),
+        )
+        return model, None
+
     is_student = args.model.endswith("_student_t")
     if args.model == "full_student_t":
         covariance = FullCovariance()
@@ -162,6 +183,8 @@ def _build_model(args: argparse.Namespace):
         covariance = GraphPrecision(ITOP_INDEPENDENT_GRAPH)
     elif args.model == "low_rank_student_t":
         covariance = LowRankCovariance(rank=4)
+    elif args.model == "shuffled_graph_student_t":
+        covariance = GraphPrecision(ITOP_SHUFFLED_TREE_GRAPH)
     else:
         covariance = GraphPrecision(ITOP_OUTPUT_GRAPH)
     objective = "student_t" if is_student else "gaussian"

@@ -65,6 +65,31 @@ ITOP_INDEPENDENT_GRAPH = EquivariantOutputGraph(
     node_irrep="1o",
     node_names=ITOP_JOINT_NAMES,
 )
+# Fixed degree-matched control for testing whether the anatomical edge labels,
+# rather than tree-sized regularization alone, explain Graph-t behavior.  The
+# tree has the same degree sequence as the skeleton and shares no skeleton edge.
+ITOP_SHUFFLED_TREE_EDGES = (
+    (0, 5),
+    (1, 5),
+    (1, 6),
+    (7, 9),
+    (4, 9),
+    (4, 11),
+    (8, 11),
+    (1, 13),
+    (1, 10),
+    (2, 10),
+    (2, 12),
+    (3, 12),
+    (3, 8),
+    (8, 14),
+)
+ITOP_SHUFFLED_TREE_GRAPH = EquivariantOutputGraph(
+    num_nodes=15,
+    edges=ITOP_SHUFFLED_TREE_EDGES,
+    node_irrep="1o",
+    node_names=ITOP_JOINT_NAMES,
+)
 ITOP_COMPACT_LABEL_FIELDS = (
     "id",
     "is_valid",

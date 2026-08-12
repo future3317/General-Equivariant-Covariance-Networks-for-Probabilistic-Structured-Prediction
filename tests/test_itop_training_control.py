@@ -414,6 +414,27 @@ def test_itop_factorial_exposes_radial_and_operator_controls():
     assert "independent_student_t" in MODEL_KINDS
     assert "low_rank_student_t" in MODEL_KINDS
     assert "full_student_t" in MODEL_KINDS
+    assert "shuffled_graph_student_t" in MODEL_KINDS
+    assert "fixed_coordinate_diagonal_student_t" in MODEL_KINDS
+
+
+def test_fixed_coordinate_control_bypasses_compiler():
+    model, plan = _build_model(
+        SimpleNamespace(
+            model="fixed_coordinate_diagonal_student_t",
+            hidden_dim=16,
+            max_radius=0.5,
+            lmax=2,
+            num_layers=1,
+            num_basis=4,
+            tp_backend="e3nn",
+            cueq_method="naive",
+            student_t_dof=5.0,
+        )
+    )
+    assert plan is None
+    assert model.compilation is None
+    assert model.joint_head.operator_head.projection.out_features == 45
 
 
 def test_end_to_end_phase_requires_independent_probabilistic_initialization():
@@ -517,7 +538,11 @@ def test_faithful_joint_freeze_contract_records_gradient_routing():
 
 @pytest.mark.parametrize(
     ("model", "covariance_mode"),
-    (("independent_student_t", "graph"), ("low_rank_student_t", "low_rank")),
+    (
+        ("independent_student_t", "graph"),
+        ("low_rank_student_t", "low_rank"),
+        ("shuffled_graph_student_t", "graph"),
+    ),
 )
 def test_itop_factorial_models_bind_to_distinct_compiler_families(
     model, covariance_mode
