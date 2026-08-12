@@ -531,6 +531,9 @@ def build_compilation_report(
     active_record = _irrep_record(compilation.active_target_irreps)
     covariance_complexity = _covariance_complexity(compilation)
     probability = _probability_semantics(compilation)
+    distribution_parameters = compilation.distribution_spec.parameter_representation(
+        compilation.output_spec, compilation.operator_family
+    )
     canonical_reachability = compilation.canonical_reachability.as_dict()
     active_reachability = compilation.active_reachability.as_dict()
     relation = compilation.operator_family.relation_to_full.value
@@ -584,6 +587,9 @@ def build_compilation_report(
         "targets": {
             "canonical": canonical_record,
             "active": active_record,
+            "distribution_parameters": _irrep_record(
+                distribution_parameters.decompose_o3().irreps
+            ),
         },
         "representation_reachability": {
             "status": "active_reachable",

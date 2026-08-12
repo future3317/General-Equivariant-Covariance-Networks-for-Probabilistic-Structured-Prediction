@@ -15,6 +15,7 @@ from representations.representation_ir import (
     IrrepsExpr,
     RepExpr,
     SymmetricSquareExpr,
+    TrivialScalarsExpr,
 )
 
 
@@ -37,6 +38,10 @@ class RadialLaw(ABC):
     @abstractmethod
     def as_dict(self) -> dict[str, Any]:
         """Return serializable statistical semantics."""
+
+    def parameter_representation(self) -> RepExpr | None:
+        """Return sample-dependent radial parameter fields, if any."""
+        return None
 
 
 @dataclass(frozen=True)
@@ -90,6 +95,56 @@ class StudentTRadial(RadialLaw):
             "degrees_of_freedom": self.degrees_of_freedom,
         }
 
+    def parameter_representation(self) -> RepExpr | None:
+        return None
+
+
+@dataclass(frozen=True)
+class ConditionalStudentTRadial(RadialLaw):
+    """Student-t law with an invariant scalar degrees-of-freedom field."""
+
+    feature_irreps: str
+    minimum_degrees_of_freedom: float = 2.05
+    initial_degrees_of_freedom: float = 5.0
+
+    def __post_init__(self) -> None:
+        if not 2.0 < self.minimum_degrees_of_freedom < self.initial_degrees_of_freedom:
+            raise ValueError("require 2 < minimum < initial degrees of freedom")
+
+    @property
+    def name(self) -> str:
+        return "conditional_student_t"
+
+    def materialize_log_prob(self) -> torch.nn.Module:
+        from distributions import StudentTNLL
+
+        return StudentTNLL(nu=self.initial_degrees_of_freedom)
+
+    def calibration_reference(self) -> dict[str, Any]:
+        return {
+            "residual_statistic": "squared_mahalanobis",
+            "reference": "sample_conditional_scaled_f_distribution",
+            "degrees_of_freedom": "invariant_scalar_field",
+            "finite_covariance_requires": "> 2",
+        }
+
+    def parameter_representation(self) -> RepExpr:
+        return TrivialScalarsExpr(1)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "kind": "conditional_student_t_radial",
+            "feature_representation": self.feature_irreps,
+            "parameter_representation": self.parameter_representation().as_dict(),
+            "degrees_of_freedom": {
+                "field": "nu(x)",
+                "transformation": "invariant_scalar_field",
+                "minimum": self.minimum_degrees_of_freedom,
+                "initial": self.initial_degrees_of_freedom,
+                "equivariance": "nu(gx)=nu(x)",
+            },
+        }
+
 
 class DistributionSpec(ABC):
     """Map output and operator semantics to an executable probability law."""
@@ -102,7 +157,13 @@ class DistributionSpec(ABC):
     def active_parameter_rep(
         self, output: O3IrrepsSpec, operator: OperatorFamilyPlan
     ) -> RepExpr:
-        """Return the selected executable parameter expression."""
+        """Return the selected executable operator-parameter expression."""
+
+    def parameter_representation(
+        self, output: O3IrrepsSpec, operator: OperatorFamilyPlan
+    ) -> RepExpr:
+        """Return operator and radial fields in the distribution parameter type."""
+        return self.active_parameter_rep(output, operator)
 
     @abstractmethod
     def materialize_log_prob(self) -> torch.nn.Module:
@@ -172,6 +233,13 @@ class EllipticalDistribution(DistributionSpec):
         self, output: O3IrrepsSpec, operator: OperatorFamilyPlan
     ) -> RepExpr:
         return operator.active_expression(self._location(output))
+
+    def parameter_representation(
+        self, output: O3IrrepsSpec, operator: OperatorFamilyPlan
+    ) -> RepExpr:
+        active = self.active_parameter_rep(output, operator)
+        radial = self.radial.parameter_representation()
+        return active if radial is None else DirectSumExpr((active, radial))
 
     def materialize_log_prob(self) -> torch.nn.Module:
         return self.radial.materialize_log_prob()

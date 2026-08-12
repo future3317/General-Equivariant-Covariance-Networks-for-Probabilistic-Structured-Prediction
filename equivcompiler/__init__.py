@@ -7,6 +7,7 @@ from equivcompiler.api import (
 from equivcompiler.autotune import BenchmarkTask, DeviceAutotuner
 from equivcompiler.checkpoint import convert_checkpoint
 from equivcompiler.distributions import (
+    ConditionalStudentTRadial,
     DistributionSpec,
     EllipticalDistribution,
     GaussianRadial,
@@ -62,6 +63,7 @@ __all__ = [
     "CompiledProbabilisticReadout",
     "DeviceAutotuner",
     "DistributionSpec",
+    "ConditionalStudentTRadial",
     "EllipticalDistribution",
     "ExactExecutorCandidates",
     "ExactLoweringRegistry",

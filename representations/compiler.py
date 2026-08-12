@@ -101,6 +101,13 @@ class O3Compilation:
         return self.operator_family.parameter_count
 
     @property
+    def distribution_parameter_irreps(self) -> o3.Irreps:
+        """Typed parameters for the operator family and radial law fields."""
+        return self.distribution_spec.parameter_representation(
+            self.output_spec, self.operator_family
+        ).decompose_o3().irreps
+
+    @property
     def graph_structure(self) -> EquivariantOutputGraph | None:
         return self.operator_family.graph
 

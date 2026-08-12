@@ -8,6 +8,7 @@ import torch
 from equivcompiler import (
     AutoBudget,
     CenteredSpectralWindowCovariance,
+    ConditionalStudentTRadial,
     EllipticalDistribution,
     ExactExecutorCandidates,
     ExactOnly,
@@ -184,6 +185,41 @@ def test_distribution_functor_separates_full_reference_and_active_parameters():
     assert active.as_dict()["kind"] == "direct_sum"
     assert canonical.decompose_o3().irreps != active.decompose_o3().irreps
     assert distribution.as_dict()["proper"]
+
+
+def test_conditional_student_t_adds_one_invariant_scalar_to_active_parameter_rep():
+    output = O3IrrepsSpec.from_cartesian("ij=ji")
+    distribution = EllipticalDistribution(
+        ConditionalStudentTRadial(feature_irreps="4x0e + 2x1o + 2x2e")
+    )
+    family = FullCovariance().compile(output)
+    active = distribution.parameter_representation(output, family)
+    covariance_active = family.active_expression(IrrepsExpr(output.irreps, "location"))
+    assert active.decompose_o3().irreps.dim == (
+        covariance_active.decompose_o3().irreps.dim + 1
+    )
+    record = distribution.as_dict()
+    assert record["radial"]["parameter_representation"] == {
+        "kind": "trivial_scalars",
+        "count": 1,
+    }
+
+
+def test_compilation_exposes_distribution_parameter_irreps_and_report_target():
+    plan = plan_readout(
+        SEED,
+        output="ij=ji",
+        covariance=FullCovariance(),
+        distribution=EllipticalDistribution(
+            ConditionalStudentTRadial(feature_irreps=str(SEED.irreps))
+        ),
+    )
+    assert plan.compilation.distribution_parameter_irreps.dim == (
+        plan.compilation.active_target_irreps.dim + 1
+    )
+    assert plan.report.targets["distribution_parameters"]["dimension"] == (
+        plan.compilation.active_target_irreps.dim + 1
+    )
 
 
 def test_restricted_family_treats_canonical_failure_as_diagnostic():
