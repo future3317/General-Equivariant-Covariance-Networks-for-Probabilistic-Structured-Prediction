@@ -129,6 +129,9 @@ def train_epoch(
         result = model(batch, target=batch.y_irreps, return_scale=False)
         loss = result["loss"]
 
+        if not bool(torch.isfinite(loss.detach()).all()):
+            raise FloatingPointError("non-finite elasticity training loss")
+
         if warmup_mse_weight > 0.0:
             mse = torch.nn.functional.mse_loss(result["mu"], batch.y_irreps)
             loss = loss + warmup_mse_weight * mse
@@ -164,6 +167,8 @@ def validate(
             continue
 
         result = model(batch, target=batch.y_irreps, return_scale=False)
+        if not bool(torch.isfinite(result["loss"].detach()).all()):
+            raise FloatingPointError("non-finite elasticity validation loss")
         batch_size = batch.y_irreps.shape[0]
         total_loss += result["loss"].item() * batch_size
         num_loss_samples += batch_size

@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 import torch
 from argparse import Namespace
 
@@ -6,6 +7,7 @@ from compatibility.e3nn import o3
 from data.elasticity_normalization import ElasticityTargetNormalizer
 from representations import rank4_elasticity_irreps
 from scripts.train_elasticity import _configure_arm
+from scripts.train_elasticity import train_epoch
 
 
 def _normalizer() -> ElasticityTargetNormalizer:
@@ -56,3 +58,34 @@ def test_named_elasticity_arms_preserve_minimal_study_contract():
     _configure_arm(args)
     assert args.objective == "student_t"
     assert args.covariance == "full"
+
+
+class _Batch:
+    def __init__(self, loss):
+        self.edge_index = torch.tensor([[0], [0]])
+        self.y_irreps = torch.zeros(1, 1)
+        self.loss = loss
+
+    def to(self, device, non_blocking=False):
+        return self
+
+
+class _NonfiniteLossModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.ones(()))
+
+    def forward(self, batch, *, target, return_scale):
+        return {"loss": self.weight * batch.loss}
+
+
+def test_elasticity_training_rejects_nonfinite_loss_before_optimizer_step():
+    model = _NonfiniteLossModel()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    with pytest.raises(FloatingPointError, match="non-finite elasticity training loss"):
+        train_epoch(
+            model,
+            [_Batch(torch.tensor(float("nan")))],
+            optimizer,
+            torch.device("cpu"),
+        )
