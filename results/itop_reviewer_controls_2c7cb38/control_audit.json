@@ -1,0 +1,318 @@
+{
+  "fixed_coordinate_rotation_audit": {
+    "all_finite": true,
+    "relative_frobenius_max": 964.2981054172294,
+    "relative_frobenius_mean": 31.968598439931878,
+    "rotation_count": 8,
+    "sample_count": 512
+  },
+  "fixed_coordinate_seed42": {
+    "side": {
+      "coverage90": 0.7957502227705806,
+      "coverage95": 0.8999246007265748,
+      "energy_score_m": 0.7274760860450371,
+      "frame_risk_coverage_auc_cm": 22.670129388529535,
+      "joint_mace": 0.14021094660360547,
+      "minimum_eigenvalue": 0.00017463608176487857,
+      "nll": -27.76449708038462
+    },
+    "top": {
+      "coverage90": 0.021619028034820756,
+      "coverage95": 0.036164233326478855,
+      "energy_score_m": 2.3675653453161294,
+      "frame_risk_coverage_auc_cm": 69.45015954586168,
+      "joint_mace": 0.7689860511344162,
+      "minimum_eigenvalue": 2.2078351552286054e-07,
+      "nll": 72.80944353559
+    }
+  },
+  "no_edge_seed42": {
+    "side": {
+      "coverage90": 0.7755432174926314,
+      "coverage95": 0.8902872026869559,
+      "energy_score_m": 0.7282415188537957,
+      "frame_risk_coverage_auc_cm": 23.07378351688385,
+      "joint_mace": 0.1517017958736034,
+      "minimum_eigenvalue": 0.001158713839602331,
+      "nll": -27.05020586924128
+    },
+    "top": {
+      "coverage90": 0.1684556857906642,
+      "coverage95": 0.22580026047021728,
+      "energy_score_m": 2.4423476931442334,
+      "frame_risk_coverage_auc_cm": 70.49810886383057,
+      "joint_mace": 0.6453278154774146,
+      "minimum_eigenvalue": 0.000552914216169457,
+      "nll": 41.12977334253341
+    }
+  },
+  "protocol": {
+    "all_predictions_finite": true,
+    "fixed_nu": 5.0,
+    "selection": "Side validation only; Top evaluation only",
+    "shuffled_graph_split_seed": 42,
+    "true_graph_effective_split_seeds": [
+      42,
+      43,
+      44
+    ]
+  },
+  "shuffled_graph": {
+    "per_seed": [
+      {
+        "side": {
+          "coverage90": 0.7982863801494277,
+          "coverage95": 0.9056549455068887,
+          "energy_score_m": 0.7261462185362663,
+          "frame_risk_coverage_auc_cm": 22.627487152249774,
+          "joint_mace": 0.13482949482486803,
+          "minimum_eigenvalue": 0.00012380462586340235,
+          "nll": -35.02946448870311
+        },
+        "top": {
+          "coverage90": 0.09912948111590925,
+          "coverage95": 0.14206594009185003,
+          "energy_score_m": 2.5496459425336004,
+          "frame_risk_coverage_auc_cm": 69.98162995285652,
+          "joint_mace": 0.7062367194461581,
+          "minimum_eigenvalue": 4.0000380301853346e-05,
+          "nll": 31.47798585117096
+        }
+      },
+      {
+        "side": {
+          "coverage90": 0.8044828295290972,
+          "coverage95": 0.9100281033655494,
+          "energy_score_m": 0.725976415103654,
+          "frame_risk_coverage_auc_cm": 22.594330191170016,
+          "joint_mace": 0.1295652546439098,
+          "minimum_eigenvalue": 0.00011324189636008256,
+          "nll": -34.84514091094776
+        },
+        "top": {
+          "coverage90": 0.12864486942216738,
+          "coverage95": 0.19491397628350127,
+          "energy_score_m": 2.515127222432354,
+          "frame_risk_coverage_auc_cm": 69.63394163090896,
+          "joint_mace": 0.6818450544931113,
+          "minimum_eigenvalue": 4.831081057666285e-05,
+          "nll": 30.370933937874444
+        }
+      },
+      {
+        "side": {
+          "coverage90": 0.7960381109054767,
+          "coverage95": 0.9030502433340187,
+          "energy_score_m": 0.7261537579941534,
+          "frame_risk_coverage_auc_cm": 22.905097042420262,
+          "joint_mace": 0.13600846528206179,
+          "minimum_eigenvalue": 0.00010330993471933734,
+          "nll": -34.97340392517303
+        },
+        "top": {
+          "coverage90": 0.08516005209404345,
+          "coverage95": 0.12716430187127287,
+          "energy_score_m": 2.5786627039043997,
+          "frame_risk_coverage_auc_cm": 69.65374258088987,
+          "joint_mace": 0.7179201795873605,
+          "minimum_eigenvalue": 4.2280584469838076e-05,
+          "nll": 30.8128062708496
+        }
+      }
+    ],
+    "seeds": [
+      42,
+      43,
+      44
+    ],
+    "side": {
+      "coverage90": {
+        "mean": 0.7996024401946672,
+        "std": 0.004373480157727675
+      },
+      "coverage95": {
+        "mean": 0.9062444307354857,
+        "std": 0.003526081717850387
+      },
+      "energy_score_m": {
+        "mean": 0.7260921305446912,
+        "std": 0.00010028339008599774
+      },
+      "frame_risk_coverage_auc_cm": {
+        "mean": 22.708971461946685,
+        "std": 0.17065690289022786
+      },
+      "joint_mace": {
+        "mean": 0.13346773825027988,
+        "std": 0.003430674359105548
+      },
+      "minimum_eigenvalue": {
+        "mean": 0.00011345215231427408,
+        "std": 1.0248963213289374e-05
+      },
+      "nll": {
+        "mean": -34.94933644160797,
+        "std": 0.09448930179125607
+      }
+    },
+    "top": {
+      "coverage90": {
+        "mean": 0.10431146754404003,
+        "std": 0.022200722331065615
+      },
+      "coverage95": {
+        "mean": 0.1547147394155414,
+        "std": 0.03560194782577212
+      },
+      "energy_score_m": {
+        "mean": 2.547811956290118,
+        "std": 0.031807420213326436
+      },
+      "frame_risk_coverage_auc_cm": {
+        "mean": 69.75643805488512,
+        "std": 0.19527304624296965
+      },
+      "joint_mace": {
+        "mean": 0.7020006511755433,
+        "std": 0.018406842978534236
+      },
+      "minimum_eigenvalue": {
+        "mean": 4.3530591782784754e-05,
+        "std": 4.293914478646812e-06
+      },
+      "nll": {
+        "mean": 30.887242019965,
+        "std": 0.5572669873975556
+      }
+    }
+  },
+  "true_graph": {
+    "per_seed": [
+      {
+        "side": {
+          "coverage90": 0.8032764411542943,
+          "coverage95": 0.910302282541641,
+          "energy_score_m": 0.7260390667544699,
+          "frame_risk_coverage_auc_cm": 22.353878617286682,
+          "joint_mace": 0.128610768387141,
+          "minimum_eigenvalue": 3.338945193783705e-05,
+          "nll": -55.93056957441766
+        },
+        "top": {
+          "coverage90": 0.1438206868188361,
+          "coverage95": 0.20030159709370074,
+          "energy_score_m": 2.4781609137019527,
+          "frame_risk_coverage_auc_cm": 69.37681436538696,
+          "joint_mace": 0.6672347316471314,
+          "minimum_eigenvalue": 2.6512735605682388e-05,
+          "nll": 2.481700008674926
+        }
+      },
+      {
+        "side": {
+          "coverage90": 0.8115292343546507,
+          "coverage95": 0.9167317842209884,
+          "energy_score_m": 0.7262314455194923,
+          "frame_risk_coverage_auc_cm": 22.184500098228455,
+          "joint_mace": 0.1214762835012681,
+          "minimum_eigenvalue": 3.1937214507554856e-05,
+          "nll": -55.92973608149929
+        },
+        "top": {
+          "coverage90": 0.14405373911851396,
+          "coverage95": 0.2030982246898348,
+          "energy_score_m": 2.449331975782356,
+          "frame_risk_coverage_auc_cm": 69.1002905368805,
+          "joint_mace": 0.6660934608266502,
+          "minimum_eigenvalue": 6.403113900654507e-06,
+          "nll": 6.166503646602705
+        }
+      },
+      {
+        "side": {
+          "coverage90": 0.7986291041195421,
+          "coverage95": 0.9063678113647269,
+          "energy_score_m": 0.726066287213972,
+          "frame_risk_coverage_auc_cm": 22.529691457748413,
+          "joint_mace": 0.13241843169511278,
+          "minimum_eigenvalue": 3.0400985298888943e-05,
+          "nll": -55.94803371817738
+        },
+        "top": {
+          "coverage90": 0.10621701281787649,
+          "coverage95": 0.14425937350058263,
+          "energy_score_m": 2.5263286391428266,
+          "frame_risk_coverage_auc_cm": 69.288170337677,
+          "joint_mace": 0.7002836040852697,
+          "minimum_eigenvalue": 7.989203330915857e-06,
+          "nll": 3.553931053151031
+        }
+      }
+    ],
+    "seeds": [
+      42,
+      43,
+      44
+    ],
+    "side": {
+      "coverage90": {
+        "mean": 0.8044782598761624,
+        "std": 0.006533499537067811
+      },
+      "coverage95": {
+        "mean": 0.9111339593757855,
+        "std": 0.005231801612128557
+      },
+      "energy_score_m": {
+        "mean": 0.726112266495978,
+        "std": 0.00010410556223478718
+      },
+      "frame_risk_coverage_auc_cm": {
+        "mean": 22.35602339108785,
+        "std": 0.17260567404579416
+      },
+      "joint_mace": {
+        "mean": 0.12750182786117395,
+        "std": 0.005554724438855056
+      },
+      "minimum_eigenvalue": {
+        "mean": 3.1909217248093615e-05,
+        "std": 1.494430024433882e-06
+      },
+      "nll": {
+        "mean": -55.93611312469811,
+        "std": 0.010331945087189888
+      }
+    },
+    "top": {
+      "coverage90": {
+        "mean": 0.13136381291840885,
+        "std": 0.021778079456547524
+      },
+      "coverage95": {
+        "mean": 0.18255306509470606,
+        "std": 0.033192776223257434
+      },
+      "energy_score_m": {
+        "mean": 2.484607176209045,
+        "std": 0.03890099314148882
+      },
+      "frame_risk_coverage_auc_cm": {
+        "mean": 69.25509174664815,
+        "std": 0.14119844836721568
+      },
+      "joint_mace": {
+        "mean": 0.6778705988530171,
+        "std": 0.019418618061725103
+      },
+      "minimum_eigenvalue": {
+        "mean": 1.3635017612417585e-05,
+        "std": 1.118059190990078e-05
+      },
+      "nll": {
+        "mean": 4.067378236142887,
+        "std": 1.8953008916299157
+      }
+    }
+  }
+}

@@ -1,0 +1,308 @@
+{
+  "cuda_build": "12.6",
+  "cuda_capability": [
+    8,
+    9
+  ],
+  "cuda_device_count": 1,
+  "cuda_total_memory_bytes": 25393692672,
+  "cudnn_benchmark": false,
+  "cudnn_deterministic": true,
+  "dataset": {
+    "caches": {
+      "side_test": {
+        "files": {
+          "centroids.npy": {
+            "bytes": 58484,
+            "sha256": "d89213e3bcb1896041f5ad7d8d970a3a9a35b18e10c3ee9ae75d23869ef8717d"
+          },
+          "frame_indices.npy": {
+            "bytes": 39032,
+            "sha256": "55a0664de0c54cf74946c700442e6181ab6438703d27279afcf395dd92a6792b"
+          },
+          "joints.npy": {
+            "bytes": 875468,
+            "sha256": "670fa8dcef78a9a2bb498c8f994fc10905945ff5831054efbf7dd550753bc77b"
+          },
+          "metadata.json": {
+            "bytes": 508,
+            "sha256": "4522f88ea969e3ef93b6a1823cfb4ea03e61243fb0e4cde8f3009920b83c2fbe"
+          },
+          "neighbors.npy": {
+            "bytes": 79675520,
+            "sha256": "668ced47449e7e3e51ded2eec52e0d651e7bc78fe489ebd19ef203170dc5d9a6"
+          },
+          "points.npy": {
+            "bytes": 29878400,
+            "sha256": "59e9d6e3f45d43dd1a8c90c862fa3a7ce1611ec79bffbbdccce583b4af799b25"
+          },
+          "visible_joints.npy": {
+            "bytes": 73073,
+            "sha256": "e8b86e1c8096ea9fb7f517a73bea177ef641ece364361bcfe80751cb7d46cf3a"
+          }
+        },
+        "metadata": {
+          "centering": "observable_point_cloud_centroid",
+          "neighbors": "exact_scipy_ckdtree_knn_excluding_self",
+          "num_neighbors": 16,
+          "num_points": 512,
+          "num_samples": 4863,
+          "sample_limit": null,
+          "sampling": "deterministic_linspace_over_valid_depth_points",
+          "schema_version": 1,
+          "source": {
+            "depth_bytes": 1613045760,
+            "depth_file": "ITOP_side_test_depth_map.h5",
+            "labels_bytes": 1125693,
+            "labels_file": "ITOP_side_test_labels_compact.npz"
+          },
+          "split": "test",
+          "view": "side"
+        },
+        "path": "/home/workspace/lrh/DATA/Tpami/ITOP/cache/side_test_n512_k16_centered_v1",
+        "sample_limit": null
+      },
+      "side_train": {
+        "files": {
+          "centroids.npy": {
+            "bytes": 216020,
+            "sha256": "9fc02e9831c5f6375358db9279f5761a8228ed09832f8416064124c8ef72d423"
+          },
+          "frame_indices.npy": {
+            "bytes": 144056,
+            "sha256": "90edb3b8a056c373a0a109a686001266a2f4d09923eef06a2b3e9e1dbebef9e0"
+          },
+          "joints.npy": {
+            "bytes": 3238508,
+            "sha256": "3e495562fa3cb1ba34a488d561d651beab3da9cf0bbaebc20371cf8b575617dd"
+          },
+          "metadata.json": {
+            "bytes": 512,
+            "sha256": "7673b719ff6835fda091309d3be95df5af571dd9e000ac5071948030ae1e975c"
+          },
+          "neighbors.npy": {
+            "bytes": 294764672,
+            "sha256": "eb5b7a40d396cf16248d48c5457bd1d56f88fbeed64e44c09d902805206f20a7"
+          },
+          "points.npy": {
+            "bytes": 110536832,
+            "sha256": "f3be8c30a8213be7cdc7b467eb55dedd13e4f08cd230505c85cb8a9fc39fa0a0"
+          },
+          "visible_joints.npy": {
+            "bytes": 269993,
+            "sha256": "35484b6708aaa421598379abd2abff44d069e713b5553083a8c5a4dfa888a674"
+          }
+        },
+        "metadata": {
+          "centering": "observable_point_cloud_centroid",
+          "neighbors": "exact_scipy_ckdtree_knn_excluding_self",
+          "num_neighbors": 16,
+          "num_points": 512,
+          "num_samples": 17991,
+          "sample_limit": null,
+          "sampling": "deterministic_linspace_over_valid_depth_points",
+          "schema_version": 1,
+          "source": {
+            "depth_bytes": 6112839680,
+            "depth_file": "ITOP_side_train_depth_map.h5",
+            "labels_bytes": 4168268,
+            "labels_file": "ITOP_side_train_labels_compact.npz"
+          },
+          "split": "train",
+          "view": "side"
+        },
+        "path": "/home/workspace/lrh/DATA/Tpami/ITOP/cache/side_train_n512_k16_centered_v1",
+        "sample_limit": null
+      },
+      "top_test": {
+        "files": {
+          "centroids.npy": {
+            "bytes": 58484,
+            "sha256": "77b5fca144d6f8faca287fc71102ed74a6b6df45389beab86c666b2d28b776b4"
+          },
+          "frame_indices.npy": {
+            "bytes": 39032,
+            "sha256": "55a0664de0c54cf74946c700442e6181ab6438703d27279afcf395dd92a6792b"
+          },
+          "joints.npy": {
+            "bytes": 875468,
+            "sha256": "b677de392dcdad1b0afcac9ed08eaa764ea4e004ded82d07a50451200c52a225"
+          },
+          "metadata.json": {
+            "bytes": 505,
+            "sha256": "2de09a63862fca06da2a18c1cc1a79ed81ed19a74830181efc7fd1c319316dc8"
+          },
+          "neighbors.npy": {
+            "bytes": 79675520,
+            "sha256": "0afd6e70bbd24a7a36d2ff85c59e81cb1b13c2d9f464c84594a4f1fba9b092fb"
+          },
+          "points.npy": {
+            "bytes": 29878400,
+            "sha256": "d7d23a62a6b458638f569baf7dd933949b2c31fe05578f6f5c6a76e5b698497c"
+          },
+          "visible_joints.npy": {
+            "bytes": 73073,
+            "sha256": "a7d50cd9b8699958d32a7c281a77fd287a4f737daa360999b09be1f16fb407d7"
+          }
+        },
+        "metadata": {
+          "centering": "observable_point_cloud_centroid",
+          "neighbors": "exact_scipy_ckdtree_knn_excluding_self",
+          "num_neighbors": 16,
+          "num_points": 512,
+          "num_samples": 4863,
+          "sample_limit": null,
+          "sampling": "deterministic_linspace_over_valid_depth_points",
+          "schema_version": 1,
+          "source": {
+            "depth_bytes": 1613045760,
+            "depth_file": "ITOP_top_test_depth_map.h5",
+            "labels_bytes": 1204637,
+            "labels_file": "ITOP_top_test_labels_compact.npz"
+          },
+          "split": "test",
+          "view": "top"
+        },
+        "path": "/home/workspace/lrh/DATA/Tpami/ITOP/cache/top_test_n512_k16_centered_v1",
+        "sample_limit": null
+      }
+    },
+    "dataset_cache_hash": "94901c5488c6d7a30cddb1d87334b84a8640d2be90ca9ff121669bb6a4660269"
+  },
+  "deterministic_algorithms": false,
+  "device": "cuda:0",
+  "device_name": "NVIDIA GeForce RTX 4090",
+  "feature_cache": {
+    "feature_cache_hash": "3d7601a7d730b3edf1f56e5d4e37210190930dabbf5e5ea2f84bfbf839e90cf7",
+    "files": {
+      "metadata.json": {
+        "bytes": 602,
+        "sha256": "858b1268b17ff4e6cc37f19db8fe4b8dd9bf637f3813bd1c2c9d102b4f378a1e"
+      },
+      "side_test.pt": {
+        "bytes": 5696697,
+        "sha256": "8e1de84b095ed68e4fe01d2314dbf524dcd7f0c884eab25dc8af8c29c5f45f7e"
+      },
+      "side_train.pt": {
+        "bytes": 21069570,
+        "sha256": "3f1f6051cc824ad742d9848da76f3803946f30f7b769b57af490e220ff87def7"
+      },
+      "top_test.pt": {
+        "bytes": 5696688,
+        "sha256": "f81c08aedf0bd6e1b70ee3aaa0be2acf2cc85df4c27d1c3061ba0fde9a9fcb6b"
+      }
+    },
+    "path": "/home/workspace/lrh/RESULTS/Tpami/ITOP/reviewer_factorial_3844f99/itop_final_n512/seed_42/frozen_features"
+  },
+  "input_checkpoint": {
+    "bytes": 1919053,
+    "path": "/home/workspace/lrh/RESULTS/Tpami/ITOP/reviewer_factorial_3844f99/itop_final_n512/seed_42/deterministic/best_model.pt",
+    "sha256": "85e46daac36ea6fd04da518d4c86411e4add2723f62c57d933824433c137363a"
+  },
+  "python": "3.11.15",
+  "source": {
+    "commit": "2c7cb380340096242ecff242090ec9a009f700cf",
+    "diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "dirty": false,
+    "source_hash": "fe9e451d7c67073dc49ceb52eac350303a9331bd8d4623e2f8c4df780da152a5",
+    "status_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "untracked_files": []
+  },
+  "tf32_matmul": false,
+  "torch": "2.6.0+cu126",
+  "torch_num_interop_threads": 48,
+  "torch_num_threads": 48,
+  "training_contract": {
+    "backend": {
+      "compile_tensor_products": false,
+      "cueq_method": "naive",
+      "tensor_product_backend": "e3nn"
+    },
+    "data": {
+      "augmentation": false,
+      "label_centering": false,
+      "num_neighbors": 16,
+      "num_points": 512,
+      "split_mixing": false,
+      "split_seed": 42,
+      "test_views": [
+        "side",
+        "top"
+      ],
+      "train_cache_sample_limit": null,
+      "train_view": "side",
+      "validation": "fixed-seed 90/10 split of side-train"
+    },
+    "freeze": {
+      "boundary": "backbone and direct mean head frozen; bypassed operator mean projection also fixed; uncertainty head trainable",
+      "frozen_parameter_count": 467633,
+      "frozen_parameter_names": [
+        "backbone.atom_embedding.weight",
+        "backbone.layers.0.fc.layer0.weight",
+        "backbone.layers.0.fc.layer1.weight",
+        "backbone.layers.0.self_interaction.weight",
+        "backbone.layers.0.skip.weight",
+        "backbone.layers.0.act.input_proj.weight",
+        "backbone.layers.1.fc.layer0.weight",
+        "backbone.layers.1.fc.layer1.weight",
+        "backbone.layers.1.self_interaction.weight",
+        "backbone.layers.1.skip.weight",
+        "backbone.layers.1.act.input_proj.weight",
+        "backbone.post_linear1.weight",
+        "backbone.post_act.input_proj.weight",
+        "backbone.post_linear2.weight",
+        "joint_head.mean_head.head.weight",
+        "joint_head.operator_head.mean_projection.weight"
+      ],
+      "input_checkpoint": {
+        "bytes": 1919053,
+        "path": "/home/workspace/lrh/RESULTS/Tpami/ITOP/reviewer_factorial_3844f99/itop_final_n512/seed_42/deterministic/best_model.pt",
+        "sha256": "85e46daac36ea6fd04da518d4c86411e4add2723f62c57d933824433c137363a"
+      },
+      "phase": "frozen_head",
+      "trainable_parameter_count": 4010,
+      "trainable_parameter_names": [
+        "joint_head.operator_head.lifting.final_linear.weight",
+        "joint_head.operator_head.covariance_projection.weight"
+      ]
+    },
+    "model": {
+      "model_kind": "shuffled_graph_student_t",
+      "phase": "frozen_head",
+      "representation_metric": "none",
+      "student_t_dof": 5.0
+    },
+    "optimization": {
+      "batch_size": 16,
+      "early_stopping_patience": 5,
+      "gradient_routing": "ordinary_objective_autograd",
+      "learning_rate": 0.0005,
+      "optimizer": "AdamW",
+      "scheduler": "ReduceLROnPlateau(factor=0.5, patience=2)",
+      "selection": "validation_nll",
+      "training_objective": "joint_negative_log_likelihood",
+      "weight_decay": 1e-05
+    },
+    "precision": {
+      "backbone": "BF16 autocast on CUDA",
+      "bitwise_cuda_reproducibility": "not claimed; exact seed/split/sampler/checkpoint contract is recorded",
+      "cudnn_benchmark": false,
+      "distributed": false,
+      "operator_readout_spd_likelihood": "FP32",
+      "tf32": false
+    },
+    "randomness": {
+      "num_workers": 8,
+      "sampler": "RandomSampler with seed*1000003+epoch",
+      "seed": 43,
+      "worker_seeding": "torch.initial_seed propagated to Python and NumPy"
+    },
+    "representation": {
+      "coordinate_dim": 3,
+      "num_joints": 15,
+      "output": "15 x 1o centered 3D joints"
+    },
+    "version": 1
+  },
+  "training_contract_hash": "fdea340dabcfadec06073dc0fa2caf0210ea6554441b19b9fefb27b919fc93cb"
+}

@@ -1,0 +1,795 @@
+{
+  "backend_selection_basis": {
+    "available_candidates": [
+      "spherical_cg"
+    ],
+    "capability_certificate": {
+      "active_plan_hash": "49b0a73968c0bd0d61d2aba14036f17c4b477e1ea8095b69d5d7df2b7503f5ed",
+      "checkpoint_map": "bijective",
+      "covered_instructions": [
+        "operator:parameter",
+        "operator:symmetric_operator",
+        "operator:spectral_positive",
+        "operator:direct_sum",
+        "operator:parameter",
+        "operator:symmetric_operator",
+        "operator:spectral_positive",
+        "operator:direct_sum",
+        "operator:pullback",
+        "operator:add"
+      ],
+      "exact": true,
+      "executor": "spherical_cg",
+      "feature_fingerprint": "b00af9e74d2c24acabac38aaf872218af59556546f661cd898270fbe7f9ce92e",
+      "fidelity": {
+        "effective": "exact",
+        "effective_contraction_rank": null,
+        "normalization_reason": null,
+        "requested": "exact_only",
+        "requested_contraction_rank": null
+      },
+      "missing_instructions": [],
+      "operator_program_hash": "c8f8490f923d2fd17ba89bb96c99f1aa82a56b00500bce578e90c2fc10a6027c",
+      "reasons": [],
+      "supported": true
+    },
+    "cueq_method": "naive",
+    "lifting_backend": "e3nn",
+    "method": "explicit_static_priority",
+    "performance_claim": "none",
+    "priority": [
+      "spherical_cg",
+      "cartesian_stf"
+    ],
+    "selected_executor": "spherical_cg"
+  },
+  "certificates": [
+    {
+      "code": "active_target_reachable",
+      "details": {
+        "active_deficit": {},
+        "active_depth": 0
+      },
+      "message": "Every irrep and multiplicity required by the selected family is covered.",
+      "status": "success"
+    },
+    {
+      "code": "canonical_reference_reachable",
+      "details": {
+        "canonical_depth": 0
+      },
+      "message": "The unrestricted full-family reference is also reachable.",
+      "status": "success"
+    },
+    {
+      "code": "structured_covariance_restriction",
+      "details": {
+        "active_coordinates": 174,
+        "budget": 174,
+        "canonical_coordinates": 1035,
+        "selected_by": "operator_family_policy"
+      },
+      "message": "The active graph family is a restriction of the unrestricted operator family.",
+      "status": "restriction"
+    },
+    {
+      "code": "exact_execution_lowering",
+      "details": {
+        "backend": "spherical_cg"
+      },
+      "message": "The execution backend preserves the compiled function space and checkpoint coordinates.",
+      "status": "success"
+    }
+  ],
+  "compatibility_hash": "c4e7c8c15be9d3f33654a33e10b752cb3c910992e300cc1741a33b115606490d",
+  "compiler_soundness": {
+    "not_claimed": [
+      "formal verification of arbitrary user-defined primitives",
+      "completeness for all equivariant SPD programs",
+      "calibration or physical uncertainty identification"
+    ],
+    "scope": "compositionally verified relative to registered typed primitives and lowering rules",
+    "trusted_base": [
+      "registered primitive semantics",
+      "representation/decomposition oracles",
+      "registered lowering rules"
+    ]
+  },
+  "complexity": {
+    "canonical_cg_instructions": 0,
+    "canonical_lifting_edges": 0,
+    "covariance": {
+      "block_dimension": 3,
+      "edges": 14,
+      "emitted_coordinates": 174,
+      "likelihood_linear_algebra": "O(J d0^3 + E d0^2)",
+      "nodes": 15,
+      "parameterization": "local_spd_graph_precision",
+      "storage": "O((J+E) d0^2)",
+      "tree_elimination": true
+    },
+    "lifting_edges": 0,
+    "parameter_counts": {
+      "active_covariance_coordinates": 174,
+      "active_target_dimension": 219,
+      "canonical_covariance_coordinates": 1035,
+      "canonical_target_dimension": 1080,
+      "mean_projection": 225,
+      "readout_role_total": 4235,
+      "readout_trainable": 4235,
+      "shared_lifting": 2328,
+      "uncertainty_projection": 1682
+    },
+    "retained_cg_instructions": 0
+  },
+  "covariance_representation": {
+    "components": [
+      {
+        "angular_momentum": 0,
+        "dimension": 120,
+        "irrep": "0e",
+        "multiplicity": 120,
+        "parity": "even"
+      },
+      {
+        "angular_momentum": 1,
+        "dimension": 315,
+        "irrep": "1e",
+        "multiplicity": 105,
+        "parity": "even"
+      },
+      {
+        "angular_momentum": 2,
+        "dimension": 600,
+        "irrep": "2e",
+        "multiplicity": 120,
+        "parity": "even"
+      }
+    ],
+    "dimension": 1035,
+    "highest_angular_momentum": 2,
+    "irreps": "120x0e+105x1e+120x2e",
+    "parities": [
+      "even"
+    ]
+  },
+  "execution_fidelity": {
+    "approximation": null,
+    "checkpoint_mapping": "bijective",
+    "decision": {
+      "effective": "exact",
+      "effective_contraction_rank": null,
+      "normalization_reason": null,
+      "requested": "exact_only",
+      "requested_contraction_rank": null
+    },
+    "exactness": "exact_for_active_family",
+    "selected_executor": "spherical_cg"
+  },
+  "family": {
+    "assembly_ir": {
+      "attributes": {},
+      "inputs": [
+        {
+          "attributes": {
+            "copies": 15
+          },
+          "inputs": [
+            {
+              "attributes": {
+                "map": "matrix_exponential"
+              },
+              "inputs": [
+                {
+                  "attributes": {
+                    "coordinate_space": "graph_local",
+                    "copies": 15,
+                    "irrep": "1o",
+                    "role": "unary"
+                  },
+                  "inputs": [
+                    {
+                      "attributes": {
+                        "binding": "potentials",
+                        "coordinate_layout": "repeated_irrep",
+                        "copies": 29,
+                        "start": 0,
+                        "stop": 90,
+                        "unit_irreps": "1x0e+1x2e"
+                      },
+                      "inputs": [],
+                      "kind": "parameter"
+                    }
+                  ],
+                  "kind": "symmetric_operator"
+                }
+              ],
+              "kind": "spectral_positive"
+            }
+          ],
+          "kind": "direct_sum"
+        },
+        {
+          "attributes": {
+            "intertwiner": "homogeneous_graph_coboundary"
+          },
+          "inputs": [
+            {
+              "attributes": {
+                "copies": 14
+              },
+              "inputs": [
+                {
+                  "attributes": {
+                    "map": "matrix_exponential"
+                  },
+                  "inputs": [
+                    {
+                      "attributes": {
+                        "coordinate_space": "graph_local",
+                        "copies": 14,
+                        "irrep": "1o",
+                        "role": "factor"
+                      },
+                      "inputs": [
+                        {
+                          "attributes": {
+                            "binding": "potentials",
+                            "coordinate_layout": "repeated_irrep",
+                            "copies": 29,
+                            "start": 90,
+                            "stop": 174,
+                            "unit_irreps": "1x0e+1x2e"
+                          },
+                          "inputs": [],
+                          "kind": "parameter"
+                        }
+                      ],
+                      "kind": "symmetric_operator"
+                    }
+                  ],
+                  "kind": "spectral_positive"
+                }
+              ],
+              "kind": "direct_sum"
+            }
+          ],
+          "kind": "pullback"
+        }
+      ],
+      "kind": "add",
+      "verification": {
+        "derivation": "closed_typed_primitive_rule_set",
+        "effects": [
+          "equivariant",
+          "cone:spd"
+        ],
+        "environment_typed": true,
+        "equivariance": "verified",
+        "errors": [],
+        "instructions": [
+          "parameter",
+          "symmetric_operator",
+          "spectral_positive",
+          "direct_sum",
+          "parameter",
+          "symmetric_operator",
+          "spectral_positive",
+          "direct_sum",
+          "pullback",
+          "add"
+        ],
+        "non_claims": [
+          "formal proof of arbitrary user-defined primitives",
+          "completeness for all equivariant SPD programs",
+          "calibration or physical uncertainty identification"
+        ],
+        "positivity": "spd",
+        "proof_scope": "closed_typed_primitive_rule_set",
+        "result_dimension": 45,
+        "result_irreps": "15x1o",
+        "trusted_base": [
+          "registered primitive semantics",
+          "representation/decomposition oracles",
+          "registered lowering rules"
+        ],
+        "type": "SPD(15x1o)",
+        "typing_rule": "T-SPDAdd",
+        "unknown_instructions": [],
+        "valid": true
+      }
+    },
+    "certificates": {
+      "derivation": "closed_typed_primitive_rule_set",
+      "effects": [
+        "equivariant",
+        "cone:spd"
+      ],
+      "environment_typed": true,
+      "equivariance": "verified",
+      "errors": [],
+      "instructions": [
+        "parameter",
+        "symmetric_operator",
+        "spectral_positive",
+        "direct_sum",
+        "parameter",
+        "symmetric_operator",
+        "spectral_positive",
+        "direct_sum",
+        "pullback",
+        "add"
+      ],
+      "non_claims": [
+        "formal proof of arbitrary user-defined primitives",
+        "completeness for all equivariant SPD programs",
+        "calibration or physical uncertainty identification"
+      ],
+      "positivity": "spd",
+      "proof_scope": "closed_typed_primitive_rule_set",
+      "result_dimension": 45,
+      "result_irreps": "15x1o",
+      "trusted_base": [
+        "registered primitive semantics",
+        "representation/decomposition oracles",
+        "registered lowering rules"
+      ],
+      "type": "SPD(15x1o)",
+      "typing_rule": "T-SPDAdd",
+      "unknown_instructions": [],
+      "valid": true
+    },
+    "computational_oracles": [
+      "logdet",
+      "quadratic_form",
+      "sampling"
+    ],
+    "domain": "precision",
+    "graph": {
+      "block_dim": 3,
+      "edges": [
+        [
+          0,
+          5
+        ],
+        [
+          1,
+          5
+        ],
+        [
+          1,
+          6
+        ],
+        [
+          7,
+          9
+        ],
+        [
+          4,
+          9
+        ],
+        [
+          4,
+          11
+        ],
+        [
+          8,
+          11
+        ],
+        [
+          1,
+          13
+        ],
+        [
+          1,
+          10
+        ],
+        [
+          2,
+          10
+        ],
+        [
+          2,
+          12
+        ],
+        [
+          3,
+          12
+        ],
+        [
+          3,
+          8
+        ],
+        [
+          8,
+          14
+        ]
+      ],
+      "is_tree": true,
+      "node_irrep": "1o",
+      "node_names": [
+        "Head",
+        "Neck",
+        "R Shoulder",
+        "L Shoulder",
+        "R Elbow",
+        "L Elbow",
+        "R Hand",
+        "L Hand",
+        "Torso",
+        "R Hip",
+        "L Hip",
+        "R Knee",
+        "L Knee",
+        "R Foot",
+        "L Foot"
+      ],
+      "num_edges": 14,
+      "num_nodes": 15,
+      "output_dim": 45
+    },
+    "kind": "graph_precision",
+    "operator_program_hash": "c8f8490f923d2fd17ba89bb96c99f1aa82a56b00500bce578e90c2fc10a6027c",
+    "optimization": {
+      "binding_correspondence": [
+        {
+          "program": "potentials",
+          "template": "potentials"
+        }
+      ],
+      "graph_identity": "bca9a9955c87174641723a0fc34260f33ef74fd97d5fbef30199bf37a3d9d312",
+      "match_evidence": [
+        "complete_operator_tree_identity",
+        "typed_binding_expression_identity",
+        "parameter_slice_and_layout_identity",
+        "operator_domain_and_output_identity",
+        "graph_and_rank_metadata_identity"
+      ],
+      "operator_domain": "precision",
+      "operator_program_hash": "c8f8490f923d2fd17ba89bb96c99f1aa82a56b00500bce578e90c2fc10a6027c",
+      "optimization_name": "graph_elimination_or_dense_precision_oracle",
+      "output_dimension": 45,
+      "parameter_layout_transform": [
+        "potentials: irrep-major copies -> potential-major coefficients",
+        "potentials: expand each local Sym^2(V0) coefficient in its basis"
+      ],
+      "proof_scope": "exact_registered_template_identity",
+      "rank": null,
+      "semantic_template_hash": "053986c26f60850dd5578d1f261d4bc0fd52a3a0f5e5309259360f1e301dcad5"
+    },
+    "output_irreps": "15x1o",
+    "parameter_bindings": [
+      {
+        "expression": {
+          "copies": 29,
+          "kind": "repeated_representation",
+          "operand": {
+            "kind": "symmetric_square",
+            "operand": {
+              "declared_irreps": "1x1o",
+              "kind": "atomic_representation",
+              "semantic_name": "graph_residual"
+            }
+          }
+        },
+        "name": "potentials",
+        "projection_name": "covariance_projection",
+        "representation": {
+          "dimension": 174,
+          "group": "O3",
+          "irreps": "29x0e+29x2e",
+          "multiplicity_basis": "abstract_multiplicity_space"
+        }
+      }
+    ],
+    "parameter_count": 174,
+    "parameter_expression": {
+      "kind": "direct_sum",
+      "terms": [
+        {
+          "copies": 29,
+          "kind": "repeated_representation",
+          "operand": {
+            "kind": "symmetric_square",
+            "operand": {
+              "declared_irreps": "1x1o",
+              "kind": "atomic_representation",
+              "semantic_name": "graph_residual"
+            }
+          }
+        }
+      ]
+    },
+    "parameter_representation": {
+      "dimension": 174,
+      "group": "O3",
+      "irreps": "29x0e+29x2e",
+      "multiplicity_basis": "abstract_multiplicity_space"
+    },
+    "rank": null,
+    "relation_to_canonical": "strict_subfamily",
+    "relation_to_full": "strict_subset",
+    "restriction": "fixed_skeleton_precision_cone"
+  },
+  "group": "O(3)",
+  "objective": {
+    "degrees_of_freedom": 5.0,
+    "name": "multivariate_student_t",
+    "proper": true
+  },
+  "output": {
+    "cartesian_formula": null,
+    "components": [
+      {
+        "angular_momentum": 1,
+        "dimension": 45,
+        "irrep": "1o",
+        "multiplicity": 15,
+        "parity": "odd"
+      }
+    ],
+    "dimension": 45,
+    "highest_angular_momentum": 1,
+    "irreps": "15x1o",
+    "parities": [
+      "odd"
+    ]
+  },
+  "output_scope": "global",
+  "probability": {
+    "covariance_relation": "covariance = 5.0/(5.0-2) * scatter",
+    "likelihood": {
+      "degrees_of_freedom": 5.0,
+      "name": "multivariate_student_t",
+      "proper": true
+    },
+    "positive_definite_object": "global precision",
+    "precision_semantics": "assembled directly from unary and relational SPD potentials",
+    "raw_parameter_semantics": "local symmetric precision generators",
+    "scale_semantics": "scatter"
+  },
+  "representation_reachability": {
+    "active": {
+      "depth": 0,
+      "failure": null,
+      "missing_irreps": [],
+      "plan": {
+        "depth": 0,
+        "execution": "fully_connected_within_retained_frontiers",
+        "minimality": "tensor_product_depth",
+        "paths": {
+          "0e": [
+            "0e"
+          ],
+          "1o": [
+            "1o"
+          ],
+          "2e": [
+            "2e"
+          ]
+        },
+        "pruning": "union_of_selected_shortest_path_frontiers",
+        "seed_irreps": "64x0e+16x1e+16x1o+8x2e+8x2o",
+        "stages": [],
+        "target_irreps": "29x0e+15x1o+29x2e"
+      },
+      "reachable": true,
+      "seed_irreps": "64x0e+16x1e+16x1o+8x2e+8x2o",
+      "target_irreps": "29x0e+15x1o+29x2e"
+    },
+    "active_is_compilation_gate": true,
+    "canonical": {
+      "depth": 0,
+      "failure": null,
+      "missing_irreps": [],
+      "plan": {
+        "depth": 0,
+        "execution": "fully_connected_within_retained_frontiers",
+        "minimality": "tensor_product_depth",
+        "paths": {
+          "0e": [
+            "0e"
+          ],
+          "1e": [
+            "1e"
+          ],
+          "1o": [
+            "1o"
+          ],
+          "2e": [
+            "2e"
+          ]
+        },
+        "pruning": "union_of_selected_shortest_path_frontiers",
+        "seed_irreps": "64x0e+16x1e+16x1o+8x2e+8x2o",
+        "stages": [],
+        "target_irreps": "120x0e+105x1e+15x1o+120x2e"
+      },
+      "reachable": true,
+      "seed_irreps": "64x0e+16x1e+16x1o+8x2e+8x2o",
+      "target_irreps": "120x0e+105x1e+15x1o+120x2e"
+    },
+    "canonical_is_compilation_gate": false,
+    "canonical_is_diagnostic": true,
+    "canonical_is_diagnostic_for_restricted_families": true,
+    "multiplicity_coverage": {
+      "active_deficit": {},
+      "canonical_deficit": {}
+    },
+    "proof_kind": "breadth_first_shortest_cg_paths",
+    "status": "active_reachable"
+  },
+  "schema_version": "3.0",
+  "seed": {
+    "components": [
+      {
+        "angular_momentum": 0,
+        "dimension": 64,
+        "irrep": "0e",
+        "multiplicity": 64,
+        "parity": "even"
+      },
+      {
+        "angular_momentum": 1,
+        "dimension": 48,
+        "irrep": "1e",
+        "multiplicity": 16,
+        "parity": "even"
+      },
+      {
+        "angular_momentum": 1,
+        "dimension": 48,
+        "irrep": "1o",
+        "multiplicity": 16,
+        "parity": "odd"
+      },
+      {
+        "angular_momentum": 2,
+        "dimension": 40,
+        "irrep": "2e",
+        "multiplicity": 8,
+        "parity": "even"
+      },
+      {
+        "angular_momentum": 2,
+        "dimension": 40,
+        "irrep": "2o",
+        "multiplicity": 8,
+        "parity": "odd"
+      }
+    ],
+    "dimension": 240,
+    "highest_angular_momentum": 2,
+    "irreps": "64x0e+16x1e+16x1o+8x2e+8x2o",
+    "parities": [
+      "even",
+      "odd"
+    ]
+  },
+  "spd_contract": {
+    "finite_precision_cone_status": "not_certified_without_dtype_audit",
+    "finite_precision_policy": {
+      "certificate": "representations.certify_numerical_spd",
+      "default_action": "reject_if_not_strict",
+      "hidden_jitter": false,
+      "kind": "value_dependent_runtime_certificate",
+      "supported_audit_dtypes": [
+        "float64",
+        "float32",
+        "float16",
+        "bfloat16"
+      ]
+    },
+    "mathematical_cone_status": "strict_spd",
+    "minimum_eigenvalue_policy": {
+      "kind": "none_declared",
+      "minimum_values": [],
+      "note": "runtime range still depends on dtype and matrix-function inputs"
+    }
+  },
+  "targets": {
+    "active": {
+      "components": [
+        {
+          "angular_momentum": 0,
+          "dimension": 29,
+          "irrep": "0e",
+          "multiplicity": 29,
+          "parity": "even"
+        },
+        {
+          "angular_momentum": 1,
+          "dimension": 45,
+          "irrep": "1o",
+          "multiplicity": 15,
+          "parity": "odd"
+        },
+        {
+          "angular_momentum": 2,
+          "dimension": 145,
+          "irrep": "2e",
+          "multiplicity": 29,
+          "parity": "even"
+        }
+      ],
+      "dimension": 219,
+      "highest_angular_momentum": 2,
+      "irreps": "29x0e+15x1o+29x2e",
+      "parities": [
+        "even",
+        "odd"
+      ]
+    },
+    "canonical": {
+      "components": [
+        {
+          "angular_momentum": 0,
+          "dimension": 120,
+          "irrep": "0e",
+          "multiplicity": 120,
+          "parity": "even"
+        },
+        {
+          "angular_momentum": 1,
+          "dimension": 315,
+          "irrep": "1e",
+          "multiplicity": 105,
+          "parity": "even"
+        },
+        {
+          "angular_momentum": 1,
+          "dimension": 45,
+          "irrep": "1o",
+          "multiplicity": 15,
+          "parity": "odd"
+        },
+        {
+          "angular_momentum": 2,
+          "dimension": 600,
+          "irrep": "2e",
+          "multiplicity": 120,
+          "parity": "even"
+        }
+      ],
+      "dimension": 1080,
+      "highest_angular_momentum": 2,
+      "irreps": "120x0e+105x1e+15x1o+120x2e",
+      "parities": [
+        "even",
+        "odd"
+      ]
+    },
+    "distribution_parameters": {
+      "components": [
+        {
+          "angular_momentum": 0,
+          "dimension": 29,
+          "irrep": "0e",
+          "multiplicity": 29,
+          "parity": "even"
+        },
+        {
+          "angular_momentum": 1,
+          "dimension": 45,
+          "irrep": "1o",
+          "multiplicity": 15,
+          "parity": "odd"
+        },
+        {
+          "angular_momentum": 2,
+          "dimension": 145,
+          "irrep": "2e",
+          "multiplicity": 29,
+          "parity": "even"
+        }
+      ],
+      "dimension": 219,
+      "highest_angular_momentum": 2,
+      "irreps": "29x0e+15x1o+29x2e",
+      "parities": [
+        "even",
+        "odd"
+      ]
+    }
+  }
+}

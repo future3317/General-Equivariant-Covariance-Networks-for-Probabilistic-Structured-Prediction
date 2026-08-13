@@ -1,0 +1,19 @@
+{
+  "audit_sha256": "c9918c0944326e723ad9c0dd55bb94c770d4cb69898242fb6e1244a09b3cfd0a",
+  "code_commit": "2c7cb380340096242ecff242090ec9a009f700cf",
+  "large_artifacts": {
+    "seed_42/fixed_coordinate_diagonal_student_t/best_model.pt": "acd21147e632e39672b899a5c9567c7e42bfd0345f29baf4de9937967e582a66",
+    "seed_42/fixed_coordinate_diagonal_student_t/predictions_side.pt": "d212cc82b2850255db9a8849396bf6b10557f0feda923a1edc91f0443746b184",
+    "seed_42/fixed_coordinate_diagonal_student_t/predictions_top.pt": "6ffb372bb8e38462305efb25f22df208caedfb397c462b1000afce811fae0a6a",
+    "seed_42/shuffled_graph_student_t/best_model.pt": "d4530e5f470effc7b3467a99a248b2fcdd98cbb818ed8c5b2c0690a701694fac",
+    "seed_42/shuffled_graph_student_t/predictions_side.pt": "7b427f70491b066f5dd9b4ee10bdf0ae1c97647f1f223d148c5d0a173cd46980",
+    "seed_42/shuffled_graph_student_t/predictions_top.pt": "8812efbf290d085a9aecfdec846891809660ad9c276fac90566b011b4f97dff0",
+    "seed_43/shuffled_graph_student_t/best_model.pt": "888ed662e509d0ca209d2881b8080d9139eea3536441c2a8366aaf32ccdc7564",
+    "seed_43/shuffled_graph_student_t/predictions_side.pt": "001cfacb82d9ee614c5a4c56c520ca488690097d4717e44d125a5cf80551e73b",
+    "seed_43/shuffled_graph_student_t/predictions_top.pt": "23dfa2981bad175ae2ac0cdaafa8a81d908bb65d19678a2ac3a29d28f21f7c2e",
+    "seed_44/shuffled_graph_student_t/best_model.pt": "b7a8e1e73bddb4047c610f30adc30334528f7b1805da88080174d35a1bff3436",
+    "seed_44/shuffled_graph_student_t/predictions_side.pt": "b39f177b949fb0820df8a3223676a1f148312287d024953cf194679c3966795e",
+    "seed_44/shuffled_graph_student_t/predictions_top.pt": "fe0ecb1c1c5cef7e590d2bab510a7c0207aa9156a3fe6240f0211e5c4251c97d"
+  },
+  "server_root": "/home/workspace/lrh/RESULTS/Tpami/ITOP/reviewer_controls_2c7cb38"
+}
