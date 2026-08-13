@@ -1,9 +1,11 @@
 import numpy as np
 import torch
+from argparse import Namespace
 
 from compatibility.e3nn import o3
 from data.elasticity_normalization import ElasticityTargetNormalizer
 from representations import rank4_elasticity_irreps
+from scripts.train_elasticity import _configure_arm
 
 
 def _normalizer() -> ElasticityTargetNormalizer:
@@ -42,3 +44,15 @@ def test_legacy_normalization_remains_available_for_reproducibility():
     values = torch.randn(3, 21)
     recovered = normalizer.inverse(normalizer.transform(values))
     torch.testing.assert_close(recovered, values, atol=2e-5, rtol=2e-5)
+
+
+def test_named_elasticity_arms_preserve_minimal_study_contract():
+    args = Namespace(arm="deterministic", objective="gaussian", covariance="auto")
+    _configure_arm(args)
+    assert args.objective == "deterministic"
+    assert args.covariance is None
+
+    args = Namespace(arm="full_student_t", objective="gaussian", covariance="auto")
+    _configure_arm(args)
+    assert args.objective == "student_t"
+    assert args.covariance == "full"

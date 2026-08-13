@@ -6,8 +6,10 @@ import argparse
 import json
 import logging
 import os
+import random
 from datetime import datetime, timezone
 
+import numpy as np
 import torch
 from torch import optim
 from tqdm import tqdm
@@ -17,14 +19,72 @@ from data.elasticity_dataset import get_elasticity_irreps_loaders
 from data.paths import dataset_dir
 from data.representation_metrics import infer_representation_block_metric
 from equivcompiler import FeatureSpec, plan_readout
-from models import EquivariantBackbone
-from representations import rank4_elasticity_irreps
+from models import DeterministicHead, EquivariantBackbone, StructuredProbabilisticPredictor
+from representations import O3IrrepsSpec, rank4_elasticity_irreps
 from scripts._common import (
     add_tensor_product_arguments,
     covariance_policy_from_cli,
     tensor_product_kwargs,
 )
 from spd_maps import RepresentationMetricMap
+
+
+ELASTICITY_ARMS = ("deterministic", "low_rank_student_t", "full_student_t")
+
+
+def _configure_arm(args: argparse.Namespace) -> None:
+    """Apply an optional named study arm without changing legacy CLI behavior."""
+    if args.arm is None:
+        return
+    if args.arm == "deterministic":
+        args.objective = "deterministic"
+        args.covariance = None
+    elif args.arm == "low_rank_student_t":
+        args.objective = "student_t"
+        args.covariance = "low_rank"
+    elif args.arm == "full_student_t":
+        args.objective = "student_t"
+        args.covariance = "full"
+    else:  # pragma: no cover - argparse restricts this value
+        raise ValueError(f"unsupported elasticity arm: {args.arm}")
+
+
+def build_elasticity_model(args: argparse.Namespace):
+    """Build a named arm while retaining the existing compiler path."""
+    backbone = EquivariantBackbone(
+        hidden_dim=args.hidden_dim,
+        lmax=args.lmax,
+        num_layers=args.num_layers,
+        atom_feature_dim=49,
+        num_basis=args.num_basis,
+        atom_features=args.atom_features,
+        **tensor_product_kwargs(args),
+    )
+    output = rank4_elasticity_irreps()
+    if args.objective == "deterministic":
+        output_spec = O3IrrepsSpec(output)
+        return (
+            StructuredProbabilisticPredictor(
+                backbone=backbone,
+                output_spec=output_spec,
+                joint_head=DeterministicHead(backbone.irreps_out, output_spec, pool=True),
+            ),
+            {"kind": "deterministic_mean", "output_irreps": str(output_spec.irreps)},
+        )
+
+    plan = plan_readout(
+        FeatureSpec.from_backbone(backbone),
+        output=output,
+        covariance=covariance_policy_from_cli(
+            args.covariance,
+            rank=args.rank,
+            parameter_budget=args.parameter_budget,
+        ),
+        distribution=args.objective,
+        student_t_dof=args.student_t_dof,
+        output_scope="global",
+    )
+    return plan.bind(backbone), plan.compilation.as_dict()
 
 
 def setup_logger(save_dir: str, experiment_name: str | None = None):
@@ -122,6 +182,7 @@ def validate(
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--arm", choices=ELASTICITY_ARMS, default=None)
     parser.add_argument("--data_dir", default=None)
     parser.add_argument("--save_dir", default="checkpoints_elasticity")
     parser.add_argument("--hidden_dim", type=int, default=48)
@@ -158,6 +219,7 @@ def main():
     parser.add_argument("--num_epochs", type=int, default=100)
     parser.add_argument("--patience", type=int, default=15)
     parser.add_argument("--warmup_epochs", type=int, default=3)
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--train_subset", type=int, default=None)
     parser.add_argument("--eval_subset", type=int, default=None)
     parser.add_argument("--num_workers", type=int, default=0)
@@ -172,7 +234,14 @@ def main():
         "--device", default="cuda" if torch.cuda.is_available() else "cpu"
     )
     args = parser.parse_args()
+    _configure_arm(args)
     args.data_dir = str(dataset_dir(args.data_dir, "mp_elastic"))
+
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
 
     logger, _experiment_name = setup_logger(args.save_dir)
     logger.info("=" * 60)
@@ -202,30 +271,11 @@ def main():
         train_dataset = train_loader.dataset
     normalizer = train_dataset.target_normalizer
 
-    backbone = EquivariantBackbone(
-        hidden_dim=args.hidden_dim,
-        lmax=args.lmax,
-        num_layers=args.num_layers,
-        atom_feature_dim=49,
-        num_basis=args.num_basis,
-        atom_features=args.atom_features,
-        **tensor_product_kwargs(args),
-    )
-    plan = plan_readout(
-        FeatureSpec.from_backbone(backbone),
-        output=rank4_elasticity_irreps(),
-        covariance=covariance_policy_from_cli(
-            args.covariance,
-            rank=args.rank,
-            parameter_budget=args.parameter_budget,
-        ),
-        distribution=args.objective,
-        student_t_dof=args.student_t_dof,
-        output_scope="global",
-    )
-    compilation = plan.compilation
-    model = plan.bind(backbone).to(args.device)
+    model, compilation = build_elasticity_model(args)
+    model = model.to(args.device)
     if args.representation_metric == "block_auto":
+        if model.spd_map is None:
+            raise ValueError("representation_metric=block_auto requires a probabilistic arm")
         # Convert normalized Cartesian targets once; the metric is inferred
         # from representation blocks and is independent of the dataset name.
         target_irreps = train_dataset.target_irreps
@@ -241,13 +291,16 @@ def main():
 
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(f"Model parameters: {num_params:,}")
-    logger.info(
-        "Compiled covariance: mode=%s, parameters=%d, canonical_depth=%d, active_depth=%d",
-        compilation.covariance_mode,
-        compilation.covariance_parameter_count,
-        compilation.canonical_plan.depth,
-        compilation.active_plan.depth,
-    )
+    if model.distribution is None:
+        logger.info("Deterministic mean control: output=%s", compilation["output_irreps"])
+    else:
+        logger.info(
+            "Compiled covariance: mode=%s, parameters=%d, canonical_depth=%d, active_depth=%d",
+            compilation["covariance_mode"],
+            compilation["covariance_parameter_count"],
+            compilation["canonical_plan"]["depth"],
+            compilation["active_plan"]["depth"],
+        )
 
     optimizer = optim.AdamW(
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay
@@ -262,7 +315,11 @@ def main():
 
     non_blocking = args.pin_memory and args.device.startswith("cuda")
     for epoch in range(args.num_epochs):
-        warmup_mse = 0.1 if epoch < args.warmup_epochs else 0.0
+        warmup_mse = (
+            0.1
+            if model.distribution is not None and epoch < args.warmup_epochs
+            else 0.0
+        )
         train_loss = train_epoch(
             model,
             train_loader,
@@ -309,7 +366,7 @@ def main():
     with open(os.path.join(args.save_dir, "args.json"), "w") as f:
         json.dump(vars(args), f, indent=2)
     with open(os.path.join(args.save_dir, "compilation.json"), "w") as f:
-        json.dump(compilation.as_dict(), f, indent=2)
+        json.dump(compilation, f, indent=2)
     with open(os.path.join(args.save_dir, "history.json"), "w") as f:
         json.dump(history, f, indent=2)
     with open(os.path.join(args.save_dir, "test_metrics.json"), "w") as f:
