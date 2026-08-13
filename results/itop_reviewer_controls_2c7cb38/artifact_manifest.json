@@ -1,5 +1,5 @@
 {
-  "audit_sha256": "c9918c0944326e723ad9c0dd55bb94c770d4cb69898242fb6e1244a09b3cfd0a",
+  "audit_sha256": "5b1a801f91679c85c6f1118b7f7cd9c8ce83f89e0be82b772e974767c08b8686",
   "code_commit": "2c7cb380340096242ecff242090ec9a009f700cf",
   "large_artifacts": {
     "seed_42/fixed_coordinate_diagonal_student_t/best_model.pt": "acd21147e632e39672b899a5c9567c7e42bfd0345f29baf4de9937967e582a66",
