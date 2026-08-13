@@ -296,10 +296,10 @@ def main():
     else:
         logger.info(
             "Compiled covariance: mode=%s, parameters=%d, canonical_depth=%d, active_depth=%d",
-            compilation["covariance_mode"],
-            compilation["covariance_parameter_count"],
-            compilation["canonical_plan"]["depth"],
-            compilation["active_plan"]["depth"],
+            compilation["family"]["kind"],
+            compilation["family"]["parameter_count"],
+            compilation["representation_reachability"]["canonical"]["depth"],
+            compilation["representation_reachability"]["active"]["depth"],
         )
 
     optimizer = optim.AdamW(
