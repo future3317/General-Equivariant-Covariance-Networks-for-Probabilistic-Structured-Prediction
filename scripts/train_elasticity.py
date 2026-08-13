@@ -12,10 +12,10 @@ import torch
 from torch import optim
 from tqdm import tqdm
 
+from data.elasticity_normalization import ElasticityTargetNormalizer
 from data.elasticity_dataset import get_elasticity_irreps_loaders
 from data.paths import dataset_dir
 from data.representation_metrics import infer_representation_block_metric
-from data.tensor_conversions import elasticity_21d_to_irreps, irreps_to_elasticity_21d
 from equivcompiler import FeatureSpec, plan_readout
 from models import EquivariantBackbone
 from representations import rank4_elasticity_irreps
@@ -46,12 +46,6 @@ def setup_logger(save_dir: str, experiment_name: str | None = None):
     logger.addHandler(file_handler)
     logger.addHandler(console_handler)
     return logger, experiment_name
-
-
-def unnormalize_21d(
-    pred_norm: torch.Tensor, mean: torch.Tensor, std: torch.Tensor
-) -> torch.Tensor:
-    return pred_norm * std.to(pred_norm.device) + mean.to(pred_norm.device)
 
 
 def train_epoch(
@@ -91,7 +85,13 @@ def train_epoch(
 
 
 @torch.inference_mode()
-def validate(model, dataloader, device, mean_21d, std_21d, non_blocking: bool = False):
+def validate(
+    model,
+    dataloader,
+    device,
+    normalizer: ElasticityTargetNormalizer,
+    non_blocking: bool = False,
+):
     model.eval()
     total_loss = 0.0
     total_abs = 0.0
@@ -108,9 +108,8 @@ def validate(model, dataloader, device, mean_21d, std_21d, non_blocking: bool = 
         total_loss += result["loss"].item() * batch_size
         num_loss_samples += batch_size
 
-        pred_21d_norm = irreps_to_elasticity_21d(result["mu"])
-        pred_21d = unnormalize_21d(pred_21d_norm, mean_21d, std_21d)
-        target_21d = unnormalize_21d(batch.y, mean_21d, std_21d)
+        pred_21d = normalizer.inverse(result["mu"])
+        target_21d = batch.y_physical_21d
 
         total_abs += torch.sum(torch.abs(pred_21d - target_21d)).item()
         num_mae_samples += batch_size * pred_21d.shape[-1]
@@ -143,6 +142,15 @@ def main():
     parser.add_argument(
         "--representation_metric", choices=("none", "block_auto"), default="none",
         help="training-set RMS metric repeated over each O(3) isotypic block",
+    )
+    parser.add_argument(
+        "--target_normalization",
+        choices=("legacy_voigt", "representation_compatible"),
+        default="legacy_voigt",
+        help=(
+            "target normalization; legacy_voigt preserves historical runs "
+            "and representation_compatible preserves the O(3) target action"
+        ),
     )
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--lr", type=float, default=5e-4)
@@ -184,6 +192,7 @@ def main():
         prefetch_factor=args.prefetch_factor,
         lmax=args.lmax,
         num_basis=args.num_basis,
+        normalization_mode=args.target_normalization,
     )
 
     # Train stats for unnormalization during validation.
@@ -191,8 +200,7 @@ def main():
         train_dataset = train_loader.dataset.dataset
     else:
         train_dataset = train_loader.dataset
-    mean_21d = torch.tensor(train_dataset.mean_21d, dtype=torch.float32)
-    std_21d = torch.tensor(train_dataset.std_21d, dtype=torch.float32)
+    normalizer = train_dataset.target_normalizer
 
     backbone = EquivariantBackbone(
         hidden_dim=args.hidden_dim,
@@ -220,9 +228,7 @@ def main():
     if args.representation_metric == "block_auto":
         # Convert normalized Cartesian targets once; the metric is inferred
         # from representation blocks and is independent of the dataset name.
-        target_irreps = elasticity_21d_to_irreps(
-            torch.as_tensor(train_dataset.target_21d_norm, dtype=torch.float32)
-        )
+        target_irreps = train_dataset.target_irreps
         metric, metric_stats = infer_representation_block_metric(
             target_irreps, rank4_elasticity_irreps()
         )
@@ -266,7 +272,7 @@ def main():
             non_blocking=non_blocking,
         )
         val_metrics = validate(
-            model, val_loader, args.device, mean_21d, std_21d, non_blocking=non_blocking
+            model, val_loader, args.device, normalizer, non_blocking=non_blocking
         )
         scheduler.step(val_metrics["loss"])
 
@@ -296,7 +302,7 @@ def main():
         )
     )
     test_metrics = validate(
-        model, test_loader, args.device, mean_21d, std_21d, non_blocking=non_blocking
+        model, test_loader, args.device, normalizer, non_blocking=non_blocking
     )
     logger.info(f"Test: loss={test_metrics['loss']:.4f}, mae={test_metrics['mae']:.4f}")
 

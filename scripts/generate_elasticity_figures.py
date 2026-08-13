@@ -19,7 +19,6 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from data.elasticity_dataset import get_elasticity_irreps_loaders
-from data.tensor_conversions import irreps_to_elasticity_21d
 from distributions import GaussianNLL
 from evaluation.calibration import calibration_error, qq_data
 from evaluation.metrics import empirical_coverage
@@ -295,10 +294,12 @@ def main():
 
     model, train_args = load_model(checkpoint_dir, args.device)
 
+    target_normalization = getattr(train_args, "target_normalization", "legacy_voigt")
     train_loader, _, test_loader = get_elasticity_irreps_loaders(
         data_dir=train_args.data_dir,
         batch_size=train_args.batch_size,
         num_workers=train_args.num_workers if hasattr(train_args, "num_workers") else 0,
+        normalization_mode=target_normalization,
     )
 
     # Obtain train stats for unnormalization.
@@ -306,8 +307,7 @@ def main():
         train_dataset = train_loader.dataset.dataset
     else:
         train_dataset = train_loader.dataset
-    mean_21d = train_dataset.mean_21d
-    std_21d = train_dataset.std_21d
+    normalizer = train_dataset.target_normalizer
 
     preds = collect_predictions(model, test_loader, args.device)
 
@@ -315,15 +315,11 @@ def main():
         history = json.load(f)
 
     # Unnormalize predictions and targets to physical 21D for parity plot.
-    mean_t = torch.tensor(mean_21d, dtype=torch.float32)
-    std_t = torch.tensor(std_21d, dtype=torch.float32)
-    pred_21d_norm = irreps_to_elasticity_21d(preds["mu_irreps"])
-    pred_21d = pred_21d_norm * std_t + mean_t
+    pred_21d = normalizer.inverse(preds["mu_irreps"])
 
-    test_21d_norm = torch.stack(
-        [test_loader.dataset[i].y for i in range(len(test_loader.dataset))]
+    test_21d = torch.stack(
+        [test_loader.dataset[i].y_physical_21d.squeeze(0) for i in range(len(test_loader.dataset))]
     )
-    test_21d = test_21d_norm * std_t + mean_t
 
     plot_training_curves(history, output_dir / "elasticity_training_curves")
     plot_parity(pred_21d.numpy(), test_21d.numpy(), output_dir / "elasticity_parity")

@@ -130,16 +130,9 @@ def plot_training_curves(history: list[dict], save_path: Path) -> None:
             color=COLORS["dark_gray"],
         )
     else:
-        ax_mae.text(
-            0.02,
-            0.97,
-            "single recorded run",
-            transform=ax_mae.transAxes,
-            ha="left",
-            va="top",
-            fontsize=7,
-            color=COLORS["dark_gray"],
-        )
+        # A single-stage history needs no stage annotation.  Avoid embedding
+        # run-management labels in the publication figure.
+        pass
 
     for ax in (ax_loss, ax_mae, ax_log):
         ax.tick_params(labelsize=8)
@@ -182,8 +175,8 @@ def plot_parity(pred_km: np.ndarray, target_km: np.ndarray, save_path: Path) -> 
             [lo, hi],
             [lo, hi],
             "--",
-            color=COLORS["champagne_gold"],
-            linewidth=1.25,
+            color=COLORS["gray"],
+            linewidth=0.9,
             label="Identity" if i == 0 else None,
         )
         residual = pred_km[:, i] - target_km[:, i]
@@ -354,15 +347,15 @@ def plot_uncertainty_alignment(
     y = np.arange(6)
     coverage_axis.axvline(
         0.5,
-        color=COLORS["midnight_blue"],
+        color=COLORS["gray"],
         linestyle=":",
-        linewidth=1.1,
+        linewidth=0.9,
     )
     coverage_axis.axvline(
         0.9,
-        color=COLORS["champagne_gold"],
+        color=COLORS["gray"],
         linestyle=":",
-        linewidth=1.1,
+        linewidth=0.9,
     )
     coverage_axis.scatter(
         marginal_coverage["coverage_50"],
@@ -397,7 +390,6 @@ def plot_uncertainty_alignment(
         bbox_to_anchor=(0.58, 0.18),
         ncol=2,
     )
-    coverage_axis.grid(axis="x", alpha=0.25)
     coverage_axis.tick_params(axis="y", length=0)
     for ax in (*heat_axes, coverage_axis):
         ax.tick_params(labelsize=7)
@@ -463,8 +455,8 @@ def plot_calibration(
         levels,
         levels,
         "--",
-        color=COLORS["champagne_gold"],
-        linewidth=1.2,
+        color=COLORS["gray"],
+        linewidth=0.9,
         label="Perfect calibration",
     )
     ax_cov.fill_between(
@@ -515,8 +507,8 @@ def plot_calibration(
         [min_val, max_val],
         [min_val, max_val],
         "--",
-        color=COLORS["champagne_gold"],
-        linewidth=1.2,
+        color=COLORS["gray"],
+        linewidth=0.9,
         label="Reference",
     )
     qq_label = (r"Theoretical $\chi^2$ quantile" if distribution == "gaussian"
@@ -646,9 +638,9 @@ def plot_spectral_diagnostics(
         upper_condition = np.exp(condition_log_bound)
         ax_condition.axvline(
             upper_condition,
-            color=COLORS["champagne_gold"],
+            color=COLORS["gray"],
             linestyle="--",
-            linewidth=1.2,
+            linewidth=0.9,
             label=rf"Certified bound $e^{{{condition_log_bound:g}}}={upper_condition:.1f}$",
         )
     ax_condition.set_xscale("log")

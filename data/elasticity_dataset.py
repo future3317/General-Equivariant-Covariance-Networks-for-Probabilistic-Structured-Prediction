@@ -13,8 +13,8 @@ from torch.utils.data import Dataset
 from atom_features import create_composite_atom_features
 from compatibility.e3nn import o3, soft_one_hot_linspace
 from compatibility.torch_geometric import Data, PyGDataLoader
+from data.elasticity_normalization import ElasticityTargetNormalizer
 from data.paths import dataset_dir
-from data.tensor_conversions import elasticity_21d_to_irreps
 
 # 21D vector indices as upper-triangular positions in a 6x6 Voigt matrix.
 _ELASTICITY_21_INDICES = [
@@ -53,8 +53,11 @@ def _matrix6x6_to_21d(C_6x6: np.ndarray) -> np.ndarray:
 class ElasticityIrrepsDataset(Dataset):
     """Elasticity dataset with targets converted to e3nn irreps.
 
-    The 21D elasticity vector is normalized using training-set statistics,
-    then converted to the irrep basis of the rank-4 elasticity tensor.
+    ``legacy_voigt`` reproduces the historical component-wise Voigt path.  It
+    is a numerical-reproducibility mode and does not, in general, preserve the
+    rank-4 representation action after normalization.
+    ``representation_compatible`` converts first, centers only invariant
+    ``0e`` channels, and scales each isotypic block with one scalar.
 
     Args:
         data_path: Path to the pickle file containing structures and C_voigt.
@@ -71,14 +74,16 @@ class ElasticityIrrepsDataset(Dataset):
         split: str,
         max_radius: float = 5.0,
         num_neighbors: int = 20,
-        train_stats: tuple[np.ndarray, np.ndarray] | None = None,
+        train_stats: tuple[np.ndarray, np.ndarray] | dict | ElasticityTargetNormalizer | None = None,
         lmax: int | None = None,
         num_basis: int = 8,
+        normalization_mode: str = "legacy_voigt",
     ):
         self.max_radius = max_radius
         self.num_neighbors = num_neighbors
         self.lmax = lmax
         self.num_basis = num_basis
+        self.normalization_mode = normalization_mode
         self._edge_sh_dim = (
             o3.Irreps.spherical_harmonics(lmax).dim if lmax is not None else None
         )
@@ -99,13 +104,28 @@ class ElasticityIrrepsDataset(Dataset):
         if train_stats is None:
             if split != "train":
                 raise ValueError("train_stats must be provided for val/test")
-            self.mean_21d = self.elasticity_21d.mean(axis=0)
-            self.std_21d = self.elasticity_21d.std(axis=0) + 1e-8
+            self.target_normalizer = ElasticityTargetNormalizer.fit(
+                self.elasticity_21d, normalization_mode
+            )
         else:
-            self.mean_21d, self.std_21d = train_stats
+            self.target_normalizer = (
+                train_stats
+                if isinstance(train_stats, ElasticityTargetNormalizer)
+                else ElasticityTargetNormalizer.from_stats(train_stats)
+            )
 
-        # Precompute normalized 21D targets.
-        self.target_21d_norm = (self.elasticity_21d - self.mean_21d) / self.std_21d
+        self.normalization_stats = self.target_normalizer.stats.as_dict()
+        self.mean_21d = self.target_normalizer.mean_21d
+        self.std_21d = self.target_normalizer.std_21d
+        self.target_irreps = self.target_normalizer.transform(
+            torch.as_tensor(self.elasticity_21d, dtype=torch.float32)
+        )
+        # Kept for legacy callers; new training consumes target_irreps directly.
+        self.target_21d_norm = (
+            (self.elasticity_21d - self.mean_21d) / self.std_21d
+            if normalization_mode == "legacy_voigt"
+            else self.elasticity_21d.copy()
+        )
 
         print(f"[ElasticityIrrepsDataset] {split}: {len(self)} samples")
 
@@ -125,7 +145,8 @@ class ElasticityIrrepsDataset(Dataset):
         )
 
         target_21d = torch.tensor(self.target_21d_norm[idx], dtype=torch.float32)
-        target_irreps = elasticity_21d_to_irreps(target_21d.unsqueeze(0))
+        target_irreps = self.target_irreps[idx].unsqueeze(0)
+        target_physical_21d = torch.tensor(self.elasticity_21d[idx], dtype=torch.float32)
 
         data = self._build_graph(structure, atom_features)
         if (
@@ -137,6 +158,7 @@ class ElasticityIrrepsDataset(Dataset):
         data.y = target_21d.unsqueeze(0)
         data.y_irreps = target_irreps
         data.y_km = target_21d.unsqueeze(0)
+        data.y_physical_21d = target_physical_21d.unsqueeze(0)
         return data
 
     def _build_graph(self, structure, atom_features):
@@ -195,6 +217,7 @@ def get_elasticity_irreps_loaders(
     prefetch_factor: int | None = None,
     lmax: int | None = None,
     num_basis: int = 8,
+    normalization_mode: str = "legacy_voigt",
 ):
     """Create PyG data loaders for irrep-space elasticity targets."""
     data_dir = dataset_dir(data_dir, "mp_elastic")
@@ -203,9 +226,14 @@ def get_elasticity_irreps_loaders(
     test_path = data_dir / "test.pkl"
 
     train_dataset = ElasticityIrrepsDataset(
-        train_path, "train", max_radius=max_radius, lmax=lmax, num_basis=num_basis
+        train_path,
+        "train",
+        max_radius=max_radius,
+        lmax=lmax,
+        num_basis=num_basis,
+        normalization_mode=normalization_mode,
     )
-    train_stats = (train_dataset.mean_21d, train_dataset.std_21d)
+    train_stats = train_dataset.target_normalizer
 
     val_dataset = ElasticityIrrepsDataset(
         val_path,
@@ -214,6 +242,7 @@ def get_elasticity_irreps_loaders(
         train_stats=train_stats,
         lmax=lmax,
         num_basis=num_basis,
+        normalization_mode=normalization_mode,
     )
     test_dataset = ElasticityIrrepsDataset(
         test_path,
@@ -222,6 +251,7 @@ def get_elasticity_irreps_loaders(
         train_stats=train_stats,
         lmax=lmax,
         num_basis=num_basis,
+        normalization_mode=normalization_mode,
     )
 
     if eval_subset is not None:

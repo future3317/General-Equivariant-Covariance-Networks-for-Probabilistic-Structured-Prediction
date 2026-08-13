@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from plotting import (
     COLORS,
+    DENSITY_CMAP,
     PALETTE,
     cm2inch,
     label_panels,
@@ -58,7 +59,7 @@ def plot_cross_family_recovery(input_path: Path, output_path: Path) -> None:
     upper = float(means.max()) * 1.08
     image = axis.imshow(
         means,
-        cmap="magma",
+        cmap=DENSITY_CMAP,
         norm=LogNorm(vmin=lower, vmax=upper),
         aspect="equal",
     )
@@ -69,6 +70,20 @@ def plot_cross_family_recovery(input_path: Path, output_path: Path) -> None:
     axis.set_ylabel("Teacher family")
     axis.set_title("Family match controls scatter recovery", loc="left", fontweight="bold")
     axis.grid(False)
+    # Matched teacher/learner families are the scientific control.  The
+    # outline makes that conclusion readable in grayscale as well as color.
+    for index in range(len(families)):
+        axis.add_patch(
+            plt.Rectangle(
+                (index - 0.5, index - 0.5),
+                1,
+                1,
+                fill=False,
+                edgecolor=COLORS["red_strong"],
+                linewidth=1.2,
+                zorder=4,
+            )
+        )
     for row_index in range(len(families)):
         for column_index in range(len(families)):
             value = means[row_index, column_index]
@@ -157,7 +172,7 @@ def main() -> None:
     fig.suptitle(
         "Controlled covariance recovery: 128 contexts, 32 repeats, 3 seeds, Student-$t$ $\\nu=5$",
         y=1.02,
-        fontsize=11,
+        fontsize=9,
     )
     fig.tight_layout(rect=(0.06, 0.06, 1, 0.96))
     save_figure(fig, args.output)

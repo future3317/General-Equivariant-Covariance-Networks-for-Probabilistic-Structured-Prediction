@@ -66,7 +66,6 @@ def main() -> None:
         ax.set_xticks(x, labels, rotation=25, ha="right")
         ax.set_ylabel(ylabel, fontsize=8, labelpad=2)
         ax.set_title(subtitle, loc="left", fontsize=8)
-        ax.grid(axis="y")
         ax.tick_params(axis="both", labelsize=7.5)
         if key == "coverage90":
             ax.axhline(0.90, color=COLORS["dark_gray"], linestyle="--", linewidth=1.0)

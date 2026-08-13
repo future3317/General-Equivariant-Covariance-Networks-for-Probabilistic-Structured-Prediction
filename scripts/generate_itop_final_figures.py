@@ -40,7 +40,7 @@ METHOD_COLORS = {
     "frozen_independent_student_t": COLORS["gray"],
     "frozen_low_rank_student_t": COLORS["teal"],
     "frozen_graph_gaussian": COLORS["gray"],
-    "frozen_graph_student_t": COLORS["blue_main"],
+    "frozen_graph_student_t": COLORS["green_3"],
 }
 
 ACTIVE_COORDS = {
@@ -609,7 +609,7 @@ def plot_overview(
         loc="upper left",
         fontsize=6.5,
         title_fontsize=6.5,
-        frameon=True,
+        frameon=False,
         handletextpad=0.4,
         borderpad=0.4,
     )
@@ -635,7 +635,7 @@ def plot_overview(
         loc="lower right",
         fontsize=6.2,
         title_fontsize=6.2,
-        frameon=True,
+        frameon=False,
         handletextpad=0.4,
         borderpad=0.4,
     )
