@@ -40,6 +40,11 @@ pc_autoencoder-master/
 *.log
 *.out
 
+# Curated README figures are source documentation, not experiment output.
+!docs/assets/
+!docs/assets/readme/
+!docs/assets/readme/*.png
+
 .claude/
 audit_results/
 elasticity_rebuttal_results/

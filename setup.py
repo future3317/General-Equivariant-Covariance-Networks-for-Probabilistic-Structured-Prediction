@@ -3,7 +3,8 @@ from setuptools import find_packages, setup
 setup(
     name="equivcompiler",
     version="0.2.0",
-    description="Representation-compiled equivariant probabilistic structured prediction",
+    description="Typed compilation of equivariant structured-output predictors with explicit SPD covariance and predictive-law contracts",
+    license="Apache-2.0",
     packages=find_packages(exclude=["tests", "tests.*"]),
     python_requires=">=3.10",
     install_requires=[
