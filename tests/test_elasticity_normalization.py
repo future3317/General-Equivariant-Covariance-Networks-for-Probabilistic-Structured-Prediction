@@ -1,13 +1,13 @@
+from argparse import Namespace
+
 import numpy as np
 import pytest
 import torch
-from argparse import Namespace
 
 from compatibility.e3nn import o3
 from data.elasticity_normalization import ElasticityTargetNormalizer
 from representations import rank4_elasticity_irreps
-from scripts.train_elasticity import _configure_arm
-from scripts.train_elasticity import train_epoch
+from scripts.train_elasticity import _configure_arm, train_epoch
 
 
 def _normalizer() -> ElasticityTargetNormalizer:

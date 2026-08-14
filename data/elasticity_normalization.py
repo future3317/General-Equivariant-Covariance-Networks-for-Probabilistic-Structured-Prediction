@@ -79,7 +79,7 @@ class ElasticityTargetNormalizer:
         mode: str = "legacy_voigt",
         *,
         eps: float = 1e-8,
-    ) -> "ElasticityTargetNormalizer":
+    ) -> ElasticityTargetNormalizer:
         values = np.asarray(elasticity_21d, dtype=np.float64)
         if values.ndim != 2 or values.shape[1] != 21:
             raise ValueError("elasticity_21d must have shape (N, 21)")
@@ -116,7 +116,7 @@ class ElasticityTargetNormalizer:
     @classmethod
     def from_stats(
         cls, stats: tuple[np.ndarray, np.ndarray] | dict | ElasticityNormalizationStats
-    ) -> "ElasticityTargetNormalizer":
+    ) -> ElasticityTargetNormalizer:
         if isinstance(stats, tuple):
             stats = ElasticityNormalizationStats(
                 mode="legacy_voigt", mean_21d=np.asarray(stats[0]), std_21d=np.asarray(stats[1])

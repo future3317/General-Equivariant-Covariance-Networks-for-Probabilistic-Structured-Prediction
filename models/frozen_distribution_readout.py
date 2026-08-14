@@ -9,7 +9,7 @@ import torch
 import torch.nn.functional as F
 
 from compatibility.e3nn import o3
-from distributions import GaussianNLL, FiniteMixtureStudentTNLL, StudentTNLL
+from distributions import FiniteMixtureStudentTNLL, GaussianNLL, StudentTNLL
 from evaluation.ensemble import finite_mixture_nll
 from spd_maps.base import SPDMap
 

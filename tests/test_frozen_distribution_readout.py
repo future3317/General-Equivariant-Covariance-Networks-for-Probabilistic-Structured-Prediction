@@ -3,6 +3,7 @@ import torch
 
 from compatibility.e3nn import o3
 from distributions import GaussianNLL, StudentTNLL
+from equivcompiler import CenteredSpectralWindowCovariance, FeatureSpec, plan_readout
 from models.frozen_distribution_readout import (
     FrozenConditionalStudentT,
     FrozenMeanScatterElliptical,
@@ -10,7 +11,6 @@ from models.frozen_distribution_readout import (
     FrozenSymmetricStudentTMixture,
     FrozenUncertaintyBranchConditionalStudentT,
 )
-from equivcompiler import CenteredSpectralWindowCovariance, FeatureSpec, plan_readout
 from spd_maps import IsotropicMap, MatrixExponentialMap
 
 

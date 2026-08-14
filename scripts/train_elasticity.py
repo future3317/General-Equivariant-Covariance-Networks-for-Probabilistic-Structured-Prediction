@@ -16,8 +16,8 @@ import torch
 from torch import optim
 from tqdm import tqdm
 
-from data.elasticity_normalization import ElasticityTargetNormalizer
 from data.elasticity_dataset import get_elasticity_irreps_loaders
+from data.elasticity_normalization import ElasticityTargetNormalizer
 from data.paths import dataset_dir
 from data.representation_metrics import infer_representation_block_metric
 from equivcompiler import FeatureSpec, plan_readout

@@ -16,6 +16,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -28,7 +29,6 @@ from scipy import stats
 #       If a panel says "native run" and you write a drawing function, you broke the contract.
 
 # Academic Figure Skill Typography Baseline -- COPY VERBATIM, place at TOP of script
-import matplotlib as mpl
 mpl.rcParams.update({
     "font.family": "sans-serif",
     "font.sans-serif": ["Arial", "Helvetica", "Liberation Sans"],

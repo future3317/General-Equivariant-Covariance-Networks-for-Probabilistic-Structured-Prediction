@@ -27,6 +27,7 @@ from data.itop_dataset import (
 from data.itop_features import get_itop_feature_loaders
 from data.paths import dataset_dir
 from data.representation_metrics import infer_representation_block_metric
+from distributions import StudentTNLL
 from equivcompiler import (
     FeatureSpec,
     FullCovariance,
@@ -47,7 +48,6 @@ from evaluation import (
     risk_coverage_auc,
     visible_occluded_mpjpe,
 )
-from distributions import StudentTNLL
 from models import (
     ControlledMeanOperatorHead,
     DeterministicHead,
