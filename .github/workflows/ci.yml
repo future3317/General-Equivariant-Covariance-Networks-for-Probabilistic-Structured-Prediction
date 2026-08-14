@@ -32,4 +32,6 @@ jobs:
         run: python -m ruff check .
 
       - name: Test with warnings as errors
-        run: python -m pytest tests -q -W error
+        # matplotlib currently emits this dependency warning during import;
+        # keep all other warnings strict without making the CPU gate version-sensitive.
+        run: python -m pytest tests -q -W error -W default::pyparsing.warnings.PyparsingDeprecationWarning
