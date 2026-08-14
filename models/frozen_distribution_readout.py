@@ -9,7 +9,7 @@ import torch
 import torch.nn.functional as F
 
 from compatibility.e3nn import o3
-from distributions import FiniteMixtureStudentTNLL, StudentTNLL
+from distributions import GaussianNLL, FiniteMixtureStudentTNLL, StudentTNLL
 from evaluation.ensemble import finite_mixture_nll
 from spd_maps.base import SPDMap
 
@@ -517,8 +517,8 @@ class FrozenMultimodalStudentTMixture(_FrozenStudentTMixtureBase):
             "moment_matching": False,
         }
 
-class FrozenMeanScatterStudentT(torch.nn.Module):
-    """Retrain one typed operator projection while H and mu stay frozen."""
+class FrozenMeanScatterElliptical(torch.nn.Module):
+    """Fit a typed scatter projection with a selected proper elliptical law."""
 
     def __init__(
         self,
@@ -526,6 +526,7 @@ class FrozenMeanScatterStudentT(torch.nn.Module):
         parameter_irreps,
         spd_map: SPDMap,
         *,
+        distribution: str,
         student_t_dof: float = 5.0,
     ) -> None:
         super().__init__()
@@ -535,7 +536,15 @@ class FrozenMeanScatterStudentT(torch.nn.Module):
             self.feature_irreps, self.parameter_irreps
         )
         self.spd_map = spd_map
-        self.objective = StudentTNLL(nu=student_t_dof)
+        self.distribution = distribution
+        if distribution == "gaussian":
+            self.objective = GaussianNLL()
+        elif distribution == "student_t":
+            if student_t_dof <= 2.0:
+                raise ValueError("factorial Student-t requires nu > 2")
+            self.objective = StudentTNLL(nu=student_t_dof)
+        else:
+            raise ValueError(f"unsupported elliptical distribution: {distribution}")
 
     def forward(
         self,
@@ -548,17 +557,47 @@ class FrozenMeanScatterStudentT(torch.nn.Module):
         return {"loss": loss, "params": params, **components}
 
     def schema(self) -> dict[str, Any]:
-        return {
-            "kind": "single_elliptical_fixed_nu_student_t",
+        schema: dict[str, Any] = {
+            "kind": (
+                "single_elliptical_fixed_nu_student_t"
+                if self.distribution == "student_t"
+                else "single_elliptical_gaussian"
+            ),
             "mean": "frozen_artifact",
             "scatter": {
                 "kind": "trainable_typed_operator_projection",
                 "input": str(self.feature_irreps),
                 "output": str(self.parameter_irreps),
             },
-            "degrees_of_freedom": {
+            "objective": (
+                "exact_student_t_log_likelihood"
+                if self.distribution == "student_t"
+                else "exact_gaussian_log_likelihood"
+            ),
+        }
+        if self.distribution == "student_t":
+            schema["degrees_of_freedom"] = {
                 "kind": "fixed",
                 "value": float(self.objective.nu),
-            },
-            "objective": "exact_student_t_log_likelihood",
-        }
+            }
+        return schema
+
+
+class FrozenMeanScatterStudentT(FrozenMeanScatterElliptical):
+    """Compatibility wrapper for the fixed-``nu`` Student-t readout."""
+
+    def __init__(
+        self,
+        feature_irreps,
+        parameter_irreps,
+        spd_map: SPDMap,
+        *,
+        student_t_dof: float = 5.0,
+    ) -> None:
+        super().__init__(
+            feature_irreps,
+            parameter_irreps,
+            spd_map,
+            distribution="student_t",
+            student_t_dof=student_t_dof,
+        )
