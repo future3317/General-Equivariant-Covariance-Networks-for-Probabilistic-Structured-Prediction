@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="./LICENSE"><img alt="License 许可证" src="https://img.shields.io/badge/License%20%2F%20许可证-Apache--2.0-blue.svg"></a>
-  <a href=".github/workflows/ci.yml"><img alt="Checks 检查" src="https://img.shields.io/github/actions/workflow/status/future3317/General-Equivariant-Covariance-Networks-for-Probabilistic-Structured-Prediction/ci.yml?branch=main&label=Checks%20%2F%20检查"></a>
+  <a href="https://github.com/future3317/General-Equivariant-Covariance-Networks-for-Probabilistic-Structured-Prediction/actions/workflows/ci.yml"><img alt="Checks / 检查" src="https://img.shields.io/github/actions/workflow/status/future3317/General-Equivariant-Covariance-Networks-for-Probabilistic-Structured-Prediction/ci.yml?branch=main&amp;label=Checks%20%2F%20%E6%A3%80%E6%9F%A5"></a>
   <a href="#benchmark-contract"><img alt="Benchmark Contract 基准协议" src="https://img.shields.io/badge/Benchmark%20Contract-Validation%20only%20selection%20%2F%20仅验证集选择-2f6f9f.svg"></a>
   <a href="#scope-and-status"><img alt="Backend Scope 后端范围" src="https://img.shields.io/badge/Backend%20Scope-O(3)%20validated%20%2F%20O(3)%E5%B7%B2%E9%AA%8C%E8%AF%81-6f42c1.svg"></a>
 </p>
