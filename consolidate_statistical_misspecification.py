@@ -16,7 +16,6 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -29,6 +28,7 @@ from scipy import stats
 #       If a panel says "native run" and you write a drawing function, you broke the contract.
 
 # Academic Figure Skill Typography Baseline -- COPY VERBATIM, place at TOP of script
+import matplotlib as mpl
 mpl.rcParams.update({
     "font.family": "sans-serif",
     "font.sans-serif": ["Arial", "Helvetica", "Liberation Sans"],
@@ -281,8 +281,6 @@ def make_figure(rows: list[dict], output: Path):
                 va="bottom",
                 fontsize=6,
             )
-        if key == "radius_direction_max_abs_spearman":
-            axis.text(0.03, 0.95, r"$p_{perm}=0.005$ for all", transform=axis.transAxes, va="top", fontsize=6, color=ACCENT_RED)
         if key == "radial_pit_ks":
             axis.text(0.03, 0.95, "lower is closer to radial reference", transform=axis.transAxes, va="top", fontsize=6, color=BLACK)
     fig.suptitle(
@@ -298,6 +296,66 @@ def make_figure(rows: list[dict], output: Path):
         fontsize=6,
     )
     save_cns_figure(fig, output / "dielectric_misspecification_consolidation")
+    plt.close(fig)
+
+
+def make_main_figure(rows: list[dict], output: Path):
+    """Export the two-arm main-text view; the three-arm audit stays supplementary."""
+    methods = ["fixed_nu", "conditional_nu"]
+    display = {
+        "fixed_nu": r"Fixed $\nu=5$",
+        "conditional_nu": r"Conditional $\nu(x)$",
+    }
+    specifications = [
+        ("nll", "Normalized NLL", False),
+        ("energy", "Energy score", False),
+        ("mace", "MACE", False),
+        ("whitened_second_moment_defect", "Whitened defect", True),
+        ("radial_pit_ks", "Radial PIT KS", False),
+        ("radius_direction_max_abs_spearman", r"Max $|\rho_S|$", False),
+    ]
+    row_map = {row["method"]: row for row in rows}
+    x = np.arange(len(methods))
+    fig, axes = plt.subplots(
+        2, 3, figsize=(183 / 25.4, 78 / 25.4), constrained_layout=True
+    )
+    for axis, (key, title, log_y) in zip(axes.flat, specifications):
+        values = [row_map[method][key] for method in methods]
+        bars = axis.bar(
+            x,
+            values,
+            color=[METHOD_COLORS[method] for method in methods],
+            width=0.62,
+            edgecolor="white",
+            linewidth=0.6,
+        )
+        if log_y:
+            axis.set_yscale("log")
+        axis.set_title(title)
+        axis.set_xticks(x, [display[method] for method in methods])
+        for bar, value in zip(bars, values):
+            axis.annotate(
+                f"{value:.3g}",
+                (bar.get_x() + bar.get_width() / 2, value),
+                xytext=(0, 3),
+                textcoords="offset points",
+                ha="center",
+                va="bottom",
+                fontsize=6,
+            )
+    fig.suptitle(
+        r"Dielectric law adaptation: radial repair without directional adequacy",
+        fontsize=9,
+        y=1.02,
+    )
+    fig.text(
+        0.5,
+        -0.03,
+        r"Fixed: one frozen baseline; conditional-$\nu$: three-seed confirmation mean. Lower is better.",
+        ha="center",
+        fontsize=6,
+    )
+    save_cns_figure(fig, output / "dielectric_law_adaptation_main")
     plt.close(fig)
 
 
@@ -395,6 +453,7 @@ def main():
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
     )
     make_figure(rows, args.output)
+    make_main_figure(rows, args.output)
     qa = {
         "figure_width_mm": 183,
         "figure_export": ["PDF vector master", "PNG 300 dpi preview"],
