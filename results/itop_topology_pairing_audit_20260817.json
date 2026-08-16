@@ -1,0 +1,256 @@
+{
+  "schema_version": 1,
+  "kind": "itop_matched_topology_pairing_audit",
+  "seeds": [
+    42,
+    43,
+    44
+  ],
+  "selection": "Side validation only; Top evaluation only; no test selection",
+  "paired_frames_per_view": 4863,
+  "per_seed": [
+    {
+      "seed": 42,
+      "true_run": "results\\itop_graph_t_robustness_ec25e58\\seed_42\\frozen_graph_student_t",
+      "shuffled_run": "results\\itop_reviewer_controls_2c7cb38\\seed_42\\shuffled_graph_student_t",
+      "protocol": {
+        "protocol_fields_match": true,
+        "protocol_mismatches": {},
+        "cache_fields_match": true,
+        "cache_mismatches": {},
+        "effective_split_seed_match": true,
+        "true_effective_split_seed": 42,
+        "shuffled_effective_split_seed": 42
+      },
+      "true_metrics": {
+        "side": {
+          "nll": -55.93056957441766,
+          "energy_score": 0.7260390667544699,
+          "joint_mace": 0.128610768387141,
+          "coverage90": 0.8032764411542943,
+          "coverage95": 0.910302282541641,
+          "risk_coverage_auc_cm": 22.353878617286682,
+          "samples": 4863
+        },
+        "top": {
+          "nll": 2.481700008674926,
+          "energy_score": 2.4781609137019527,
+          "joint_mace": 0.6672347316471314,
+          "coverage90": 0.1438206868188361,
+          "coverage95": 0.20030159709370077,
+          "risk_coverage_auc_cm": 69.37681436538696,
+          "samples": 4863
+        }
+      },
+      "shuffled_metrics": {
+        "side": {
+          "nll": -35.02946448870311,
+          "energy_score": 0.7261462185362663,
+          "joint_mace": 0.13482949482486803,
+          "coverage90": 0.7982863801494277,
+          "coverage95": 0.9056549455068889,
+          "risk_coverage_auc_cm": 22.627487152249774,
+          "samples": 4863
+        },
+        "top": {
+          "nll": 31.47798585117096,
+          "energy_score": 2.5496459425336004,
+          "joint_mace": 0.7062367194461581,
+          "coverage90": 0.09912948111590923,
+          "coverage95": 0.14206594009185,
+          "risk_coverage_auc_cm": 69.98162995285652,
+          "samples": 4863
+        }
+      },
+      "paired_nll": {
+        "side": {
+          "direction": "shuffled_minus_true",
+          "mean": 20.901108709549156,
+          "bootstrap_95": [
+            20.74227748222546,
+            21.060681802667002
+          ],
+          "samples": 4863
+        },
+        "top": {
+          "direction": "shuffled_minus_true",
+          "mean": 28.996286721069453,
+          "bootstrap_95": [
+            28.88835717352277,
+            29.106575807785006
+          ],
+          "samples": 4863
+        }
+      }
+    },
+    {
+      "seed": 43,
+      "true_run": "results\\itop_graph_t_robustness_ec25e58\\seed_43\\frozen_graph_student_t",
+      "shuffled_run": "results\\itop_reviewer_controls_matched_20260816\\seed_43\\shuffled_graph_student_t",
+      "protocol": {
+        "protocol_fields_match": true,
+        "protocol_mismatches": {},
+        "cache_fields_match": true,
+        "cache_mismatches": {},
+        "effective_split_seed_match": true,
+        "true_effective_split_seed": 43,
+        "shuffled_effective_split_seed": 43
+      },
+      "true_metrics": {
+        "side": {
+          "nll": -55.92973608149929,
+          "energy_score": 0.7262314455194923,
+          "joint_mace": 0.1214762835012681,
+          "coverage90": 0.8115292343546509,
+          "coverage95": 0.9167317842209886,
+          "risk_coverage_auc_cm": 22.184500098228455,
+          "samples": 4863
+        },
+        "top": {
+          "nll": 6.166503646602705,
+          "energy_score": 2.449331975782356,
+          "joint_mace": 0.6660934608266502,
+          "coverage90": 0.14405373911851393,
+          "coverage95": 0.20309822468983485,
+          "risk_coverage_auc_cm": 69.1002905368805,
+          "samples": 4863
+        }
+      },
+      "shuffled_metrics": {
+        "side": {
+          "nll": -35.023967527985306,
+          "energy_score": 0.7261036535199471,
+          "joint_mace": 0.12992168757282882,
+          "coverage90": 0.8039207622181095,
+          "coverage95": 0.9097402152306533,
+          "risk_coverage_auc_cm": 22.614825462720738,
+          "samples": 4863
+        },
+        "top": {
+          "nll": 33.09287936339868,
+          "energy_score": 2.5163563739474286,
+          "joint_mace": 0.6793568784700803,
+          "coverage90": 0.13146891493591062,
+          "coverage95": 0.19758722325039413,
+          "risk_coverage_auc_cm": 69.78121595395446,
+          "samples": 4863
+        }
+      },
+      "paired_nll": {
+        "side": {
+          "direction": "shuffled_minus_true",
+          "mean": 21.084599268175797,
+          "bootstrap_95": [
+            20.925782794247258,
+            21.246179742754162
+          ],
+          "samples": 4863
+        },
+        "top": {
+          "direction": "shuffled_minus_true",
+          "mean": 24.204434596381972,
+          "bootstrap_95": [
+            24.056139504238484,
+            24.348337252460148
+          ],
+          "samples": 4863
+        }
+      }
+    },
+    {
+      "seed": 44,
+      "true_run": "results\\itop_graph_t_robustness_ec25e58\\seed_44\\frozen_graph_student_t",
+      "shuffled_run": "results\\itop_reviewer_controls_matched_20260816\\seed_44\\shuffled_graph_student_t",
+      "protocol": {
+        "protocol_fields_match": true,
+        "protocol_mismatches": {},
+        "cache_fields_match": true,
+        "cache_mismatches": {},
+        "effective_split_seed_match": true,
+        "true_effective_split_seed": 44,
+        "shuffled_effective_split_seed": 44
+      },
+      "true_metrics": {
+        "side": {
+          "nll": -55.94803371817738,
+          "energy_score": 0.726066287213972,
+          "joint_mace": 0.13241843169511278,
+          "coverage90": 0.7986291041195421,
+          "coverage95": 0.9063678113647268,
+          "risk_coverage_auc_cm": 22.529691457748413,
+          "samples": 4863
+        },
+        "top": {
+          "nll": 3.553931053151031,
+          "energy_score": 2.5263286391428266,
+          "joint_mace": 0.7002836040852697,
+          "coverage90": 0.10621701281787649,
+          "coverage95": 0.14425937350058263,
+          "risk_coverage_auc_cm": 69.288170337677,
+          "samples": 4863
+        }
+      },
+      "shuffled_metrics": {
+        "side": {
+          "nll": -34.92334769984564,
+          "energy_score": 0.7261331110998408,
+          "joint_mace": 0.13885307423401194,
+          "coverage90": 0.7931592295565151,
+          "coverage95": 0.9006785934608266,
+          "risk_coverage_auc_cm": 22.93771259046393,
+          "samples": 4863
+        },
+        "top": {
+          "nll": 31.749290546712967,
+          "energy_score": 2.5762254435282737,
+          "joint_mace": 0.7155176845568579,
+          "coverage90": 0.08854616491877443,
+          "coverage95": 0.1291521008979368,
+          "risk_coverage_auc_cm": 69.72806393119512,
+          "samples": 4863
+        }
+      },
+      "paired_nll": {
+        "side": {
+          "direction": "shuffled_minus_true",
+          "mean": 20.97463413283844,
+          "bootstrap_95": [
+            20.820056311951276,
+            21.139077121344105
+          ],
+          "samples": 4863
+        },
+        "top": {
+          "direction": "shuffled_minus_true",
+          "mean": 27.258882197477423,
+          "bootstrap_95": [
+            27.148131955418837,
+            27.379197936336226
+          ],
+          "samples": 4863
+        }
+      }
+    }
+  ],
+  "pooled_paired_nll": {
+    "side": {
+      "direction": "shuffled_minus_true",
+      "mean": 20.98678070352113,
+      "bootstrap_95": [
+        20.8908958620552,
+        21.0789441730149
+      ],
+      "samples": 14589
+    },
+    "top": {
+      "direction": "shuffled_minus_true",
+      "mean": 26.819867838309616,
+      "bootstrap_95": [
+        26.740523739461434,
+        26.899460200939544
+      ],
+      "samples": 14589
+    }
+  },
+  "conclusion": "true and shuffled Graph-t differ only in declared topology within each matched seed/split"
+}

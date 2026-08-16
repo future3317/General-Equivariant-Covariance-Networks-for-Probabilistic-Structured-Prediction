@@ -8,6 +8,7 @@ used only for final evaluation.
 
 - Formal control audit: `results/itop_reviewer_controls_2c7cb38/control_audit.json`.
 - Split-matched replication: `results/itop_reviewer_controls_matched_20260816/`.
+- Matched topology audit: `results/itop_topology_pairing_audit_20260817.json`.
 - Frozen backbone/cache: seed-42 deterministic checkpoint and feature cache.
 - Distribution: fixed Student-$t$, $\nu=5$.
 - Selection: Side train/validation only; Top evaluation only.
@@ -27,12 +28,15 @@ reported descriptively and are not used as sole success criteria.
 | Head | Side NLL | Top NLL | Side Energy | Top Energy | Side MACE | Top MACE |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | True Graph-$t$ | $-55.936 \pm 0.010$ | $4.067 \pm 1.895$ | $0.726 \pm 0.000$ | $2.485 \pm 0.039$ | $0.128 \pm 0.006$ | $0.678 \pm 0.019$ |
-| Shuffled Graph-$t$ | $-34.949 \pm 0.094$ | $30.887 \pm 0.557$ | $0.726 \pm 0.000$ | $2.548 \pm 0.032$ | $0.133 \pm 0.003$ | $0.702 \pm 0.018$ |
+| Shuffled Graph-$t$ | $-34.992 \pm 0.060$ | $32.107 \pm 0.865$ | $0.726 \pm 0.000$ | $2.547 \pm 0.030$ | $0.135 \pm 0.004$ | $0.700 \pm 0.019$ |
 
 The true-versus-shuffled result therefore supports a topology-specific
-likelihood effect under the audited protocol.  It does not support a claim of
-cross-view calibration: Top coverage remains strongly below nominal for both
-structured heads.
+likelihood effect under the audited protocol.  Pooled paired per-frame NLL
+differences (shuffled minus true) are $+20.987$ with 95\% bootstrap CI
+$[20.891,21.079]$ on Side and $+26.820$ with CI $[26.741,26.899]$ on Top
+(14,589 paired frames per view).  It does not support a claim of cross-view
+calibration: Top coverage remains strongly below nominal for both structured
+heads.
 
 ## Secondary one-seed controls
 
@@ -44,25 +48,20 @@ structured heads.
 The fixed-coordinate row remains a negative rotation-consistency diagnostic,
 not a competitive equivariant baseline.
 
-## Split-matched shuffled replication
+## Pairing and artifact conclusion
 
-This follow-up keeps the seed-42 frozen backbone/cache but uses split seeds 43
-and 44 together with model seeds 43 and 44.  It contains shuffled Graph-$t$
-only; no matched true-Graph rerun was launched in this batch.  Accordingly, it
-is a robustness record and must not replace the paired three-seed audit above.
-
-| Seeds | Side NLL | Top NLL | Side Energy | Top Energy | Side MACE | Top MACE |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 43, 44 mean $\pm$ s.d. | $-34.974 \pm 0.071$ | $32.421 \pm 0.950$ | $0.726 \pm 0.000$ | $2.546 \pm 0.042$ | $0.134 \pm 0.006$ | $0.697 \pm 0.026$ |
-
-The two replication artifacts are finite and strictly SPD (minimum scatter
-eigenvalues: Side $1.07\times10^{-4}$ and $1.23\times10^{-4}$; Top
-$4.22\times10^{-5}$ and $4.65\times10^{-5}$).  Their Top NLL remains poor,
-consistent with the formal negative topology-control interpretation.
+The seed-42 control and the seed-43/44 replication artifacts were audited
+together with the corresponding True Graph-$t$ runs.  For every seed, the
+protocol fields, frozen-cache fields, effective split seed, frame order, and
+targets match exactly; each view contains 4,863 paired frames.  All saved
+predictions are finite and the saved scatter materializations are strictly SPD.
+The resulting contrast changes only the declared topology within each matched
+seed/split.  Minimum-eigenvalue details remain in the raw artifacts rather than
+being used as a headline performance claim.
 
 ## Decision
 
 The formal three-seed true-versus-shuffled audit is clean and paper-relevant;
-the split-matched replication is retained as supporting robustness evidence.
-No new method, hyperparameter, or paper claim is introduced from this audit,
-and Graph-$t$ Structured diagnostics, including panel (a), remain unchanged.
+the paired contrast replaces the former split-42-only wording.  No new method,
+hyperparameter, or calibration claim is introduced from this audit, and
+Graph-$t$ Structured diagnostics, including panel (a), remain unchanged.

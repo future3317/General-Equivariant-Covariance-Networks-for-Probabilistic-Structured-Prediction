@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 
 import torch
 
@@ -84,6 +84,50 @@ class TargetTransform:
             bias=tuple(float(value) for value in vector.tolist()),
         )
 
+    @classmethod
+    def from_multiplicity_blocks(
+        cls,
+        output_irreps: o3.Irreps | str,
+        blocks: Mapping[str, torch.Tensor],
+        bias: torch.Tensor | None = None,
+        *,
+        name: str = "multiplicity_block_affine",
+    ) -> TargetTransform:
+        """Construct an admissible linear map from isotypic blocks.
+
+        A block for an irrep type acts on its multiplicity space and is
+        repeated as the identity on the irrep coordinates.  Dense affine
+        inputs remain supported through :meth:`affine`, but are checked
+        against this same commutant structure by :meth:`verify`.
+        """
+        irreps = o3.Irreps(output_irreps)
+        layout = _target_coordinate_layout(irreps)
+        multiplicities = {
+            str(irrep): max(slot for _, slot, _ in entries) + 1
+            for irrep, entries in _layout_by_irrep(layout).items()
+        }
+        normalized: dict[str, torch.Tensor] = {}
+        for irrep_name, multiplicity in multiplicities.items():
+            block = torch.as_tensor(
+                blocks.get(irrep_name, torch.eye(multiplicity, dtype=torch.float64)),
+                dtype=torch.float64,
+            )
+            if block.shape != (multiplicity, multiplicity):
+                raise ValueError(
+                    f"multiplicity block for {irrep_name} must have shape "
+                    f"({multiplicity}, {multiplicity}), got {tuple(block.shape)}"
+                )
+            normalized[irrep_name] = block
+        linear = torch.zeros(irreps.dim, irreps.dim, dtype=torch.float64)
+        slots = _layout_by_irrep(layout)
+        for irrep_name, entries in slots.items():
+            block = normalized[irrep_name]
+            for row_index, row_slot, row_component in entries:
+                for col_index, col_slot, col_component in entries:
+                    if row_component == col_component:
+                        linear[row_index, col_index] = block[row_slot, col_slot]
+        return cls.affine(irreps, linear, bias, name=name)
+
     @property
     def dimension(self) -> int:
         return self.output_irreps.dim
@@ -99,7 +143,12 @@ class TargetTransform:
         return torch.tensor(self.bias, dtype=dtype)
 
     def verify(self, output_spec, *, tolerance: float = 1e-8) -> dict[str, Any]:
-        """Numerically verify the intertwiner and invariant-bias conditions."""
+        """Verify the affine map against the exact irrep commutant structure.
+
+        The structural check is the contract verifier.  The finite set of
+        group elements is retained only as a numerical conformance audit and
+        is never used as evidence for arbitrary O(3) equivariance.
+        """
         if o3.Irreps(output_spec.irreps) != self.output_irreps:
             return {
                 "status": "rejected",
@@ -117,24 +166,40 @@ class TargetTransform:
         )
         linear = self.linear_matrix()
         bias = self.bias_vector()
-        linear_residual = 0.0
-        bias_residual = 0.0
+        projected_linear = _project_to_irrep_commutant(self.output_irreps, linear)
+        linear_residual = float((linear - projected_linear).abs().max())
+        invariant_coordinates = _invariant_coordinate_indices(self.output_irreps)
+        projected_bias = torch.zeros_like(bias)
+        if invariant_coordinates:
+            projected_bias[list(invariant_coordinates)] = bias[list(invariant_coordinates)]
+        bias_residual = float((bias - projected_bias).abs().max())
+        numerical_linear_residual = 0.0
+        numerical_bias_residual = 0.0
         for transformation in transformations:
             representation = output_spec.representation_matrix(transformation).double()
-            linear_residual = max(
-                linear_residual,
+            numerical_linear_residual = max(
+                numerical_linear_residual,
                 float((linear @ representation - representation @ linear).abs().max()),
             )
-            bias_residual = max(
-                bias_residual,
+            numerical_bias_residual = max(
+                numerical_bias_residual,
                 float((representation @ bias - bias).abs().max()),
             )
         verified = linear_residual <= tolerance and bias_residual <= tolerance
         return {
             "status": "verified" if verified else "rejected",
+            "verification_kind": "irrep_commutant_structure",
             "tolerance": tolerance,
             "max_linear_intertwiner_residual": linear_residual,
             "max_bias_invariance_residual": bias_residual,
+            "numerical_audit": {
+                "kind": "finite_group_element_conformance",
+                "elements": 3,
+                "max_linear_intertwiner_residual": numerical_linear_residual,
+                "max_bias_invariance_residual": numerical_bias_residual,
+            },
+            "admissible_form": "direct_sum(A_lambda tensor I_dim(lambda))",
+            "invariant_bias_irrep": "0e",
             "conditions": ["A rho(g) = rho(g) A", "rho(g) b = b"],
         }
 
@@ -162,6 +227,66 @@ def _components(irreps: o3.Irreps) -> tuple[dict[str, Any], ...]:
         for irrep, multiplicity in sorted(
             counts.items(), key=lambda item: (item[0].l, -item[0].p)
         )
+    )
+
+
+def _target_coordinate_layout(
+    irreps: o3.Irreps,
+) -> tuple[tuple[int, o3.Irrep, int, int], ...]:
+    """Return ``(coordinate, irrep, multiplicity_slot, component)`` entries."""
+    layout: list[tuple[int, o3.Irrep, int, int]] = []
+    cursor = 0
+    next_slot: dict[str, int] = {}
+    for multiplicity, irrep in irreps:
+        name = str(irrep)
+        first_slot = next_slot.get(name, 0)
+        for local_multiplicity in range(int(multiplicity)):
+            for component in range(irrep.dim):
+                layout.append((cursor, irrep, first_slot + local_multiplicity, component))
+                cursor += 1
+        next_slot[name] = first_slot + int(multiplicity)
+    return tuple(layout)
+
+
+def _layout_by_irrep(
+    layout: tuple[tuple[int, o3.Irrep, int, int], ...],
+) -> dict[str, tuple[tuple[int, int, int], ...]]:
+    grouped: dict[str, list[tuple[int, int, int]]] = {}
+    for coordinate, irrep, local_multiplicity, component in layout:
+        name = str(irrep)
+        grouped.setdefault(name, []).append((coordinate, local_multiplicity, component))
+    return {name: tuple(entries) for name, entries in grouped.items()}
+
+
+def _project_to_irrep_commutant(irreps: o3.Irreps, matrix: torch.Tensor) -> torch.Tensor:
+    projected = torch.zeros_like(matrix)
+    grouped = _layout_by_irrep(_target_coordinate_layout(irreps))
+    for entries in grouped.values():
+        by_slot_component: dict[tuple[int, int], list[int]] = {}
+        for coordinate, slot, component in entries:
+            by_slot_component.setdefault((slot, component), []).append(coordinate)
+        slots = sorted({slot for _, slot, _ in entries})
+        components = sorted({component for _, _, component in entries})
+        for row_slot in slots:
+            for col_slot in slots:
+                values = []
+                for component in components:
+                    rows = by_slot_component[(row_slot, component)]
+                    cols = by_slot_component[(col_slot, component)]
+                    values.append(matrix[rows[0], cols[0]])
+                value = torch.stack(values).mean()
+                for component in components:
+                    row = by_slot_component[(row_slot, component)][0]
+                    col = by_slot_component[(col_slot, component)][0]
+                    projected[row, col] = value
+    return projected
+
+
+def _invariant_coordinate_indices(irreps: o3.Irreps) -> tuple[int, ...]:
+    return tuple(
+        coordinate
+        for coordinate, irrep, _, _ in _target_coordinate_layout(irreps)
+        if irrep.l == 0 and irrep.p == 1
     )
 
 

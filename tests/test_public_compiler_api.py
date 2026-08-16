@@ -259,6 +259,48 @@ def test_target_transform_is_recorded_and_changes_compatibility_identity():
     assert transformed.report["target_transform"]["name"] == "compatible_affine"
     assert transformed.compatibility_hash != identity.compatibility_hash
     assert transformed.compilation.report()["target_transform"]["name"] == "compatible_affine"
+    assert transformed.target_transform_verification["verification_kind"] == (
+        "irrep_commutant_structure"
+    )
+    assert transformed.target_transform_verification["numerical_audit"]["elements"] == 3
+
+
+def test_target_transform_multiplicity_blocks_construct_admissible_rank2_map():
+    transform = TargetTransform.from_multiplicity_blocks(
+        "0e + 2e",
+        {"0e": torch.tensor([[2.0]]), "2e": torch.tensor([[0.5]])},
+        torch.tensor([0.25, 0.0, 0.0, 0.0, 0.0, 0.0]),
+    )
+    matrix = transform.linear_matrix()
+    assert torch.allclose(
+        matrix,
+        torch.diag(torch.tensor([2.0, 0.5, 0.5, 0.5, 0.5, 0.5], dtype=torch.float64)),
+    )
+    verification = transform.verify(describe_output("0e + 2e").output_spec)
+    assert verification["status"] == "verified"
+    assert verification["max_linear_intertwiner_residual"] == 0.0
+    assert verification["max_bias_invariance_residual"] == 0.0
+
+
+def test_target_transform_tracks_repeated_irrep_multiplicity_slots():
+    transform = TargetTransform.from_multiplicity_blocks(
+        "2x0e + 2x2e",
+        {
+            "0e": torch.tensor([[2.0, 0.3], [0.3, 0.5]]),
+            "2e": torch.tensor([[1.0, 0.2], [0.2, 0.7]]),
+        },
+    )
+    matrix = transform.linear_matrix()
+    scalar = torch.tensor([[2.0, 0.3], [0.3, 0.5]], dtype=torch.float64)
+    rank2 = torch.kron(
+        torch.tensor([[1.0, 0.2], [0.2, 0.7]], dtype=torch.float64),
+        torch.eye(5, dtype=torch.float64),
+    )
+    expected = torch.block_diag(scalar, rank2)
+    assert torch.allclose(matrix, expected)
+    assert transform.verify(describe_output("2x0e + 2x2e").output_spec)["status"] == (
+        "verified"
+    )
 
 
 def test_target_transform_rejects_non_intertwining_affine_map():
