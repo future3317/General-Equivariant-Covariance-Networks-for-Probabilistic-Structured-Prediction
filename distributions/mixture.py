@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import torch
 
-from distributions.student_t import student_t_log_prob_from_statistics
+from distributions.student_t import (
+    _quadratic_from_log_for_diagnostics,
+    student_t_log_prob_from_log_statistics,
+    student_t_log_prob_from_statistics,
+)
 from spd_maps.base import SPDMap
 
 
@@ -42,9 +46,42 @@ class FiniteMixtureStudentTNLL(torch.nn.Module):
     certified component lowerings without changing their typed semantics.
     """
 
-    def __init__(self, *, require_finite_covariance: bool = False):
+    def __init__(
+        self,
+        *,
+        require_finite_covariance: bool = False,
+        quadratic_oracle: str = "direct",
+    ):
         super().__init__()
         self.require_finite_covariance = bool(require_finite_covariance)
+        if quadratic_oracle not in {"direct", "shifted_log"}:
+            raise ValueError(
+                "quadratic_oracle must be 'direct' or 'shifted_log'"
+            )
+        self.quadratic_oracle = quadratic_oracle
+
+    def predictive_law_contract(self, *, components: int = 2) -> dict[str, object]:
+        """Declare exact mixture scoring and law-correct diagnostic semantics."""
+        if components < 2:
+            raise ValueError("a finite mixture contract requires at least two components")
+        return {
+            "kind": "finite_mixture_student_t",
+            "components": int(components),
+            "log_prob": "exact_component_logsumexp",
+            "sample": "categorical_component_student_t",
+            "moment_existence": {
+                "mean": "finite_for_component_nu>1",
+                "covariance": "finite_for_component_nu>2",
+            },
+            "scatter_to_covariance": "componentwise_nu/(nu-2) * S",
+            "marginal_quantile": "simulation_based_mixture_quantile",
+            "radial_reference": "simulation_based_mixture_reference",
+            "diagnostic_oracle": {
+                "kind": "simulation_based_mixture_oracle",
+                "moment_matched": False,
+                "radius_direction_null": "not_single_ellipse_null",
+            },
+        }
 
     def forward(
         self,
@@ -74,9 +111,19 @@ class FiniteMixtureStudentTNLL(torch.nn.Module):
         residual = target.unsqueeze(0) - component_means
         flat_params = component_params.reshape(components * observations, *component_params.shape[2:])
         flat_residual = residual.reshape(components * observations, dimension)
-        logdet, mahalanobis2 = spd_map.statistics(flat_params, flat_residual)
+        logdet = spd_map.logdet(flat_params)
+        if self.quadratic_oracle == "shifted_log":
+            log_mahalanobis2 = spd_map.log_precision_action(
+                flat_params, flat_residual
+            )
+            mahalanobis2 = _quadratic_from_log_for_diagnostics(log_mahalanobis2)
+        else:
+            mahalanobis2 = spd_map.precision_action(flat_params, flat_residual)
+            log_mahalanobis2 = None
         logdet = logdet.reshape(components, observations)
         mahalanobis2 = mahalanobis2.reshape(components, observations)
+        if log_mahalanobis2 is not None:
+            log_mahalanobis2 = log_mahalanobis2.reshape(components, observations)
 
         nu_tensor = _component_parameter(
             nu,
@@ -112,12 +159,14 @@ class FiniteMixtureStudentTNLL(torch.nn.Module):
                 dim=0, keepdim=True
             )
 
-        component_log_prob = student_t_log_prob_from_statistics(
-            logdet,
-            mahalanobis2,
-            dimension,
-            nu_tensor,
-        )
+        if log_mahalanobis2 is None:
+            component_log_prob = student_t_log_prob_from_statistics(
+                logdet, mahalanobis2, dimension, nu_tensor
+            )
+        else:
+            component_log_prob = student_t_log_prob_from_log_statistics(
+                logdet, log_mahalanobis2, dimension, nu_tensor
+            )
         log_weights = normalized_weights.log()
         log_prob = torch.logsumexp(log_weights + component_log_prob, dim=0)
         loss = -log_prob.mean()

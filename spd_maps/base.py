@@ -48,6 +48,17 @@ class SPDMap(torch.nn.Module, abc.ABC):
         """
         ...
 
+    def log_precision_action(
+        self, A: torch.Tensor, residual: torch.Tensor
+    ) -> torch.Tensor:
+        """Return ``log(r^T S(A)^-1 r)`` without changing map semantics.
+
+        Maps with a numerically stable log-domain oracle may override this
+        method.  The default keeps the existing public behavior for maps
+        whose quadratic form is already finite in the active dtype.
+        """
+        return torch.log(self.precision_action(A, residual))
+
     def precision(self, A: torch.Tensor) -> torch.Tensor:
         """Return the precision matrix, computed lazily by default."""
         return torch.linalg.inv(self.forward(A))

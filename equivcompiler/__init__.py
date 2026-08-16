@@ -64,6 +64,7 @@ __all__ = [
     "ConditionalStudentTRadial",
     "DeviceAutotuner",
     "DistributionSpec",
+    "ConditionalStudentTRadial",
     "EllipticalDistribution",
     "ExactExecutorCandidates",
     "ExactLoweringRegistry",

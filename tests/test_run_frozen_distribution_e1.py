@@ -7,7 +7,12 @@ from compatibility.e3nn import o3
 from equivcompiler import FullCovariance
 from representations import O3IrrepsSpec
 from scripts.itop_reproducibility import sha256_file
-from scripts.run_frozen_distribution_e1 import main
+from scripts.run_frozen_distribution_e1 import _parse_diagnostic_splits, main
+
+
+def test_diagnostic_split_selector_defaults_to_all_and_accepts_subset():
+    assert _parse_diagnostic_splits(None) == ("train", "val", "test")
+    assert _parse_diagnostic_splits(("val", "test")) == ("val", "test")
 
 
 def test_fixed_e1_runner_publishes_complete_artifacts(tmp_path, monkeypatch):

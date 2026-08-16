@@ -64,16 +64,19 @@ def _shape_covariance_voigt(points: np.ndarray) -> np.ndarray:
     S = (1/N) sum_k (p_k - mu) (p_k - mu)^T.
     """
     centered = points - points.mean(axis=0)
-    S = (centered.T @ centered) / len(points)
-    S = 0.5 * (S + S.T)
+    # The covariance is only 3x3, so forming it from scalar products is both
+    # cheaper than dispatching a BLAS GEMM and avoids loading another OpenMP
+    # runtime on Windows when this adapter is used with the egnn environment.
+    xx, yy, zz = centered.T
+    inv_n = 1.0 / len(points)
     return np.array(
         [
-            S[0, 0],
-            S[1, 1],
-            S[2, 2],
-            S[1, 2],
-            S[0, 2],
-            S[0, 1],
+            np.sum(xx * xx) * inv_n,
+            np.sum(yy * yy) * inv_n,
+            np.sum(zz * zz) * inv_n,
+            np.sum(yy * zz) * inv_n,
+            np.sum(xx * zz) * inv_n,
+            np.sum(xx * yy) * inv_n,
         ],
         dtype=np.float32,
     )

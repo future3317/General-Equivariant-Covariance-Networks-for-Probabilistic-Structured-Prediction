@@ -67,6 +67,8 @@ class ElasticityIrrepsDataset(Dataset):
     rank-4 representation action after normalization.
     ``representation_compatible`` converts first, centers only invariant
     ``0e`` channels, and scales each isotypic block with one scalar.
+    ``representation_compatible_multiplicity`` additionally whitens repeated
+    copies within each isotypic block using a commutant metric.
 
     Args:
         data_path: Path to the pickle file containing structures and C_voigt.

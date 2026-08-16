@@ -7,6 +7,72 @@ import torch
 from compatibility.e3nn import o3
 
 
+def fit_multiplicity_whitening(
+    values: torch.Tensor,
+    output_irreps: o3.Irreps,
+    *,
+    eps: float = 1e-6,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Fit the maximal positive whitening metric in the representation commutant.
+
+    For each repeated ``(l, parity)`` type, the returned block is the
+    Kronecker product ``B_l`` with the irrep identity, where
+    ``B_l=(C_l+eps I)^(-1/2)``.  It therefore
+    mixes multiplicity copies but never mixes irrep coordinates, preserving
+    the orthogonal representation action.
+    """
+    values = torch.as_tensor(values, dtype=torch.float64).detach()
+    irreps = o3.Irreps(output_irreps)
+    if values.ndim != 2 or values.shape[-1] != irreps.dim:
+        raise ValueError(f"values must have shape (N, {irreps.dim})")
+    if values.shape[0] == 0:
+        raise ValueError("cannot fit a metric from an empty sample set")
+    if eps <= 0.0:
+        raise ValueError("eps must be positive")
+
+    groups: dict[tuple[int, int], list[int]] = {}
+    offset = 0
+    for multiplicity, irrep in irreps:
+        indices = list(range(offset, offset + int(multiplicity * irrep.dim)))
+        groups.setdefault((irrep.l, irrep.p), []).extend(indices)
+        offset += int(multiplicity * irrep.dim)
+
+    whitening = values.new_zeros((irreps.dim, irreps.dim))
+    stats: dict[str, float] = {}
+    for (angular_momentum, parity), indices in groups.items():
+        dimension = 2 * angular_momentum + 1
+        multiplicity = len(indices) // dimension
+        block = values[:, indices].reshape(-1, multiplicity, dimension)
+        covariance = torch.einsum("nmd,nkd->mk", block, block) / (
+            block.shape[0] * dimension
+        )
+        eigenvalues, eigenvectors = torch.linalg.eigh(
+            covariance + eps * torch.eye(multiplicity, dtype=values.dtype)
+        )
+        block_whitening = (
+            eigenvectors * eigenvalues.rsqrt().unsqueeze(0)
+        ) @ eigenvectors.transpose(-1, -2)
+        key = f"l{angular_momentum}{'e' if parity == 1 else 'o'}"
+        stats[f"{key}_multiplicity"] = float(multiplicity)
+        stats[f"{key}_condition_before"] = float(
+            (eigenvalues[-1] / eigenvalues[0]).item()
+        )
+        full_block = torch.kron(
+            block_whitening, torch.eye(dimension, dtype=values.dtype)
+        )
+        for row, source_row in enumerate(indices):
+            for col, source_col in enumerate(indices):
+                whitening[source_row, source_col] = full_block[row, col]
+
+    stats.update(
+        {
+            "metric_min": float(whitening.diagonal().min()),
+            "metric_max": float(whitening.diagonal().max()),
+        }
+    )
+    return whitening.float(), stats
+
+
 def infer_representation_block_metric(
     values: torch.Tensor,
     output_irreps: o3.Irreps,

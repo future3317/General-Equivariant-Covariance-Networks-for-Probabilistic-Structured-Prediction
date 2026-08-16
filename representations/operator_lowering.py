@@ -300,6 +300,13 @@ class OptimizedProgramMap(SPDMap):
             self._transform_parameters(params), residual
         )
 
+    def log_precision_action(
+        self, params: torch.Tensor, residual: torch.Tensor
+    ) -> torch.Tensor:
+        return self.delegate.log_precision_action(
+            self._transform_parameters(params), residual
+        )
+
     def statistics(
         self, params: torch.Tensor, residual: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:

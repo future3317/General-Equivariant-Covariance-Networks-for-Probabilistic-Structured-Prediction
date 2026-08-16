@@ -7,3 +7,8 @@ build-backend = "setuptools.build_meta"
 # project modules, so direct ``python scripts/foo.py`` execution remains supported.
 "scripts/*.py" = ["E402"]
 "experiments/*.py" = ["E402"]
+
+[tool.pytest.ini_options]
+# Keep the default suite on the maintained tests tree.  Scratch copies under
+# tmp/ are intentionally ignored and are not part of the repository contract.
+testpaths = ["tests"]

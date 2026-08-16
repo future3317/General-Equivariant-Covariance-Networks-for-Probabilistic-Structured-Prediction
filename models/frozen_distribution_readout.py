@@ -243,6 +243,19 @@ class FrozenUncertaintyBranchConditionalStudentT(torch.nn.Module):
         }
 
 
+class FrozenOperatorProjection(torch.nn.Module):
+    """Materialize one frozen typed scatter projection from a checkpoint."""
+
+    def __init__(self, feature_irreps, parameter_irreps) -> None:
+        super().__init__()
+        self.feature_irreps = o3.Irreps(feature_irreps)
+        self.parameter_irreps = o3.Irreps(parameter_irreps)
+        self.projection = o3.Linear(self.feature_irreps, self.parameter_irreps)
+
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
+        return self.projection(features)
+
+
 class FrozenGlobalStudentT(torch.nn.Module):
     """Keep mean and scatter fixed while fitting one global finite-covariance nu."""
 

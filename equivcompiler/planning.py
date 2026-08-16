@@ -524,6 +524,7 @@ def plan_readout(
     executor: ExecutorPolicy | None = None,
     cost: CostPolicy | None = None,
     student_t_dof: float = 5.0,
+    quadratic_oracle: Literal["direct", "shifted_log"] = "direct",
     output_scope: OutputScope = "global",
     lifting_backend: str = "e3nn",
     cueq_method: str = "naive",
@@ -533,7 +534,9 @@ def plan_readout(
     cost = PreferExecutor() if cost is None else cost
     fidelity_policy = fidelity or ExactOnly()
     distribution_spec = normalize_distribution(
-        distribution, student_t_dof=student_t_dof
+        distribution,
+        student_t_dof=student_t_dof,
+        quadratic_oracle=quadratic_oracle,
     )
     semantics = describe_output(output)
     pool_input = _validate_contract(seed, output_scope)

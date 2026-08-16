@@ -1,0 +1,51 @@
+# Journal insight experiment ledger
+
+This ledger is the source of truth for the long-horizon evidence refresh. It
+distinguishes existing artifacts from new runs and keeps test evaluation out of
+selection decisions.
+
+## Baseline artifacts already present
+
+| Evidence | Artifact | Protocol status |
+|---|---|---|
+| Dielectric Full-t factorial | `results/dielectric_family_factorial_0b5ea92/full/student_t/seed_{42,43,44}` | Existing formal checkpoints; validation-only selection; 281 test structures |
+| Dielectric paired bootstrap | `results/dielectric_paired_factorial_bootstrap_20260814.json` | Read-only audit of existing predictions; no test selection |
+| ITOP true Graph-t robustness | `results/itop_graph_t_robustness_ec25e58/seed_{42,43,44}/frozen_graph_student_t` | Existing three-seed Graph-t artifacts; split provenance requires exact-match audit |
+| ITOP shuffled controls | `results/itop_reviewer_controls_2c7cb38/seed_{42,43,44}/shuffled_graph_student_t` | Existing fixed-split control artifacts; true-vs-shuffled matching is complete only where split provenance agrees |
+| Elasticity formal study | `results/elasticity_end_to_end_feb75b9` | Existing legacy-Voigt deterministic/LR-t/Full-t study; not representation-compatible evidence |
+| Elasticity compatible feasibility | `results/elasticity_stability_20260816/{D2_seed43,D3_seed43,D4_seed43}` plus server-side checkpoints | D2 and D3 fail fast under unrestricted Full; D4 bounded-window diagnostic is finite and strict-SPD for seed 43; no promoted unrestricted result |
+
+## Current decision ledger
+
+| Stage | Hypothesis | Required evidence | Status | Next action |
+|---|---|---|---|---|
+| Matched dielectric conditional-nu | Conditional radial law improves the headline Full-t checkpoints, not only a separate frozen checkpoint | Same seed, features, mean, scatter, 281 test IDs; validation-only conditional-nu fit; paired law-correct metrics | Pending | Build matched runner and audit |
+| Exact ITOP topology | True skeleton helps beyond a split or initialization artifact | Fixed split 42; true/shuffled Graph-t paired across seeds 42/43/44 | Partial existing | Verify provenance, then fill missing true fixed-split runs |
+| Random topology distribution | True skeleton is better than most degree-matched random trees | Pre-generated trees, no outcome filtering, fixed split and protocol | Pending | Generate topology manifest before training |
+| Compatible elasticity | Failure is a repairable numerical boundary rather than incompatible target semantics | FP32/FP64 replay, failing-term trace, shifted-log oracle, multiplicity whitening, and one bounded-window control | Completed negative diagnostic | Stop expansion; retain bounded-window result only as a limitation/control |
+| Law-aware diagnostics | Diagnostic reference belongs to the registered predictive law | Contract tests for Gaussian, Student-t, conditional-nu, and mixture | Partial implementation | Consolidate existing methods and remove experiment-name dispatch |
+| K=2 mixture | A two-scatter mixture explains residual non-elliptical structure | Exact mixture NLL plus law-correct joint diagnostic improvement | Prototype exists; promotion pending | Audit existing mixture path, then run matched dielectric pilot |
+| Group backend | Group-independent IR has a small backend registration boundary | Static dependency audit plus minimal O(2)/SO(2) oracle if feasible | Pending | Perform architecture audit after core evidence |
+
+## Non-negotiable selection rules
+
+- Train/validation may select checkpoints and hyperparameters; test is never used
+  for selection.
+- ITOP Top is evaluation-only.
+- A mixture cannot be promoted from NLL alone; it needs a law-correct joint
+  diagnostic improvement.
+- A representation-compatible elasticity claim requires all predetermined seeds
+  to be finite and pass strict-SPD/equivariance checks.
+- Existing fixed-law results and compiler semantics are not overwritten.
+
+## Accepted systems-only optimization
+
+The E1 runner now accepts `--diagnostic_splits`. The default remains
+`train val test`, preserving the historical behavior; formal law-comparison
+runs use `val test` so that train predictions and train NLL remain available
+while the expensive train Energy/elliptical diagnostics are explicitly marked
+`skipped_by_config`. This changes no model, loss, split, seed, checkpoint
+selection rule, or prediction artifact. A server smoke run with the matched
+operator projection produced complete predictions, protocol, diagnostics,
+environment, and manifest artifacts under
+`journal_insight_20260814/dielectric/smoke_seed42_retry3`.

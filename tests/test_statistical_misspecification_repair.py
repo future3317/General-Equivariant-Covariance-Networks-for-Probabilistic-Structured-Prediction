@@ -31,6 +31,14 @@ class _ScalarSPDMap(SPDMap):
         return residual.squeeze(-1).square() * (-params.squeeze(-1)).exp()
 
 
+def test_finite_mixture_contract_uses_exact_law_aware_diagnostics():
+    contract = FiniteMixtureStudentTNLL().predictive_law_contract(components=2)
+    assert contract["log_prob"] == "exact_component_logsumexp"
+    assert contract["sample"] == "categorical_component_student_t"
+    assert contract["diagnostic_oracle"]["kind"] == "simulation_based_mixture_oracle"
+    assert contract["diagnostic_oracle"]["moment_matched"] is False
+
+
 def test_finite_mixture_one_component_matches_existing_student_t():
     torch.manual_seed(10)
     spd_map = MatrixExponentialMap()

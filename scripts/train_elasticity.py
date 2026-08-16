@@ -103,9 +103,14 @@ def build_elasticity_model(args: argparse.Namespace):
             str(configuration["covariance"]),
             rank=args.rank,
             parameter_budget=args.parameter_budget,
+            shape_min=args.shape_min,
+            shape_max=args.shape_max,
+            volume_min=args.volume_min,
+            volume_max=args.volume_max,
         ),
         distribution=str(configuration["objective"]),
         student_t_dof=args.student_t_dof,
+        quadratic_oracle=args.student_t_quadratic_oracle,
         output_scope="global",
     )
     return plan.bind(backbone), plan.compilation.as_dict()
@@ -132,6 +137,41 @@ def setup_logger(save_dir: str, experiment_name: str | None = None):
     return logger, experiment_name
 
 
+def _operator_forward_diagnostics(model, params, residual) -> dict[str, float]:
+    """Summarize generator and quadratic-form values during stability audits."""
+    spd_map = model.spd_map
+    while getattr(spd_map, "_transform_parameters", None) is None and hasattr(
+        spd_map, "base"
+    ):
+        spd_map = spd_map.base
+    transform = getattr(spd_map, "_transform_parameters", None)
+    if transform is None:
+        return {}
+    with torch.no_grad():
+        generator = transform(params.detach())
+        generator = 0.5 * (generator + generator.transpose(-1, -2))
+        eigenvalues = torch.linalg.eigvalsh(generator)
+        log_quadratic = model.spd_map.log_precision_action(
+            params.detach(), residual.detach()
+        )
+        return {
+            "generator_lambda_min": float(eigenvalues[..., 0].min()),
+            "generator_lambda_max": float(eigenvalues[..., -1].max()),
+            "generator_frobenius_max": float(
+                generator.square().sum(dim=(-2, -1)).sqrt().max()
+            ),
+            "residual_norm_max": float(residual.square().sum(dim=-1).sqrt().max()),
+            "log_quadratic_min": float(log_quadratic.min()),
+            "log_quadratic_max": float(log_quadratic.max()),
+            "generator_trace_min": float(
+                torch.diagonal(generator, dim1=-2, dim2=-1).sum(-1).min()
+            ),
+            "generator_trace_max": float(
+                torch.diagonal(generator, dim1=-2, dim2=-1).sum(-1).max()
+            ),
+        }
+
+
 def train_epoch(
     model,
     dataloader,
@@ -139,10 +179,14 @@ def train_epoch(
     device,
     warmup_mse_weight: float = 0.0,
     non_blocking: bool = False,
+    record_operator_diagnostics: bool = False,
+    return_stats: bool = False,
 ):
     model.train()
     total_loss = torch.tensor(0.0, device=device)
+    total_nll = torch.tensor(0.0, device=device)
     num_samples = 0
+    diagnostic_extrema: dict[str, float] = {}
 
     for batch in tqdm(dataloader, desc="Training", leave=False):
         batch = batch.to(device, non_blocking=non_blocking)
@@ -151,24 +195,63 @@ def train_epoch(
 
         optimizer.zero_grad(set_to_none=True)
         result = model(batch, target=batch.y_irreps, return_scale=False)
-        loss = result["loss"]
+        nll = result["loss"]
 
-        if not bool(torch.isfinite(loss.detach()).all()):
-            raise FloatingPointError("non-finite elasticity training loss")
+        if record_operator_diagnostics and "params" in result:
+            forward_diagnostics = _operator_forward_diagnostics(
+                model,
+                result["params"],
+                batch.y_irreps - result["mu"].detach(),
+            )
+            for key, value in forward_diagnostics.items():
+                if key.endswith("_min"):
+                    diagnostic_extrema[key] = min(
+                        diagnostic_extrema.get(key, float("inf")), value
+                    )
+                else:
+                    diagnostic_extrema[key] = max(
+                        diagnostic_extrema.get(key, float("-inf")), value
+                    )
 
+        if not bool(torch.isfinite(nll.detach()).all()):
+            raise FloatingPointError(
+                "non-finite elasticity training loss; "
+                f"forward_diagnostics={forward_diagnostics if record_operator_diagnostics else {}}"
+            )
+
+        loss = nll
         if warmup_mse_weight > 0.0:
             mse = torch.nn.functional.mse_loss(result["mu"], batch.y_irreps)
             loss = loss + warmup_mse_weight * mse
 
+        if not bool(torch.isfinite(loss.detach()).all()):
+            raise FloatingPointError("non-finite elasticity training objective")
+
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        torch.nn.utils.clip_grad_norm_(
+            model.parameters(), max_norm=1.0, error_if_nonfinite=True
+        )
         optimizer.step()
+        if not all(
+            bool(torch.isfinite(parameter).all())
+            for parameter in model.parameters()
+        ):
+            raise FloatingPointError(
+                "non-finite elasticity parameter after optimizer step"
+            )
 
         batch_size = batch.y_irreps.shape[0]
         total_loss += loss.detach() * batch_size
+        total_nll += nll.detach() * batch_size
         num_samples += batch_size
 
-    return (total_loss / max(num_samples, 1)).item()
+    stats = {
+        "loss": (total_loss / max(num_samples, 1)).item(),
+        "nll": (total_nll / max(num_samples, 1)).item(),
+    }
+    if record_operator_diagnostics:
+        stats.update(diagnostic_extrema)
+    return stats if return_stats else stats["loss"]
 
 
 @torch.inference_mode()
@@ -246,27 +329,56 @@ def main():
     parser.add_argument("--rank", type=int, default=8)
     parser.add_argument(
         "--covariance",
-        choices=["auto", "full", "block", "low_rank"],
+        choices=[
+            "auto",
+            "full",
+            "block",
+            "low_rank",
+            "centered_spectral_window",
+        ],
         default="auto",
     )
     parser.add_argument("--parameter_budget", type=int, default=192)
+    parser.add_argument("--shape_min", type=float, default=-2.0)
+    parser.add_argument("--shape_max", type=float, default=2.0)
+    parser.add_argument("--volume_min", type=float, default=-8.0)
+    parser.add_argument("--volume_max", type=float, default=8.0)
     parser.add_argument(
         "--objective", choices=["gaussian", "student_t"], default="gaussian"
     )
     parser.add_argument("--student_t_dof", type=float, default=5.0)
+    parser.add_argument(
+        "--student_t_quadratic_oracle",
+        choices=("direct", "shifted_log"),
+        default="direct",
+        help="Student-t quadratic-form lowering used by the matrix-exponential map",
+    )
     parser.add_argument(
         "--representation_metric", choices=("none", "block_auto"), default="none",
         help="training-set RMS metric repeated over each O(3) isotypic block",
     )
     parser.add_argument(
         "--target_normalization",
-        choices=("legacy_voigt", "representation_compatible"),
+        choices=(
+            "legacy_voigt",
+            "representation_compatible",
+            "representation_compatible_multiplicity",
+        ),
         default="legacy_voigt",
-        help="target normalization contract used by the elasticity dataset",
+        help=(
+            "target normalization; legacy_voigt preserves historical runs; "
+            "representation_compatible preserves the O(3) target action; "
+            "representation_compatible_multiplicity whitens repeated irreps"
+        ),
     )
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--lr", type=float, default=5e-4)
     parser.add_argument("--weight_decay", type=float, default=1e-4)
+    parser.add_argument(
+        "--record_operator_diagnostics",
+        action="store_true",
+        help="record generator spectrum and log-quadratic diagnostics per epoch",
+    )
     parser.add_argument("--num_epochs", type=int, default=100)
     parser.add_argument("--patience", type=int, default=15)
     parser.add_argument("--warmup_epochs", type=int, default=3)
@@ -390,13 +502,15 @@ def main():
             if model.distribution is not None and epoch < args.warmup_epochs
             else 0.0
         )
-        train_loss = train_epoch(
+        train_stats = train_epoch(
             model,
             train_loader,
             optimizer,
             args.device,
             warmup_mse,
             non_blocking=non_blocking,
+            record_operator_diagnostics=args.record_operator_diagnostics,
+            return_stats=True,
         )
         val_metrics = validate(
             model, val_loader, args.device, normalizer, non_blocking=non_blocking
@@ -405,14 +519,35 @@ def main():
 
         logger.info(
             f"Epoch {epoch + 1}/{args.num_epochs}: "
-            f"train_loss={train_loss:.4f}, val_loss={val_metrics['loss']:.4f}, "
+            f"train_loss={train_stats['loss']:.4f}, "
+            f"train_nll={train_stats['nll']:.4f}, "
+            f"val_loss={val_metrics['loss']:.4f}, "
             f"val_mae={val_metrics['mae']:.4f}"
+            + (
+                " | operator_diagnostics="
+                + json.dumps(
+                    {
+                        key: value
+                        for key, value in train_stats.items()
+                        if key not in {"loss", "nll"}
+                    },
+                    sort_keys=True,
+                )
+                if args.record_operator_diagnostics
+                else ""
+            )
         )
 
         history.append(
             {
                 "epoch": epoch + 1,
-                "train_loss": train_loss,
+                "train_loss": train_stats["loss"],
+                "train_nll": train_stats["nll"],
+                **{
+                    key: value
+                    for key, value in train_stats.items()
+                    if key not in {"loss", "nll"}
+                },
                 "validation_criterion": val_metrics["loss"],
                 **val_metrics,
             }

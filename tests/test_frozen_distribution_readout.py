@@ -8,6 +8,7 @@ from models.frozen_distribution_readout import (
     FrozenConditionalStudentT,
     FrozenMeanScatterElliptical,
     FrozenMeanScatterStudentT,
+    FrozenOperatorProjection,
     FrozenSymmetricStudentTMixture,
     FrozenUncertaintyBranchConditionalStudentT,
 )
@@ -62,6 +63,22 @@ def test_existing_frozen_student_t_readout_remains_compatible():
     model = FrozenMeanScatterStudentT("0e", "0e", IsotropicMap(dim=1))
     assert isinstance(model.objective, StudentTNLL)
     assert model.schema()["kind"] == "single_elliptical_fixed_nu_student_t"
+
+
+def test_frozen_operator_projection_preserves_typed_equivariance():
+    torch.manual_seed(11)
+    feature_irreps = o3.Irreps("2x0e + 1x1o")
+    parameter_irreps = o3.Irreps("1x0e + 1x1o")
+    projection = FrozenOperatorProjection(feature_irreps, parameter_irreps).double()
+    projection.requires_grad_(False)
+    features = torch.randn(6, feature_irreps.dim, dtype=torch.float64)
+    rotation = o3.rand_matrix(dtype=torch.float64)
+    transformed = features @ feature_irreps.D_from_matrix(rotation).T
+    expected = projection(features) @ parameter_irreps.D_from_matrix(rotation).T
+    torch.testing.assert_close(
+        projection(transformed), expected, atol=1e-9, rtol=1e-9
+    )
+    assert all(parameter.grad is None for parameter in projection.parameters())
 
 
 def test_conditional_nu_is_invariant_and_above_finite_covariance_threshold():

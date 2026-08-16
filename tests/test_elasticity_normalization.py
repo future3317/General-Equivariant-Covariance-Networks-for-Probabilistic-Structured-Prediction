@@ -39,6 +39,26 @@ def test_representation_compatible_normalization_round_trips_physical_targets():
     torch.testing.assert_close(recovered, values, atol=2e-5, rtol=2e-5)
 
 
+def test_multiplicity_whitening_round_trips_and_commutes_with_o3_action():
+    normalizer = ElasticityTargetNormalizer.fit(
+        np.random.default_rng(17).normal(size=(128, 21)),
+        mode="representation_compatible_multiplicity",
+    )
+    values = torch.randn(7, 21)
+    rotation = o3.rand_matrix()
+    irreps = o3.Irreps(rank4_elasticity_irreps())
+    normalized = normalizer.transform(values)
+    physical_rotated = normalizer.inverse(
+        normalized @ irreps.D_from_matrix(rotation).T
+    )
+    lhs = normalizer.transform(physical_rotated)
+    rhs = normalized @ irreps.D_from_matrix(rotation).T
+    torch.testing.assert_close(lhs, rhs, atol=3e-5, rtol=3e-5)
+    torch.testing.assert_close(
+        normalizer.inverse(normalized), values, atol=3e-5, rtol=3e-5
+    )
+
+
 def test_legacy_normalization_remains_available_for_reproducibility():
     normalizer = ElasticityTargetNormalizer.fit(
         np.random.default_rng(8).normal(size=(32, 21)), mode="legacy_voigt"
@@ -89,3 +109,26 @@ def test_elasticity_training_rejects_nonfinite_loss_before_optimizer_step():
             optimizer,
             torch.device("cpu"),
         )
+
+
+class _FiniteMeanModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.ones(()))
+
+    def forward(self, batch, *, target, return_scale):
+        return {"loss": self.weight.square(), "mu": target}
+
+
+def test_mean_only_training_path_preserves_legacy_loss():
+    model = _FiniteMeanModel()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+
+    loss = train_epoch(
+        model,
+        [_Batch(torch.tensor(1.0))],
+        optimizer,
+        torch.device("cpu"),
+    )
+
+    assert loss == pytest.approx(1.0)

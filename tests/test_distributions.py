@@ -41,6 +41,40 @@ def test_student_t_gradient_finite():
     assert torch.isfinite(A.grad).all()
 
 
+def test_shifted_student_t_oracle_matches_direct_value_and_gradient():
+    torch.manual_seed(21)
+    mu, target, A = _make_test_tensors(dtype=torch.float64)
+    direct_A = A.detach().clone().requires_grad_(True)
+    shifted_A = A.detach().clone().requires_grad_(True)
+    spdm = MatrixExponentialMap()
+    direct, _ = StudentTNLL(nu=5.0, quadratic_oracle="direct")(
+        mu, direct_A, target, spdm
+    )
+    shifted, _ = StudentTNLL(nu=5.0, quadratic_oracle="shifted_log")(
+        mu, shifted_A, target, spdm
+    )
+    direct.backward()
+    shifted.backward()
+    torch.testing.assert_close(shifted.detach(), direct.detach(), rtol=1e-10, atol=1e-10)
+    torch.testing.assert_close(
+        shifted_A.grad, direct_A.grad, rtol=1e-8, atol=1e-8
+    )
+
+
+def test_shifted_student_t_oracle_avoids_direct_fp32_quadratic_overflow():
+    mu = torch.zeros(2, 4)
+    target = torch.ones_like(mu)
+    generator = (-100.0 * torch.eye(4)).unsqueeze(0).expand(2, -1, -1).clone()
+    direct, _ = StudentTNLL(nu=5.0, quadratic_oracle="direct")(
+        mu, generator, target, MatrixExponentialMap()
+    )
+    shifted, _ = StudentTNLL(nu=5.0, quadratic_oracle="shifted_log")(
+        mu, generator, target, MatrixExponentialMap()
+    )
+    assert not bool(torch.isfinite(direct))
+    assert bool(torch.isfinite(shifted))
+
+
 def test_student_t_log_prob_supports_conditional_nu_gradients():
     mu, target, A = _make_test_tensors(dtype=torch.float64)
     raw_nu = torch.randn(mu.shape[0], dtype=mu.dtype, requires_grad=True)

@@ -37,6 +37,7 @@ from models.frozen_distribution_readout import (
     FrozenGlobalStudentT,
     FrozenMeanScatterStudentT,
     FrozenMultimodalStudentTMixture,
+    FrozenOperatorProjection,
     FrozenSharedMeanStudentTMixture,
     FrozenSymmetricStudentTMixture,
     FrozenUncertaintyBranchConditionalStudentT,
@@ -62,6 +63,7 @@ MIXTURE_VARIANTS = {
     "multimodal_mean_mixture",
     "symmetric_mixture",
 }
+DIAGNOSTIC_SPLITS = ("train", "val", "test")
 SPECTRAL_VARIANTS = ("centered_e4", "centered_e8", "matrix_exp")
 VARIANTS = DISTRIBUTION_VARIANTS + SPECTRAL_VARIANTS
 
@@ -203,15 +205,27 @@ def _build_model(metadata: dict, variant: str, spd_map, device: torch.device):
     return model
 
 
-def _forward(model, variant: str, batch: dict, spd_map, objective: StudentTNLL):
+def _forward(
+    model,
+    variant: str,
+    batch: dict,
+    spd_map,
+    objective: StudentTNLL,
+    operator_projection: torch.nn.Module | None = None,
+):
+    params = batch["params"]
+    if operator_projection is not None:
+        with torch.no_grad():
+            params = operator_projection(_model_features(batch))
     if variant == "fixed":
         loss, components = objective(
-            batch["mean"], batch["params"], batch["target"], spd_map
+            batch["mean"], params, batch["target"], spd_map
         )
-        return {"loss": loss, "params": batch["params"], **components}
+        return {"loss": loss, "params": params, **components}
     if variant in {
         "global_nu",
         "conditional_nu",
+        "uncertainty_branch_conditional_nu",
         "uncertainty_branch_conditional_nu",
         "shared_mean_mixture",
         "multimodal_mean_mixture",
@@ -220,21 +234,31 @@ def _forward(model, variant: str, batch: dict, spd_map, objective: StudentTNLL):
         return model(
             _model_features(batch),
             batch["mean"],
-            batch["params"],
+            params,
             batch["target"],
         )
     return model(_model_features(batch), batch["mean"], batch["target"])
 
 
 @torch.inference_mode()
-def _loss(model, variant: str, loader, device, spd_map, objective) -> float:
+def _loss(
+    model,
+    variant: str,
+    loader,
+    device,
+    spd_map,
+    objective,
+    operator_projection: torch.nn.Module | None = None,
+) -> float:
     if model is not None:
         model.eval()
     total = 0.0
     count = 0
     for raw in loader:
         batch = _to_device(raw, device)
-        result = _forward(model, variant, batch, spd_map, objective)
+        result = _forward(
+            model, variant, batch, spd_map, objective, operator_projection
+        )
         if not bool(torch.isfinite(result["loss"])):
             raise FloatingPointError("non-finite E1 validation loss")
         size = int(batch["target"].shape[0])
@@ -243,7 +267,16 @@ def _loss(model, variant: str, loader, device, spd_map, objective) -> float:
     return total / count
 
 
-def _train_epoch(model, variant: str, loader, optimizer, device, spd_map, objective):
+def _train_epoch(
+    model,
+    variant: str,
+    loader,
+    optimizer,
+    device,
+    spd_map,
+    objective,
+    operator_projection: torch.nn.Module | None = None,
+):
     model.train()
     total = 0.0
     count = 0
@@ -253,7 +286,9 @@ def _train_epoch(model, variant: str, loader, optimizer, device, spd_map, object
     for raw in loader:
         batch = _to_device(raw, device)
         optimizer.zero_grad(set_to_none=True)
-        result = _forward(model, variant, batch, spd_map, objective)
+        result = _forward(
+            model, variant, batch, spd_map, objective, operator_projection
+        )
         loss = result["loss"]
         if not bool(torch.isfinite(loss.detach())):
             raise FloatingPointError("non-finite E1 training loss")
@@ -277,7 +312,15 @@ def _train_epoch(model, variant: str, loader, optimizer, device, spd_map, object
 
 
 @torch.inference_mode()
-def _predict(model, variant: str, loader, device, spd_map, objective):
+def _predict(
+    model,
+    variant: str,
+    loader,
+    device,
+    spd_map,
+    objective,
+    operator_projection: torch.nn.Module | None = None,
+):
     if model is not None:
         model.eval()
     records: dict[str, list[torch.Tensor]] = {}
@@ -285,7 +328,9 @@ def _predict(model, variant: str, loader, device, spd_map, objective):
     count = 0
     for raw in loader:
         batch = _to_device(raw, device)
-        result = _forward(model, variant, batch, spd_map, objective)
+        result = _forward(
+            model, variant, batch, spd_map, objective, operator_projection
+        )
         size = int(batch["target"].shape[0])
         total += float(result["loss"]) * size
         count += size
@@ -447,6 +492,46 @@ def _save_checkpoint(payload: dict, path: Path) -> None:
     temporary.replace(path)
 
 
+def _parse_diagnostic_splits(value) -> tuple[str, ...]:
+    if value is None:
+        return DIAGNOSTIC_SPLITS
+    selected = tuple(value)
+    if not selected or len(set(selected)) != len(selected):
+        raise ValueError("diagnostic_splits must contain unique split names")
+    unknown = set(selected).difference(DIAGNOSTIC_SPLITS)
+    if unknown:
+        raise ValueError(f"unsupported diagnostic splits: {sorted(unknown)}")
+    return tuple(split for split in DIAGNOSTIC_SPLITS if split in selected)
+
+
+def _load_fixed_operator_projection(
+    metadata: dict, checkpoint: Path | None, device: torch.device
+) -> torch.nn.Module | None:
+    if checkpoint is None:
+        return None
+    payload = torch.load(checkpoint, map_location=device, weights_only=True)
+    state = payload.get("model_state", payload) if isinstance(payload, dict) else payload
+    if not isinstance(state, dict):
+        raise TypeError(f"unsupported operator checkpoint payload: {checkpoint}")
+    prefix = "parameter_projection."
+    projection_state = {
+        key[len(prefix) :]: value
+        for key, value in state.items()
+        if key.startswith(prefix)
+    }
+    if not projection_state:
+        raise KeyError(
+            f"{checkpoint} does not contain a parameter_projection state dict"
+        )
+    projection = FrozenOperatorProjection(
+        metadata["feature_irreps"], metadata["parameter_irreps"]
+    ).to(device)
+    projection.projection.load_state_dict(projection_state, strict=True)
+    projection.eval()
+    projection.requires_grad_(False)
+    return projection
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cache_dir", type=Path, required=True)
@@ -465,12 +550,26 @@ def main() -> None:
         help="optional compatible uncertainty-law checkpoint initialization",
     )
     parser.add_argument(
+        "--diagnostic_splits",
+        nargs="+",
+        choices=DIAGNOSTIC_SPLITS,
+        default=None,
+        help="splits receiving expensive calibration and Energy diagnostics",
+    )
+    parser.add_argument(
+        "--fixed_operator_checkpoint",
+        type=Path,
+        default=None,
+        help="optional checkpoint whose operator projection is frozen",
+    )
+    parser.add_argument(
         "--observation_descriptor_dir",
         type=Path,
         default=None,
         help="optional aligned label-free invariant descriptor payload",
     )
     args = parser.parse_args()
+    args.diagnostic_splits = _parse_diagnostic_splits(args.diagnostic_splits)
     if args.run_dir.exists():
         raise FileExistsError(f"refusing to overwrite E1 run: {args.run_dir}")
     if args.max_epochs < 1 or args.patience < 1:
@@ -512,6 +611,9 @@ def main() -> None:
             raise ValueError(
                 f"unexpected initialization keys: {incompatible.unexpected_keys}"
             )
+    fixed_operator_projection = _load_fixed_operator_projection(
+        metadata, args.fixed_operator_checkpoint, device
+    )
     objective = StudentTNLL(nu=float(metadata["student_t_dof"]))
     args.run_dir.mkdir(parents=True)
     history = []
@@ -520,7 +622,15 @@ def main() -> None:
     selected_epoch = 0
     best_path = args.run_dir / "best_model.pt"
     if model is None:
-        best = _loss(None, args.variant, loaders["val"], device, spd_map, objective)
+        best = _loss(
+            None,
+            args.variant,
+            loaders["val"],
+            device,
+            spd_map,
+            objective,
+            fixed_operator_projection,
+        )
         history = [
             {
                 "epoch": 0,
@@ -557,6 +667,7 @@ def main() -> None:
                 device,
                 spd_map,
                 objective,
+                fixed_operator_projection,
             )
             validation = _loss(
                 model,
@@ -565,6 +676,7 @@ def main() -> None:
                 device,
                 spd_map,
                 objective,
+                fixed_operator_projection,
             )
             scheduler.step(validation)
             record = {
@@ -618,17 +730,29 @@ def main() -> None:
             )
             loader = evaluation_loaders[split]
         nll, prediction = _predict(
-            model, args.variant, loader, device, spd_map, objective
+            model,
+            args.variant,
+            loader,
+            device,
+            spd_map,
+            objective,
+            fixed_operator_projection,
         )
         predictions[split] = prediction
-        diagnostics[split] = _diagnostics(
-            prediction,
-            args.variant,
-            nll,
-            float(metadata["student_t_dof"]),
-            args.seed,
-            spd_map,
-        )
+        if split in args.diagnostic_splits:
+            diagnostics[split] = _diagnostics(
+                prediction,
+                args.variant,
+                nll,
+                float(metadata["student_t_dof"]),
+                args.seed,
+                spd_map,
+            )
+        else:
+            diagnostics[split] = {
+                "status": "skipped_by_config",
+                "nll": nll,
+            }
         path = args.run_dir / f"predictions_{split}.pt"
         _save_checkpoint(prediction, path)
         artifact_hashes[path.name] = sha256_file(path)
@@ -656,6 +780,11 @@ def main() -> None:
             "mean": True,
             "features": True,
             "observation_descriptors": bool(args.observation_descriptor_dir),
+            "operator_checkpoint": (
+                None
+                if args.fixed_operator_checkpoint is None
+                else str(args.fixed_operator_checkpoint.resolve())
+            ),
             "shared_scatter": args.variant
             in {"fixed", "global_nu", "conditional_nu", "symmetric_mixture"},
         },
@@ -667,6 +796,7 @@ def main() -> None:
             "ood_used_for_selection": False,
         },
         "seed": args.seed,
+        "diagnostic_splits": list(args.diagnostic_splits),
         "initialization": (
             {
                 "path": str(args.init_model.resolve()),

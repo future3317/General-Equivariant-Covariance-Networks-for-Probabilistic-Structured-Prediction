@@ -39,6 +39,22 @@ class RadialLaw(ABC):
     def as_dict(self) -> dict[str, Any]:
         """Return serializable statistical semantics."""
 
+    def predictive_law_contract(self) -> dict[str, Any]:
+        """Declare scoring, sampling, and diagnostic semantics for this law."""
+        reference = self.calibration_reference()
+        return {
+            "log_prob": "registered_radial_log_prob",
+            "sample": "registered_radial_sampler",
+            "moment_existence": {"mean": "law_declared", "covariance": "law_declared"},
+            "scatter_to_covariance": "law_declared",
+            "marginal_quantile": "law_declared_if_available",
+            "radial_reference": reference,
+            "diagnostic_oracle": {
+                "kind": reference.get("reference", "registered_radial_oracle"),
+                "radius_direction_null": "law_declared",
+            },
+        }
+
     def parameter_representation(self) -> RepExpr | None:
         """Return sample-dependent radial parameter fields, if any."""
         return None
@@ -64,14 +80,31 @@ class GaussianRadial(RadialLaw):
     def as_dict(self) -> dict[str, Any]:
         return {"kind": "gaussian_radial"}
 
+    def predictive_law_contract(self) -> dict[str, Any]:
+        return {
+            "log_prob": "normalized_multivariate_gaussian",
+            "sample": "gaussian_scale_cholesky",
+            "moment_existence": {"mean": "finite", "covariance": "finite"},
+            "scatter_to_covariance": "covariance=S",
+            "marginal_quantile": {"kind": "standard_normal", "cdf": "Phi"},
+            "radial_reference": {"kind": "chi_square", "cdf": "ChiSquare_d"},
+            "diagnostic_oracle": {
+                "kind": "chi_square",
+                "radius_direction_null": "independent_uniform_direction",
+            },
+        }
+
 
 @dataclass(frozen=True)
 class StudentTRadial(RadialLaw):
     degrees_of_freedom: float = 5.0
+    quadratic_oracle: Literal["direct", "shifted_log"] = "direct"
 
     def __post_init__(self) -> None:
         if self.degrees_of_freedom <= 0:
             raise ValueError("Student-t degrees of freedom must be positive")
+        if self.quadratic_oracle not in {"direct", "shifted_log"}:
+            raise ValueError("quadratic_oracle must be 'direct' or 'shifted_log'")
 
     @property
     def name(self) -> str:
@@ -80,7 +113,9 @@ class StudentTRadial(RadialLaw):
     def materialize_log_prob(self) -> torch.nn.Module:
         from distributions import StudentTNLL
 
-        return StudentTNLL(nu=self.degrees_of_freedom)
+        return StudentTNLL(
+            nu=self.degrees_of_freedom, quadratic_oracle=self.quadratic_oracle
+        )
 
     def calibration_reference(self) -> dict[str, Any]:
         return {
@@ -93,11 +128,39 @@ class StudentTRadial(RadialLaw):
         return {
             "kind": "student_t_radial",
             "degrees_of_freedom": self.degrees_of_freedom,
+            "quadratic_oracle": self.quadratic_oracle,
         }
 
     def parameter_representation(self) -> RepExpr | None:
         return None
 
+    def predictive_law_contract(self) -> dict[str, Any]:
+        return {
+            "log_prob": "normalized_multivariate_student_t",
+            "sample": "student_t_scale_mixture",
+            "parameters": {
+                "nu": {
+                    "kind": "constant",
+                    "value": self.degrees_of_freedom,
+                    "transformation": "none",
+                }
+            },
+            "quadratic_oracle": self.quadratic_oracle,
+            "moment_existence": {
+                "mean": "finite_for_nu>1",
+                "covariance": "finite_for_nu>2",
+            },
+            "scatter_to_covariance": "nu/(nu-2) * S when nu>2",
+            "marginal_quantile": {"kind": "student_t", "cdf": "StudentT_nu"},
+            "radial_reference": {
+                "kind": "scaled_f_distribution",
+                "cdf": "F_{d,nu}(q/d)",
+            },
+            "diagnostic_oracle": {
+                "kind": "scaled_f_distribution",
+                "radius_direction_null": "independent_uniform_direction",
+            },
+        }
 
 @dataclass(frozen=True)
 class ConditionalStudentTRadial(RadialLaw):
@@ -106,10 +169,13 @@ class ConditionalStudentTRadial(RadialLaw):
     feature_irreps: str
     minimum_degrees_of_freedom: float = 2.05
     initial_degrees_of_freedom: float = 5.0
+    quadratic_oracle: Literal["direct", "shifted_log"] = "direct"
 
     def __post_init__(self) -> None:
         if not 2.0 < self.minimum_degrees_of_freedom < self.initial_degrees_of_freedom:
             raise ValueError("require 2 < minimum < initial degrees of freedom")
+        if self.quadratic_oracle not in {"direct", "shifted_log"}:
+            raise ValueError("quadratic_oracle must be 'direct' or 'shifted_log'")
 
     @property
     def name(self) -> str:
@@ -118,7 +184,10 @@ class ConditionalStudentTRadial(RadialLaw):
     def materialize_log_prob(self) -> torch.nn.Module:
         from distributions import StudentTNLL
 
-        return StudentTNLL(nu=self.initial_degrees_of_freedom)
+        return StudentTNLL(
+            nu=self.initial_degrees_of_freedom,
+            quadratic_oracle=self.quadratic_oracle,
+        )
 
     def calibration_reference(self) -> dict[str, Any]:
         return {
@@ -142,6 +211,40 @@ class ConditionalStudentTRadial(RadialLaw):
                 "minimum": self.minimum_degrees_of_freedom,
                 "initial": self.initial_degrees_of_freedom,
                 "equivariance": "nu(gx)=nu(x)",
+            },
+            "quadratic_oracle": self.quadratic_oracle,
+        }
+
+    def predictive_law_contract(self) -> dict[str, Any]:
+        return {
+            "log_prob": "normalized_multivariate_student_t",
+            "sample": "conditional_student_t_scale_mixture",
+            "parameters": {
+                "nu": {
+                    "kind": "sample_conditional",
+                    "field": "nu(x)",
+                    "transformation": "invariant_scalar_field",
+                    "equivariance": "nu(gx)=nu(x)",
+                    "minimum": self.minimum_degrees_of_freedom,
+                }
+            },
+            "quadratic_oracle": self.quadratic_oracle,
+            "moment_existence": {
+                "mean": "finite_for_nu(x)>1",
+                "covariance": "finite_for_nu(x)>2",
+            },
+            "scatter_to_covariance": "nu(x)/(nu(x)-2) * S(x) pointwise",
+            "marginal_quantile": {
+                "kind": "sample_conditional_student_t",
+                "cdf": "StudentT_{nu(x)}",
+            },
+            "radial_reference": {
+                "kind": "sample_conditional_scaled_f_distribution",
+                "cdf": "F_{d,nu(x)}(q/d)",
+            },
+            "diagnostic_oracle": {
+                "kind": "sample_conditional_scaled_f_distribution",
+                "radius_direction_null": "conditional_independent_uniform_direction",
             },
         }
 
@@ -182,6 +285,10 @@ class DistributionSpec(ABC):
         """Return the residual calibration reference law."""
 
     @abstractmethod
+    def predictive_law_contract(self) -> dict[str, Any]:
+        """Return law-aware scoring, sampling, and diagnostic semantics."""
+
+    @abstractmethod
     def as_dict(self) -> dict[str, Any]:
         """Return stable distribution semantics."""
 
@@ -196,12 +303,13 @@ class EllipticalDistribution(DistributionSpec):
         self,
         radial: RadialLaw | Literal["gaussian", "student_t"] = "gaussian",
         student_t_dof: float = 5.0,
+        quadratic_oracle: Literal["direct", "shifted_log"] = "direct",
     ) -> None:
         if isinstance(radial, str):
             law: RadialLaw = (
                 GaussianRadial()
                 if radial == "gaussian"
-                else StudentTRadial(student_t_dof)
+                else StudentTRadial(student_t_dof, quadratic_oracle)
                 if radial == "student_t"
                 else _unsupported_radial(radial)
             )
@@ -250,6 +358,9 @@ class EllipticalDistribution(DistributionSpec):
     def calibration_reference(self) -> dict[str, Any]:
         return self.radial.calibration_reference()
 
+    def predictive_law_contract(self) -> dict[str, Any]:
+        return self.radial.predictive_law_contract()
+
     def objective(self) -> dict[str, Any]:
         return {
             "name": self.objective_name(),
@@ -265,6 +376,7 @@ class EllipticalDistribution(DistributionSpec):
             "objective": self.objective(),
             "proper": True,
             "calibration_reference": self.calibration_reference(),
+            "predictive_law": self.predictive_law_contract(),
         }
 
 
@@ -276,7 +388,12 @@ def normalize_distribution(
     distribution: DistributionSpec | Literal["gaussian", "student_t"],
     *,
     student_t_dof: float,
+    quadratic_oracle: Literal["direct", "shifted_log"] = "direct",
 ) -> DistributionSpec:
     if isinstance(distribution, DistributionSpec):
         return distribution
-    return EllipticalDistribution(distribution, student_t_dof=student_t_dof)
+    return EllipticalDistribution(
+        distribution,
+        student_t_dof=student_t_dof,
+        quadratic_oracle=quadratic_oracle,
+    )

@@ -8,6 +8,7 @@ import numpy as np
 import torch
 
 from compatibility.e3nn import o3
+from data.representation_metrics import fit_multiplicity_whitening
 from data.tensor_conversions import elasticity_21d_to_irreps, irreps_to_elasticity_21d
 from representations import rank4_elasticity_irreps
 
@@ -21,6 +22,7 @@ class ElasticityNormalizationStats:
     std_21d: np.ndarray | None = None
     mean_irreps: np.ndarray | None = None
     scale_irreps: np.ndarray | None = None
+    whitening_irreps: np.ndarray | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -33,6 +35,9 @@ class ElasticityNormalizationStats:
             "scale_irreps": None
             if self.scale_irreps is None
             else self.scale_irreps.tolist(),
+            "whitening_irreps": None
+            if self.whitening_irreps is None
+            else self.whitening_irreps.tolist(),
         }
 
 
@@ -53,23 +58,38 @@ class ElasticityTargetNormalizer:
     equivariance guarantee for the normalized targets.
     ``representation_compatible`` converts to irreps first, centers only
     invariant ``0e`` coordinates, and applies one positive scale per isotypic
-    block.  The latter operation commutes with every orthogonal representation
-    matrix of the rank-4 elasticity output.
+    block.  ``representation_compatible_multiplicity`` replaces that scalar
+    with a positive whitening operator on each multiplicity space.  Both
+    operations commute with every orthogonal representation matrix of the
+    rank-4 elasticity output.
     """
 
     _IRREPS = o3.Irreps(rank4_elasticity_irreps())
 
     def __init__(self, stats: ElasticityNormalizationStats, *, eps: float = 1e-8):
-        if stats.mode not in {"legacy_voigt", "representation_compatible"}:
+        if stats.mode not in {
+            "legacy_voigt",
+            "representation_compatible",
+            "representation_compatible_multiplicity",
+        }:
             raise ValueError(f"unknown elasticity normalization mode: {stats.mode}")
         self.stats = stats
         self.eps = float(eps)
         if stats.mode == "legacy_voigt":
             if stats.mean_21d is None or stats.std_21d is None:
                 raise ValueError("legacy_voigt requires mean_21d and std_21d")
-        elif stats.mean_irreps is None or stats.scale_irreps is None:
+        elif stats.mode == "representation_compatible" and (
+            stats.mean_irreps is None or stats.scale_irreps is None
+        ):
             raise ValueError(
                 "representation_compatible requires mean_irreps and scale_irreps"
+            )
+        elif stats.mode == "representation_compatible_multiplicity" and (
+            stats.mean_irreps is None or stats.whitening_irreps is None
+        ):
+            raise ValueError(
+                "representation_compatible_multiplicity requires mean_irreps "
+                "and whitening_irreps"
             )
 
     @classmethod
@@ -93,7 +113,10 @@ class ElasticityTargetNormalizer:
                 std_21d=values.std(axis=0) + eps,
             )
             return cls(stats, eps=eps)
-        if mode != "representation_compatible":
+        if mode not in {
+            "representation_compatible",
+            "representation_compatible_multiplicity",
+        }:
             raise ValueError(f"unknown elasticity normalization mode: {mode}")
 
         irrep_values = elasticity_21d_to_irreps(torch.from_numpy(values).float())
@@ -108,9 +131,20 @@ class ElasticityTargetNormalizer:
             centered = block - mean[start:stop]
             block_rms = float(np.sqrt(np.mean(centered * centered)))
             scale[start:stop] = max(block_rms, eps)
-        stats = ElasticityNormalizationStats(
-            mode=mode, mean_irreps=mean, scale_irreps=scale
-        )
+        if mode == "representation_compatible":
+            stats = ElasticityNormalizationStats(
+                mode=mode, mean_irreps=mean, scale_irreps=scale
+            )
+        else:
+            centered = irrep_values - mean
+            whitening, _ = fit_multiplicity_whitening(
+                torch.from_numpy(centered), cls._IRREPS, eps=eps
+            )
+            stats = ElasticityNormalizationStats(
+                mode=mode,
+                mean_irreps=mean,
+                whitening_irreps=whitening.double().numpy(),
+            )
         return cls(stats, eps=eps)
 
     @classmethod
@@ -128,6 +162,7 @@ class ElasticityTargetNormalizer:
                 std_21d=_array_or_none(stats.get("std_21d")),
                 mean_irreps=_array_or_none(stats.get("mean_irreps")),
                 scale_irreps=_array_or_none(stats.get("scale_irreps")),
+                whitening_irreps=_array_or_none(stats.get("whitening_irreps")),
             )
         return cls(stats)
 
@@ -149,6 +184,9 @@ class ElasticityTargetNormalizer:
             return elasticity_21d_to_irreps((values - mean) / std)
         irreps = elasticity_21d_to_irreps(values)
         mean = _tensor(self.stats.mean_irreps, values)
+        if self.stats.mode == "representation_compatible_multiplicity":
+            whitening = _tensor(self.stats.whitening_irreps, values)
+            return (irreps - mean) @ whitening.transpose(-1, -2)
         scale = _tensor(self.stats.scale_irreps, values)
         return (irreps - mean) / scale
 
@@ -162,6 +200,12 @@ class ElasticityTargetNormalizer:
                 self.stats.mean_21d, values
             )
         mean = _tensor(self.stats.mean_irreps, values)
+        if self.stats.mode == "representation_compatible_multiplicity":
+            whitening = _tensor(self.stats.whitening_irreps, values)
+            centered = torch.linalg.solve(
+                whitening, values.unsqueeze(-1)
+            ).squeeze(-1)
+            return irreps_to_elasticity_21d(centered + mean)
         scale = _tensor(self.stats.scale_irreps, values)
         return irreps_to_elasticity_21d(values * scale + mean)
 

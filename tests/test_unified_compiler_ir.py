@@ -222,6 +222,43 @@ def test_compilation_exposes_distribution_parameter_irreps_and_report_target():
     )
 
 
+def test_predictive_law_contract_declares_law_aware_diagnostic_semantics():
+    fixed = EllipticalDistribution("student_t", student_t_dof=5.0)
+    conditional = EllipticalDistribution(
+        ConditionalStudentTRadial(feature_irreps="4x0e + 2x2e")
+    )
+    fixed_contract = fixed.predictive_law_contract()
+    conditional_contract = conditional.predictive_law_contract()
+    assert fixed_contract["log_prob"] == "normalized_multivariate_student_t"
+    assert fixed_contract["sample"] == "student_t_scale_mixture"
+    assert fixed_contract["radial_reference"]["kind"] == "scaled_f_distribution"
+    assert fixed_contract["moment_existence"]["covariance"] == "finite_for_nu>2"
+    assert conditional_contract["parameters"]["nu"]["transformation"] == (
+        "invariant_scalar_field"
+    )
+    assert conditional_contract["diagnostic_oracle"]["kind"] == (
+        "sample_conditional_scaled_f_distribution"
+    )
+
+
+def test_shifted_student_t_oracle_is_carried_through_compiler_lowering():
+    plan = plan_readout(
+        SEED,
+        output="ij=ji",
+        covariance=FullCovariance(),
+        distribution="student_t",
+        quadratic_oracle="shifted_log",
+    )
+    assert plan.distribution_spec.as_dict()["radial"]["quadratic_oracle"] == (
+        "shifted_log"
+    )
+    spd_map = plan.compilation.build_spd_map()
+    parameters = torch.randn(3, plan.compilation.covariance_parameter_count)
+    residual = torch.randn(3, 6)
+    log_quadratic = spd_map.log_precision_action(parameters, residual)
+    assert bool(torch.isfinite(log_quadratic).all())
+
+
 def test_restricted_family_treats_canonical_failure_as_diagnostic():
     output = O3IrrepsSpec.from_cartesian("ij=ji")
     family = IsotypicBlockCovariance().compile(output)

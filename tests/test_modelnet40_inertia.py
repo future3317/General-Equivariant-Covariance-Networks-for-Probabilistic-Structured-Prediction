@@ -237,9 +237,21 @@ def test_shape_covariance_computation():
     """Manual shape covariance matches the helper for a random point cloud."""
     points = np.random.randn(64, 3).astype(np.float32)
     centered = points - points.mean(axis=0)
-    S = (centered.T @ centered) / len(points)
+    # Keep this oracle independent of the production helper while avoiding a
+    # tiny BLAS GEMM that loads a second OpenMP runtime in the Windows egnn
+    # environment.
+    x, y, z = centered.T
+    inv_n = 1.0 / len(points)
     expected = np.array(
-        [S[0, 0], S[1, 1], S[2, 2], S[1, 2], S[0, 2], S[0, 1]], dtype=np.float32
+        [
+            np.sum(x * x) * inv_n,
+            np.sum(y * y) * inv_n,
+            np.sum(z * z) * inv_n,
+            np.sum(y * z) * inv_n,
+            np.sum(x * z) * inv_n,
+            np.sum(x * y) * inv_n,
+        ],
+        dtype=np.float32,
     )
     assert np.allclose(_shape_covariance_voigt(points), expected, atol=1e-5)
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 
 from equivcompiler import (
+    CenteredSpectralWindowCovariance,
     FirstFeasible,
     FullCovariance,
     GraphPrecision,
@@ -50,12 +51,22 @@ def covariance_policy_from_cli(
     rank: int,
     parameter_budget: int,
     graph: EquivariantOutputGraph | None = None,
+    shape_min: float = -2.0,
+    shape_max: float = 2.0,
+    volume_min: float = -8.0,
+    volume_max: float = 8.0,
 ):
     """Translate an explicit CLI choice to one typed covariance policy."""
     policies = {
         "full": FullCovariance(),
         "low_rank": LowRankCovariance(rank),
         "block": IsotypicBlockCovariance(),
+        "centered_spectral_window": CenteredSpectralWindowCovariance(
+            shape_min=shape_min,
+            shape_max=shape_max,
+            volume_min=volume_min,
+            volume_max=volume_max,
+        ),
     }
     if graph is not None:
         policies["graph"] = GraphPrecision(graph)

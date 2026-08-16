@@ -40,6 +40,12 @@ class RepresentationMetricMap(SPDMap):
         metric = self.metric.to(dtype=residual.dtype, device=residual.device)
         return self.base.precision_action(A, residual * metric)
 
+    def log_precision_action(
+        self, A: torch.Tensor, residual: torch.Tensor
+    ) -> torch.Tensor:
+        metric = self.metric.to(dtype=residual.dtype, device=residual.device)
+        return self.base.log_precision_action(A, residual * metric)
+
     def precision(self, A: torch.Tensor) -> torch.Tensor:
         precision = self.base.precision(A)
         metric = self.metric.to(dtype=precision.dtype, device=precision.device)
