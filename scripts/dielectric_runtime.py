@@ -29,6 +29,7 @@ from equivcompiler import (
     SpectralWindowCovariance,
     plan_readout,
 )
+from equivcompiler.specs import TargetTransform
 from models import EquivariantBackbone
 from spd_maps import RepresentationMetricMap
 
@@ -258,6 +259,9 @@ def build_dielectric_model(spec: DielectricRunSpec, device: str | torch.device):
         distribution=spec.distribution,
         student_t_dof=spec.student_t_dof,
         output_scope="global",
+        target_transform=TargetTransform.identity(
+            "0e + 2e", name="physical_irrep_identity"
+        ),
     )
     model = plan.bind(backbone).to(device)
     if spec.representation_metric == "block_auto":

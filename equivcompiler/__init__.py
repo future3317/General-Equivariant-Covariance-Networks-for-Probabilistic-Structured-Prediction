@@ -42,7 +42,12 @@ from equivcompiler.policies import (
     TruncatedMultiplicityRank,
 )
 from equivcompiler.signatures import execution_signature_for_plan
-from equivcompiler.specs import FeatureSpec, OutputSemantics, describe_output
+from equivcompiler.specs import (
+    FeatureSpec,
+    OutputSemantics,
+    TargetTransform,
+    describe_output,
+)
 from representations import (
     CompilationCertificate,
     CompilationError,
@@ -64,7 +69,6 @@ __all__ = [
     "ConditionalStudentTRadial",
     "DeviceAutotuner",
     "DistributionSpec",
-    "ConditionalStudentTRadial",
     "EllipticalDistribution",
     "ExactExecutorCandidates",
     "ExactLoweringRegistry",
@@ -88,6 +92,7 @@ __all__ = [
     "SpecificExecutor",
     "SpectralWindowCovariance",
     "StudentTRadial",
+    "TargetTransform",
     "TruncatedMultiplicityRank",
     "UnreachableActiveTargetError",
     "UnreachableTargetError",

@@ -87,6 +87,8 @@ class O3Compilation:
     backend_exact: bool
     stf_contraction_rank: int | None
     config: LoweringConfig
+    target_transform: Any
+    target_transform_verification: dict[str, Any]
 
     @property
     def covariance_mode(self) -> str:
@@ -237,6 +239,8 @@ class O3ProgramCompiler:
         distribution_spec: Any,
         canonical_reachability: O3ReachabilityAnalysis | None = None,
         active_reachability: O3ReachabilityAnalysis | None = None,
+        target_transform: Any = None,
+        target_transform_verification: dict[str, Any] | None = None,
     ) -> O3Compilation:
         if not hasattr(feature_contract, "irreps") or not hasattr(
             feature_contract, "fingerprint"
@@ -351,6 +355,8 @@ class O3ProgramCompiler:
             backend_exact=backend_exact,
             stf_contraction_rank=contraction_rank,
             config=self.config,
+            target_transform=target_transform,
+            target_transform_verification=target_transform_verification or {},
         )
 
 

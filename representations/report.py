@@ -579,7 +579,7 @@ def build_compilation_report(
         "capability_certificate": (compilation.executor_decision.capability.as_dict()),
     }
     record = {
-        "schema_version": "3.0",
+        "schema_version": "3.1",
         "group": "O(3)",
         "output": output_record,
         "covariance_representation": _irrep_record(compilation.covariance_irreps),
@@ -635,6 +635,14 @@ def build_compilation_report(
         "probability": probability,
         "spd_contract": _spd_contract(compilation),
         "output_scope": compilation.config.output_scope,
+        "target_transform": (
+            compilation.target_transform.as_dict()
+            if compilation.target_transform is not None
+            else None
+        ),
+        "target_transform_verification": dict(
+            compilation.target_transform_verification
+        ),
         "certificates": certificates,
         "compiler_soundness": {
             "scope": "compositionally verified relative to registered typed primitives and lowering rules",

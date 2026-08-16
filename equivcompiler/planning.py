@@ -36,7 +36,12 @@ from equivcompiler.policies import (
     TruncatedMultiplicityRank,
 )
 from equivcompiler.signatures import plan_fingerprints
-from equivcompiler.specs import FeatureSpec, OutputSemantics, describe_output
+from equivcompiler.specs import (
+    FeatureSpec,
+    OutputSemantics,
+    TargetTransform,
+    describe_output,
+)
 from representations import (
     CompilationCertificate,
     CompilationError,
@@ -49,7 +54,7 @@ from representations import (
 from representations.operator_ir import OperatorFamilyPlan
 
 OutputScope = Literal["global", "node", "edge"]
-COMPILER_VERSION = "0.4"
+COMPILER_VERSION = "0.5"
 
 
 def _policy_record(policy: object) -> dict[str, Any]:
@@ -381,6 +386,7 @@ def _compatibility_hash(
     output_scope: OutputScope,
     lifting_backend: str,
     cueq_method: str,
+    target_transform: TargetTransform,
 ) -> str:
     payload = {
         "compiler_version": COMPILER_VERSION,
@@ -394,6 +400,7 @@ def _compatibility_hash(
         "output_scope": output_scope,
         "lifting_backend": lifting_backend,
         "cueq_method": cueq_method,
+        "target_transform": target_transform.as_dict(),
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -413,6 +420,8 @@ def _decorate_report(
     selection_reason: dict[str, Any],
     backend_selection_basis: dict[str, Any],
     compatibility_hash: str,
+    target_transform: TargetTransform,
+    target_transform_verification: dict[str, Any],
 ) -> CompilationReport:
     record = report.as_dict()
     certificates = []
@@ -445,6 +454,8 @@ def _decorate_report(
             "compatibility_hash": compatibility_hash,
             "feature_fingerprint": seed.fingerprint,
             "certificates": certificates,
+            "target_transform": target_transform.as_dict(),
+            "target_transform_verification": target_transform_verification,
         }
     )
     return CompilationReport.from_dict(record)
@@ -466,6 +477,8 @@ class CompilationPlan:
     selection_reason: dict[str, Any]
     backend_selection_basis: dict[str, Any]
     compatibility_hash: str
+    target_transform: TargetTransform
+    target_transform_verification: dict[str, Any]
     report: CompilationReport
 
     def build_readout(
@@ -511,6 +524,8 @@ class CompilationPlan:
             selection_reason=self.selection_reason,
             backend_selection_basis=self.backend_selection_basis,
             compatibility_hash=self.compatibility_hash,
+            target_transform=self.target_transform,
+            target_transform_verification=self.target_transform_verification,
         )
 
 
@@ -528,6 +543,7 @@ def plan_readout(
     output_scope: OutputScope = "global",
     lifting_backend: str = "e3nn",
     cueq_method: str = "naive",
+    target_transform: TargetTransform | None = None,
 ) -> CompilationPlan:
     """Analyze semantics/reachability and select an independently costed lowering."""
     executor = ExactExecutorCandidates() if executor is None else executor
@@ -539,6 +555,19 @@ def plan_readout(
         quadratic_oracle=quadratic_oracle,
     )
     semantics = describe_output(output)
+    target_transform = target_transform or TargetTransform.identity(
+        semantics.output_spec.irreps
+    )
+    target_transform_verification = target_transform.verify(semantics.output_spec)
+    if target_transform_verification["status"] != "verified":
+        raise CompilationError(
+            CompilationCertificate(
+                code="target_transform_contract_violation",
+                status="failure",
+                message="target transform is not an O(3)-equivariant affine map for the declared output",
+                details=target_transform_verification,
+            )
+        )
     pool_input = _validate_contract(seed, output_scope)
     family, selection_reason = _select_family(covariance, semantics)
 
@@ -597,6 +626,8 @@ def plan_readout(
         distribution_spec=distribution_spec,
         canonical_reachability=canonical_reachability,
         active_reachability=active_reachability,
+        target_transform=target_transform,
+        target_transform_verification=target_transform_verification,
     )
     if isinstance(fidelity_policy, ExactOnly) and not compilation.backend_exact:
         raise RuntimeError("ExactOnly materialized an approximate executor")
@@ -612,6 +643,7 @@ def plan_readout(
         output_scope,
         lifting_backend,
         cueq_method,
+        target_transform,
     )
     report = _decorate_report(
         compilation.report(),
@@ -626,6 +658,8 @@ def plan_readout(
         selection_reason=selection_reason,
         backend_selection_basis=backend_selection_basis,
         compatibility_hash=compatibility_hash,
+        target_transform=target_transform,
+        target_transform_verification=target_transform_verification,
     )
     return CompilationPlan(
         seed=seed,
@@ -640,5 +674,7 @@ def plan_readout(
         selection_reason=selection_reason,
         backend_selection_basis=backend_selection_basis,
         compatibility_hash=compatibility_hash,
+        target_transform=target_transform,
+        target_transform_verification=target_transform_verification,
         report=report,
     )

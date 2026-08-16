@@ -7,6 +7,8 @@ import json
 from dataclasses import dataclass
 from typing import Any, Literal
 
+import torch
+
 from compatibility.e3nn import o3
 from representations import O3IrrepsSpec, irrep_multiplicities
 from representations.representation_ir import (
@@ -22,6 +24,130 @@ from representations.representation_ir import (
 FeatureScope = Literal["global", "node", "edge"]
 FeatureLayout = Literal["e3nn", "compiler_native"]
 GroupName = Literal["O3", "SO3"]
+
+
+@dataclass(frozen=True)
+class TargetTransform:
+    """Typed affine map at the boundary of the compiled output contract.
+
+    ``linear`` is represented in column-vector convention.  The compiler only
+    accepts maps that commute with the declared output representation and whose
+    bias is invariant.  Dataset preprocessing that does not satisfy this
+    contract must be audited outside the exact compiler path.
+    """
+
+    output_irreps: o3.Irreps
+    name: str = "identity"
+    linear: tuple[tuple[float, ...], ...] | None = None
+    bias: tuple[float, ...] | None = None
+
+    def __post_init__(self) -> None:
+        irreps = o3.Irreps(self.output_irreps)
+        object.__setattr__(self, "output_irreps", irreps)
+        dimension = irreps.dim
+        if self.linear is not None:
+            matrix = tuple(tuple(float(value) for value in row) for row in self.linear)
+            if len(matrix) != dimension or any(len(row) != dimension for row in matrix):
+                raise ValueError("target-transform linear map has the wrong dimension")
+            object.__setattr__(self, "linear", matrix)
+        if self.bias is not None:
+            vector = tuple(float(value) for value in self.bias)
+            if len(vector) != dimension:
+                raise ValueError("target-transform bias has the wrong dimension")
+            object.__setattr__(self, "bias", vector)
+
+    @classmethod
+    def identity(cls, output_irreps: o3.Irreps | str, *, name: str = "identity"):
+        return cls(o3.Irreps(output_irreps), name=name)
+
+    @classmethod
+    def affine(
+        cls,
+        output_irreps: o3.Irreps | str,
+        linear: torch.Tensor,
+        bias: torch.Tensor | None = None,
+        *,
+        name: str = "affine",
+    ):
+        matrix = torch.as_tensor(linear, dtype=torch.float64)
+        if matrix.ndim != 2:
+            raise ValueError("target-transform linear map must be a matrix")
+        vector = (
+            torch.zeros(matrix.shape[0], dtype=torch.float64)
+            if bias is None
+            else torch.as_tensor(bias, dtype=torch.float64)
+        )
+        return cls(
+            o3.Irreps(output_irreps),
+            name=name,
+            linear=tuple(tuple(float(value) for value in row) for row in matrix.tolist()),
+            bias=tuple(float(value) for value in vector.tolist()),
+        )
+
+    @property
+    def dimension(self) -> int:
+        return self.output_irreps.dim
+
+    def linear_matrix(self, *, dtype: torch.dtype = torch.float64) -> torch.Tensor:
+        if self.linear is None:
+            return torch.eye(self.dimension, dtype=dtype)
+        return torch.tensor(self.linear, dtype=dtype)
+
+    def bias_vector(self, *, dtype: torch.dtype = torch.float64) -> torch.Tensor:
+        if self.bias is None:
+            return torch.zeros(self.dimension, dtype=dtype)
+        return torch.tensor(self.bias, dtype=dtype)
+
+    def verify(self, output_spec, *, tolerance: float = 1e-8) -> dict[str, Any]:
+        """Numerically verify the intertwiner and invariant-bias conditions."""
+        if o3.Irreps(output_spec.irreps) != self.output_irreps:
+            return {
+                "status": "rejected",
+                "reason": "output_irreps_mismatch",
+                "expected": str(self.output_irreps),
+                "actual": str(output_spec.irreps),
+            }
+        transformations = (
+            torch.eye(3, dtype=torch.float64),
+            torch.diag(torch.tensor([-1.0, 1.0, 1.0], dtype=torch.float64)),
+            torch.tensor(
+                [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+                dtype=torch.float64,
+            ),
+        )
+        linear = self.linear_matrix()
+        bias = self.bias_vector()
+        linear_residual = 0.0
+        bias_residual = 0.0
+        for transformation in transformations:
+            representation = output_spec.representation_matrix(transformation).double()
+            linear_residual = max(
+                linear_residual,
+                float((linear @ representation - representation @ linear).abs().max()),
+            )
+            bias_residual = max(
+                bias_residual,
+                float((representation @ bias - bias).abs().max()),
+            )
+        verified = linear_residual <= tolerance and bias_residual <= tolerance
+        return {
+            "status": "verified" if verified else "rejected",
+            "tolerance": tolerance,
+            "max_linear_intertwiner_residual": linear_residual,
+            "max_bias_invariance_residual": bias_residual,
+            "conditions": ["A rho(g) = rho(g) A", "rho(g) b = b"],
+        }
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "output_irreps": str(self.output_irreps),
+            "dimension": self.dimension,
+            "linear": self.linear_matrix().tolist(),
+            "bias": self.bias_vector().tolist(),
+            "coordinate_convention": "column_vector",
+            "semantic_boundary": "target_transform_to_compiled_output",
+        }
 
 
 def _components(irreps: o3.Irreps) -> tuple[dict[str, Any], ...]:

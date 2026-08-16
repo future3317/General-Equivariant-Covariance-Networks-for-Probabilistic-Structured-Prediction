@@ -10,6 +10,7 @@ from equivcompiler import (
     FullCovariance,
     GraphPrecision,
     LowRankCovariance,
+    TargetTransform,
     TruncatedMultiplicityRank,
     compile_readout,
     describe_output,
@@ -237,6 +238,43 @@ def test_compatibility_hash_covers_scope_and_layout():
     global_plan = plan_readout(FeatureSpec.from_irreps(SEED, scope="global"), **common)
     node_plan = plan_readout(FeatureSpec.from_irreps(SEED, scope="node"), **common)
     assert global_plan.compatibility_hash != node_plan.compatibility_hash
+
+
+def test_target_transform_is_recorded_and_changes_compatibility_identity():
+    seed = FeatureSpec.from_irreps("4x0e + 2x1o + 2x2e", scope="global")
+    identity = plan_readout(seed, output="0e + 2e", covariance=FullCovariance())
+    compatible = TargetTransform.affine(
+        "0e + 2e",
+        2.0 * torch.eye(6),
+        torch.tensor([0.25, 0.0, 0.0, 0.0, 0.0, 0.0]),
+        name="compatible_affine",
+    )
+    transformed = plan_readout(
+        seed,
+        output="0e + 2e",
+        covariance=FullCovariance(),
+        target_transform=compatible,
+    )
+    assert transformed.target_transform_verification["status"] == "verified"
+    assert transformed.report["target_transform"]["name"] == "compatible_affine"
+    assert transformed.compatibility_hash != identity.compatibility_hash
+    assert transformed.compilation.report()["target_transform"]["name"] == "compatible_affine"
+
+
+def test_target_transform_rejects_non_intertwining_affine_map():
+    seed = FeatureSpec.from_irreps("4x0e + 2x1o + 2x2e", scope="global")
+    transform = TargetTransform.affine(
+        "0e + 2e",
+        torch.diag(torch.tensor([1.0, 2.0, 1.0, 1.0, 1.0, 1.0])),
+        name="componentwise_scale",
+    )
+    with pytest.raises(CompilationError, match="target transform"):
+        plan_readout(
+            seed,
+            output="0e + 2e",
+            covariance=FullCovariance(),
+            target_transform=transform,
+        )
 
 
 def test_graph_precision_is_restricted_family_with_exact_lowering():
