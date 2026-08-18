@@ -27,7 +27,7 @@ from data.itop_dataset import (
 from data.itop_features import get_itop_feature_loaders
 from data.paths import dataset_dir
 from data.representation_metrics import infer_representation_block_metric
-from distributions import StudentTNLL
+from distributions import GaussianNLL, StudentTNLL
 from equivcompiler import (
     FeatureSpec,
     FullCovariance,
@@ -56,6 +56,8 @@ from models import (
 )
 from models.controlled_readout import ControlledMeanPooledParameterHead
 from models.fixed_coordinate_baseline import (
+    FixedCoordinateCholeskyMap,
+    FixedCoordinateCholeskyReadout,
     FixedCoordinateDiagonalMap,
     FixedCoordinateDiagonalReadout,
 )
@@ -83,6 +85,8 @@ MODEL_KINDS = (
     "graph_student_t",
     "shuffled_graph_student_t",
     "fixed_coordinate_diagonal_student_t",
+    "fixed_coordinate_cholesky_gaussian",
+    "fixed_coordinate_cholesky_student_t",
 )
 PHASES = ("deterministic", "frozen_head", "joint_finetune", "end_to_end")
 
@@ -173,6 +177,28 @@ def _build_model(args: argparse.Namespace):
             joint_head=ControlledMeanPooledParameterHead(mean_head, parameter_head),
             spd_map=FixedCoordinateDiagonalMap(),
             distribution=StudentTNLL(nu=args.student_t_dof),
+        )
+        return model, None
+
+    if args.model in {
+        "fixed_coordinate_cholesky_gaussian",
+        "fixed_coordinate_cholesky_student_t",
+    }:
+        mean_head = DeterministicHead(backbone.irreps_out, output, pool=True)
+        parameter_head = FixedCoordinateCholeskyReadout(
+            backbone.irreps_out.dim, output.dim
+        )
+        distribution = (
+            StudentTNLL(nu=args.student_t_dof)
+            if args.model.endswith("student_t")
+            else GaussianNLL()
+        )
+        model = StructuredProbabilisticPredictor(
+            backbone,
+            output,
+            joint_head=ControlledMeanPooledParameterHead(mean_head, parameter_head),
+            spd_map=FixedCoordinateCholeskyMap(output.dim),
+            distribution=distribution,
         )
         return model, None
 

@@ -11,6 +11,7 @@ from statistics import mean, stdev
 import torch
 from e3nn import o3
 
+from evaluation import empirical_coverage
 from scripts.train_itop import _build_model
 
 REQUIRED = (
@@ -30,6 +31,36 @@ METRICS = (
     "joint_mace",
     "frame_risk_coverage_auc_cm",
 )
+
+
+def _rotation_summary(records: list[dict[str, float]], *, rotations: int) -> dict:
+    """Aggregate coordinate-stress observations without hiding failures."""
+    if not records:
+        raise ValueError("rotation audit produced no observations")
+    required = {"equivariance_error", "nll_delta", "coverage90_delta", "coverage95_delta"}
+    if any(set(record) != required | {"is_reflection"} for record in records):
+        raise ValueError("rotation audit records have an unexpected schema")
+    errors = torch.tensor([record["equivariance_error"] for record in records], dtype=torch.float64)
+    nll = torch.tensor([record["nll_delta"] for record in records], dtype=torch.float64)
+    coverage90 = torch.tensor([record["coverage90_delta"] for record in records], dtype=torch.float64)
+    coverage95 = torch.tensor([record["coverage95_delta"] for record in records], dtype=torch.float64)
+    reflection_count = sum(bool(record["is_reflection"]) for record in records)
+    return {
+        "transform_count": len(records),
+        "rotation_count": len(records) - reflection_count,
+        "reflection_count": reflection_count,
+        "equivariance_error_mean": float(errors.mean()),
+        "equivariance_error_max": float(errors.max()),
+        "nll_delta_mean": float(nll.mean()),
+        "nll_delta_std": float(nll.std(unbiased=False)),
+        "nll_delta_max_abs": float(nll.abs().max()),
+        "coverage90_delta_mean": float(coverage90.mean()),
+        "coverage90_delta_max_abs": float(coverage90.abs().max()),
+        "coverage95_delta_mean": float(coverage95.mean()),
+        "coverage95_delta_max_abs": float(coverage95.abs().max()),
+        "all_finite": bool(torch.isfinite(torch.cat((errors, nll, coverage90, coverage95))).all()),
+        "requested_transform_count": rotations,
+    }
 
 
 def _read_run(path: Path) -> dict:
@@ -115,25 +146,47 @@ def _rotation_audit(run: dict, feature_cache: Path, *, rotations: int) -> dict:
     )
     model.load_state_dict(checkpoint["model_state"], strict=True)
     model.eval()
-    features = torch.load(feature_cache, map_location="cpu", weights_only=True)[
-        "features"
-    ][:512]
+    cache = torch.load(feature_cache, map_location="cpu", weights_only=True)
+    features = cache["features"][:512]
+    if "target" not in cache:
+        raise ValueError("rotation audit feature cache must contain targets")
+    targets = cache["target"][: features.shape[0]]
     batch = torch.arange(features.shape[0])
     feature_irreps = model.backbone.irreps_out
     output_irreps = model.output_spec.irreps
     with torch.no_grad():
-        base = model.forward_from_features(features, batch, return_scale=True)
+        base = model.forward_from_features(
+            features, batch, target=targets, return_scale=True
+        )
     errors = []
+    records = []
     base_scale = base["scale"].to(torch.float64)
+    base_mean = base["mu"].to(torch.float64)
+    base_target = targets.to(torch.float64)
+    base_nll = float(base["loss"].item())
+    base_coverage = empirical_coverage(
+        base_mean,
+        base_target,
+        base_scale,
+        reference="student_t" if run["args"]["model"].endswith("student_t") else "gaussian",
+        student_t_dof=float(run["args"].get("student_t_dof", 5.0)),
+    )
     with torch.random.fork_rng(devices=[]):
         torch.manual_seed(20260813)
         for _ in range(rotations):
             rotation = o3.rand_matrix()
+            is_reflection = len(records) % 2 == 1
+            if is_reflection:
+                reflection = torch.diag(torch.tensor([-1.0, 1.0, 1.0]))
+                rotation = reflection @ rotation
             feature_action = feature_irreps.D_from_matrix(rotation)
             output_action = output_irreps.D_from_matrix(rotation).to(torch.float64)
             with torch.no_grad():
                 transformed = model.forward_from_features(
-                    features @ feature_action.T, batch, return_scale=True
+                    features @ feature_action.T,
+                    batch,
+                    target=base_target @ output_action.T,
+                    return_scale=True,
                 )
             expected = output_action @ base_scale @ output_action.T
             numerator = torch.linalg.matrix_norm(
@@ -144,14 +197,31 @@ def _rotation_audit(run: dict, feature_cache: Path, *, rotations: int) -> dict:
             denominator = torch.linalg.matrix_norm(
                 expected, ord="fro", dim=(-2, -1)
             )
-            errors.extend((numerator / denominator.clamp_min(1e-15)).tolist())
-    return {
-        "sample_count": features.shape[0],
-        "rotation_count": rotations,
-        "relative_frobenius_mean": mean(errors),
-        "relative_frobenius_max": max(errors),
-        "all_finite": all(math.isfinite(value) for value in errors),
-    }
+            equivariance_error = numerator / denominator.clamp_min(1e-15)
+            errors.extend(equivariance_error.tolist())
+            transformed_scale = transformed["scale"].to(torch.float64)
+            transformed_coverage = empirical_coverage(
+                transformed["mu"].to(torch.float64),
+                base_target @ output_action.T,
+                transformed_scale,
+                reference="student_t" if run["args"]["model"].endswith("student_t") else "gaussian",
+                student_t_dof=float(run["args"].get("student_t_dof", 5.0)),
+            )
+            records.append(
+                {
+                    "equivariance_error": float(equivariance_error.mean()),
+                    "nll_delta": float(transformed["loss"].item() - base_nll),
+                    "coverage90_delta": float(
+                        transformed_coverage["coverage_90"] - base_coverage["coverage_90"]
+                    ),
+                    "coverage95_delta": float(
+                        transformed_coverage["coverage_95"] - base_coverage["coverage_95"]
+                    ),
+                    "is_reflection": is_reflection,
+                }
+            )
+    summary = _rotation_summary(records, rotations=rotations)
+    return {"sample_count": features.shape[0], **summary}
 
 
 def _parse_runs(values: list[str]) -> list[Path]:
@@ -165,7 +235,7 @@ def main() -> None:
     parser.add_argument("--no-edge", required=True)
     parser.add_argument("--fixed-coordinate", required=True)
     parser.add_argument("--feature-cache", required=True)
-    parser.add_argument("--rotations", type=int, default=8)
+    parser.add_argument("--rotations", type=int, default=300)
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
