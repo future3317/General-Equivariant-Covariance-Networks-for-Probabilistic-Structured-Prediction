@@ -51,13 +51,25 @@ class FixedCoordinateCholeskyReadout(torch.nn.Module):
     by :class:`FixedCoordinateCholeskyMap`.
     """
 
-    def __init__(self, feature_dim: int, output_dim: int):
+    def __init__(self, feature_dim: int, output_dim: int, *, diagonal_floor: float = 1e-2):
         super().__init__()
         if feature_dim < 1 or output_dim < 1:
             raise ValueError("feature_dim and output_dim must be positive")
+        if diagonal_floor <= 0 or diagonal_floor >= 1:
+            raise ValueError("diagonal_floor must lie in (0, 1)")
         self.output_dim = int(output_dim)
         self.parameter_count = self.output_dim * (self.output_dim + 1) // 2
+        self.diagonal_floor = float(diagonal_floor)
         self.projection = torch.nn.Linear(feature_dim, self.parameter_count)
+        torch.nn.init.zeros_(self.projection.weight)
+        rows, columns = torch.tril_indices(self.output_dim, self.output_dim)
+        diagonal = (rows == columns).nonzero(as_tuple=False).flatten()
+        identity_logit = torch.log(
+            torch.expm1(torch.tensor(1.0 - self.diagonal_floor))
+        )
+        with torch.no_grad():
+            self.projection.bias.zero_()
+            self.projection.bias[diagonal] = identity_logit
 
     def forward(self, features: torch.Tensor) -> torch.Tensor:
         return self.projection(features)
@@ -66,14 +78,23 @@ class FixedCoordinateCholeskyReadout(torch.nn.Module):
 class FixedCoordinateCholeskyMap(SPDMap):
     """Map unconstrained triangular coordinates to an SPD matrix."""
 
-    def __init__(self, output_dim: int, *, diagonal_floor: float = 1e-6):
+    def __init__(
+        self,
+        output_dim: int,
+        *,
+        diagonal_floor: float = 1e-2,
+        off_diagonal_scale: float = 0.25,
+    ):
         super().__init__()
         if output_dim < 1:
             raise ValueError("output_dim must be positive")
         if diagonal_floor <= 0:
             raise ValueError("diagonal_floor must be positive")
+        if off_diagonal_scale <= 0:
+            raise ValueError("off_diagonal_scale must be positive")
         self.output_dim = int(output_dim)
         self.diagonal_floor = float(diagonal_floor)
+        self.off_diagonal_scale = float(off_diagonal_scale)
         rows, columns = torch.tril_indices(self.output_dim, self.output_dim)
         self.register_buffer("rows", rows, persistent=False)
         self.register_buffer("columns", columns, persistent=False)
@@ -100,7 +121,9 @@ class FixedCoordinateCholeskyMap(SPDMap):
                 f"got {params.shape[-1]}"
             )
         factor = params.new_zeros(*params.shape[:-1], self.output_dim, self.output_dim)
-        factor[..., self.rows, self.columns] = params
+        factor[..., self.rows, self.columns] = (
+            torch.tanh(params) * self.off_diagonal_scale
+        )
         diagonal = params.index_select(-1, self.diagonal_index)
         diagonal_rows = torch.arange(self.output_dim, device=self.rows.device)
         factor[..., diagonal_rows, diagonal_rows] = (
