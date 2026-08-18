@@ -12,8 +12,15 @@ import sys
 from pathlib import Path
 
 
-def member_command(args: argparse.Namespace, seed: int, output: Path) -> list[str]:
-    return [
+def member_command(
+    args: argparse.Namespace,
+    seed: int,
+    output: Path,
+    *,
+    training_stage: str,
+    init_checkpoint: Path | None = None,
+) -> list[str]:
+    command = [
         sys.executable,
         str(Path(__file__).with_name("train_dielectric.py")),
         "--data_dir",
@@ -29,7 +36,7 @@ def member_command(args: argparse.Namespace, seed: int, output: Path) -> list[st
         "--covariance_parameterization",
         args.covariance_parameterization,
         "--training_stage",
-        args.training_stage,
+        training_stage,
         "--hidden_dim",
         str(args.hidden_dim),
         "--lmax",
@@ -53,6 +60,9 @@ def member_command(args: argparse.Namespace, seed: int, output: Path) -> list[st
         "--device",
         args.device,
     ]
+    if init_checkpoint is not None:
+        command.extend(["--init_checkpoint", str(init_checkpoint)])
+    return command
 
 
 def main() -> None:
@@ -67,7 +77,6 @@ def main() -> None:
         choices=("matrix_exp", "spectral_window", "centered_spectral_window"),
         default="centered_spectral_window",
     )
-    parser.add_argument("--training_stage", choices=("mean", "covariance", "joint"), default="joint")
     parser.add_argument("--hidden_dim", type=int, default=32)
     parser.add_argument("--lmax", type=int, default=2)
     parser.add_argument("--num_layers", type=int, default=2)
@@ -89,10 +98,24 @@ def main() -> None:
         output = args.output_root / f"seed_{seed}"
         if output.exists():
             raise FileExistsError(f"refusing to overwrite ensemble member: {output}")
-        command = member_command(args, seed, output)
-        print(" ".join(command))
-        if not args.dry_run:
-            subprocess.run(command, check=True)
+        mean_dir = output / "mean"
+        covariance_dir = output / "covariance"
+        stages = (
+            ("mean", mean_dir, None),
+            ("covariance", covariance_dir, mean_dir),
+            ("joint", output, covariance_dir),
+        )
+        for training_stage, stage_dir, init_checkpoint in stages:
+            command = member_command(
+                args,
+                seed,
+                stage_dir,
+                training_stage=training_stage,
+                init_checkpoint=init_checkpoint,
+            )
+            print(" ".join(command))
+            if not args.dry_run:
+                subprocess.run(command, check=True)
 
 
 if __name__ == "__main__":
