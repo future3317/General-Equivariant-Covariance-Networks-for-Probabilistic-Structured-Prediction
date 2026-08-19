@@ -227,6 +227,13 @@ def _metric_summary(run: dict[str, Any], view: str) -> dict[str, float | int | N
     }
 
 
+def _cluster_means(values: np.ndarray, cluster_ids: np.ndarray) -> dict[str, float]:
+    return {
+        str(cluster): float(values[cluster_ids == cluster].mean())
+        for cluster in np.unique(cluster_ids)
+    }
+
+
 def _paired_nll(
     true: dict[str, Any],
     shuffled: dict[str, Any],
@@ -243,6 +250,7 @@ def _paired_nll(
         "true_frame_nll_mean": float(_frame_nll(true_prediction).mean()),
         "shuffled_frame_nll_mean": float(_frame_nll(shuffled_prediction).mean()),
         "mean": float(values.mean()),
+        "subject_level_mean": _cluster_means(values, subject_ids),
         "bootstrap_95": list(bootstrap_mean_interval(values, seed=seed, samples=4000)),
         "subject_cluster_bootstrap_95": list(
             cluster_bootstrap_mean_interval(
@@ -315,6 +323,7 @@ def audit(
                 np.concatenate(pooled_shuffled[view]).mean()
             ),
             "mean": float(values.mean()),
+            "subject_level_mean": _cluster_means(values, subject_ids),
             "bootstrap_95": list(
                 bootstrap_mean_interval(values, seed=20260816, samples=4000)
             ),
