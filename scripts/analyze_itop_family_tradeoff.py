@@ -11,6 +11,10 @@ from typing import Any
 import numpy as np
 import torch
 
+from scripts.audit_itop_topology_pairing import (
+    _subject_ids,
+    cluster_bootstrap_mean_interval,
+)
 from scripts.itop_reproducibility import atomic_write_json
 
 
@@ -40,6 +44,32 @@ def aggregate_paired_differences(records: list[torch.Tensor]) -> torch.Tensor:
     if not records or len({tuple(record.shape) for record in records}) != 1:
         raise ValueError("seed-wise paired differences must share one sample shape")
     return torch.stack([record.detach().double().cpu() for record in records]).mean(0)
+
+
+def subject_cluster_bootstrap_interval(
+    differences: torch.Tensor,
+    subject_ids: list[str] | np.ndarray,
+    *,
+    repetitions: int = 2000,
+    seed: int = 42,
+) -> dict[str, float | int | str]:
+    values = differences.detach().double().cpu().numpy().reshape(1, -1)
+    interval = cluster_bootstrap_mean_interval(
+        values,
+        np.asarray(subject_ids),
+        seed=seed,
+        samples=repetitions,
+    )
+    return {
+        "pairs": int(values.shape[1]),
+        "repetitions": int(repetitions),
+        "seed": int(seed),
+        "mean": float(values.mean()),
+        "lower_95": interval[0],
+        "upper_95": interval[1],
+        "cluster_unit": "subject prefix from official compact label ID",
+        "cluster_count": int(np.unique(subject_ids).size),
+    }
 
 
 def validate_paired_predictions(
@@ -127,12 +157,14 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--pair", action="append", required=True, metavar="SEED=FULL=GRAPH")
     parser.add_argument("--runtime", type=Path, required=True)
+    parser.add_argument("--labels", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--bootstrap-repetitions", type=int, default=2000)
     args = parser.parse_args()
 
     seed_records: dict[str, Any] = {}
     deltas_by_view: dict[str, list[torch.Tensor]] = {"side": [], "top": []}
+    subjects_by_view: dict[str, np.ndarray] = {}
     for seed, full_dir, graph_dir in sorted(_parse_pair(value) for value in args.pair):
         views = {}
         for view in ("side", "top"):
@@ -143,11 +175,20 @@ def main() -> None:
             graph_nll = _per_sample_nll(graph_dir, graph_prediction)
             delta = graph_nll - full_nll
             deltas_by_view[view].append(delta)
+            subjects_by_view[view] = _subject_ids(
+                args.labels, full_prediction["frame_index"].numpy()
+            )
             views[view] = {
                 "full_mean_nll": float(full_nll.mean()),
                 "graph_mean_nll": float(graph_nll.mean()),
                 "graph_minus_full": paired_bootstrap_interval(
                     delta,
+                    repetitions=args.bootstrap_repetitions,
+                    seed=seed,
+                ),
+                "subject_cluster_bootstrap": subject_cluster_bootstrap_interval(
+                    delta,
+                    subjects_by_view[view],
                     repetitions=args.bootstrap_repetitions,
                     seed=seed,
                 ),
@@ -173,14 +214,22 @@ def main() -> None:
                 )
             ),
         }
-    aggregate = {
-        view: paired_bootstrap_interval(
-            aggregate_paired_differences(deltas),
+    aggregate = {}
+    for view, deltas in deltas_by_view.items():
+        aggregate_delta = aggregate_paired_differences(deltas)
+        aggregate[view] = paired_bootstrap_interval(
+            aggregate_delta,
             repetitions=args.bootstrap_repetitions,
             seed=20260811,
         )
-        for view, deltas in deltas_by_view.items()
-    }
+        aggregate[view]["subject_cluster_bootstrap"] = (
+            subject_cluster_bootstrap_interval(
+                aggregate_delta,
+                subjects_by_view[view],
+                repetitions=args.bootstrap_repetitions,
+                seed=20260817,
+            )
+        )
     result = {
         "schema_version": 1,
         "comparison": "paired frozen-backbone Full-t versus Graph-t",
@@ -198,6 +247,10 @@ def main() -> None:
         "claim_boundary": (
             "Head-seed, shared-backbone family evidence; not independent-backbone "
             "robustness or calibrated OOD detection."
+        ),
+        "cluster_inference": (
+            "Subject-cluster bootstrap uses the official compact label ID prefix; "
+            "action-sequence metadata is not present in the compact artifact."
         ),
     }
     atomic_write_json(result, args.output)

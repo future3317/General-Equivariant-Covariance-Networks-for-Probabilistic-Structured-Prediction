@@ -4,10 +4,21 @@ import torch
 
 from scripts.analyze_itop_family_tradeoff import (
     aggregate_paired_differences,
+    subject_cluster_bootstrap_interval,
     paired_bootstrap_interval,
     pareto_frontier,
     validate_paired_predictions,
 )
+
+
+def test_subject_cluster_interval_uses_complete_clusters():
+    delta = torch.tensor([1.0, 1.0, 10.0, 10.0])
+    result = subject_cluster_bootstrap_interval(
+        delta, ["a", "a", "b", "b"], repetitions=200, seed=9
+    )
+    assert result["mean"] == 5.5
+    assert result["cluster_count"] == 2
+    assert result["lower_95"] <= result["mean"] <= result["upper_95"]
 
 
 def test_paired_bootstrap_is_reproducible_and_contains_constant_delta():

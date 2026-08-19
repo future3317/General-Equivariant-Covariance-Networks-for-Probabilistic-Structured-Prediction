@@ -35,16 +35,16 @@ The coverage values are mean per-joint marginal coverages at the nominal
 level. The exact source rows remain available in the audit JSON and original
 metrics artifacts.
 
-### ITOP paired per-frame bootstrap
+### ITOP paired comparisons
 
 The new audit uses exact saved frame IDs, identical targets, and production
 Student-t sufficient statistics. Values are `right - left`; negative Top NLL
 means the right-hand model is better under the proper score.
 
-| Contrast | View | Pooled NLL difference | 95% paired bootstrap interval |
+| Contrast | View | Pooled NLL difference | 95% subject-cluster bootstrap interval |
 |---|---|---:|---:|
-| Graph-t − Full-t | Side | +14.848 | [+14.691, +15.002] |
-| Graph-t − Full-t | Top | -4.372 | [-4.492, -4.257] |
+| Graph-t − Full-t | Side | +14.848 | [+12.743, +16.707] |
+| Graph-t − Full-t | Top | -4.372 | [-5.929, -3.021] |
 | Graph-t − LR-t | Side | -19.944 | [-20.102, -19.783] |
 | Graph-t − LR-t | Top | -27.257 | [-27.362, -27.150] |
 | LR-t − Full-t | Side | +34.793 | [+34.588, +34.994] |
@@ -63,7 +63,7 @@ reports right-minus-left NLL:
 
 | Contrast | Mean difference | 95% cluster bootstrap interval |
 |---|---:|---:|
-| Full Student-t - Full Gaussian | -11.313 | [-11.669, -10.966] |
+| Full Student-t - Full Gaussian | -2.134 | [-2.490, -1.787] |
 | Full Student-t - Isotropic Student-t | -2.568 | [-2.936, -2.199] |
 
 The machine-readable output is
@@ -74,8 +74,9 @@ add training or test-set model selection.
 ### Dielectric fixed-nu sensitivity
 
 This is a post-hoc scan of the saved Full-t predictions using the existing
-Student-t log-probability implementation. It is not validation selection and
-does not constitute a learned global nu experiment.
+Student-t log-probability implementation. It is distinct from the completed
+one-seed validation-selected global-$\nu$ control recorded in
+`results/stat_misspec_pilot_868baac/dielectric/global_nu`.
 
 | Fixed nu | Test NLL mean ± seed SD |
 |---:|---:|
@@ -98,7 +99,10 @@ The exact output is `results/dielectric_fixed_nu_sensitivity_20260812/fixed_nu_s
   Indep-t versus Graph-t and Graph-G versus Graph-t are available under the same
   frozen representation contract, but their single-seed status remains explicit.
 - The fixed-nu scan supports sensitivity of the radial-law result; it does not
-  establish validation-selected nu or repair directional misspecification.
+  establish that a fixed $ν=5$ is selected or repair directional misspecification.
+- The validation-selected global-$\nu$ control is a completed one-seed negative
+  control (NLL `-2.662`, MACE `0.106`, whitened defect `9.960`); it is not a
+  replacement for the three-seed conditional-$\nu(x)$ comparison.
 - Elasticity supports end-to-end trainability of the complete rank-4 path. Its
   three-seed averages are Full-t NLL `28.628 ± 0.490`, LR-t NLL `31.969 ±
   0.043`, Full-t Energy `7.187 ± 0.043`, and LR-t Energy `6.999 ± 0.011`.
@@ -117,8 +121,6 @@ The exact output is `results/dielectric_fixed_nu_sensitivity_20260812/fixed_nu_s
 
 ## Unresolved
 
-- A true validation-selected global nu would require validation prediction
-  artifacts or a new controlled training/evaluation protocol.
 - Six-head multi-seed uncertainty-factorial variance remains unmeasured.
 - All executable application evidence remains on the validated O(3) backend;
   no second-group empirical result is inferred.

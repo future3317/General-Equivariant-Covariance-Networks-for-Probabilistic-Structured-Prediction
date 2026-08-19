@@ -27,7 +27,7 @@ from data.itop_dataset import (
 from data.itop_features import get_itop_feature_loaders
 from data.paths import dataset_dir
 from data.representation_metrics import infer_representation_block_metric
-from distributions import StudentTNLL
+from distributions import GaussianNLL, StudentTNLL
 from equivcompiler import (
     FeatureSpec,
     FullCovariance,
@@ -56,6 +56,8 @@ from models import (
 )
 from models.controlled_readout import ControlledMeanPooledParameterHead
 from models.fixed_coordinate_baseline import (
+    FixedCoordinateCholeskyMap,
+    FixedCoordinateCholeskyReadout,
     FixedCoordinateDiagonalMap,
     FixedCoordinateDiagonalReadout,
 )
@@ -83,6 +85,8 @@ MODEL_KINDS = (
     "graph_student_t",
     "shuffled_graph_student_t",
     "fixed_coordinate_diagonal_student_t",
+    "fixed_coordinate_cholesky_gaussian",
+    "fixed_coordinate_cholesky_student_t",
 )
 PHASES = ("deterministic", "frozen_head", "joint_finetune", "end_to_end")
 
@@ -173,6 +177,28 @@ def _build_model(args: argparse.Namespace):
             joint_head=ControlledMeanPooledParameterHead(mean_head, parameter_head),
             spd_map=FixedCoordinateDiagonalMap(),
             distribution=StudentTNLL(nu=args.student_t_dof),
+        )
+        return model, None
+
+    if args.model in {
+        "fixed_coordinate_cholesky_gaussian",
+        "fixed_coordinate_cholesky_student_t",
+    }:
+        mean_head = DeterministicHead(backbone.irreps_out, output, pool=True)
+        parameter_head = FixedCoordinateCholeskyReadout(
+            backbone.irreps_out.dim, output.dim
+        )
+        distribution = (
+            StudentTNLL(nu=args.student_t_dof)
+            if args.model.endswith("student_t")
+            else GaussianNLL()
+        )
+        model = StructuredProbabilisticPredictor(
+            backbone,
+            output,
+            joint_head=ControlledMeanPooledParameterHead(mean_head, parameter_head),
+            spd_map=FixedCoordinateCholeskyMap(output.dim),
+            distribution=distribution,
         )
         return model, None
 
@@ -586,9 +612,103 @@ def _energy_and_bone_error(
     return score.mean(), bone
 
 
+class EvaluationSPDCertificateError(FloatingPointError):
+    """A strict-SPD evaluation failure with its batch-level audit payload."""
+
+    def __init__(self, message: str, diagnostic: dict[str, Any]):
+        super().__init__(message)
+        self.diagnostic = diagnostic
+
+
+def _conditioning_summary(
+    spd_map,
+    params: torch.Tensor,
+    scale: torch.Tensor,
+    certificate: dict[str, object],
+    *,
+    batch: Any | None = None,
+) -> dict[str, object]:
+    """Summarize the failed factor and its materialized scatter.
+
+    This is only called on a rejected evaluation batch.  It compares the
+    factor-level singular values with the eigendecomposition of ``LL^T`` so a
+    failed certificate can distinguish conditioning collapse from a
+    materialization discrepancy.
+    """
+    summary: dict[str, object] = {"certificate": certificate}
+    factor_builder = getattr(spd_map, "_factor", None)
+    if not callable(factor_builder):
+        summary["factor_audit"] = None
+    else:
+        factor = factor_builder(params.detach().double())
+        diagonal = torch.diagonal(factor, dim1=-2, dim2=-1)
+        diagonal_matrix = torch.diag_embed(diagonal)
+        off_diagonal = factor - diagonal_matrix
+        singular_values = torch.linalg.svdvals(factor)
+        eigenvalues = torch.linalg.eigvalsh(scale)
+        sigma_min = singular_values[..., -1]
+        sigma_max = singular_values[..., 0]
+        eigen_min = eigenvalues[..., 0]
+        eigen_max = eigenvalues[..., -1]
+        factor_condition = sigma_max / sigma_min
+        scatter_condition = eigen_max / eigen_min
+        diagonal_norm = torch.linalg.vector_norm(diagonal_matrix, dim=(-2, -1))
+        off_diagonal_norm = torch.linalg.vector_norm(off_diagonal, dim=(-2, -1))
+        off_diagonal_ratio = off_diagonal_norm / diagonal_norm
+
+        def stats(values: torch.Tensor) -> dict[str, float]:
+            flat = values.detach().double().flatten()
+            return {
+                "min": float(flat.min()),
+                "median": float(flat.median()),
+                "max": float(flat.max()),
+            }
+
+        summary["factor_audit"] = {
+            "diag_L": stats(diagonal),
+            "max_abs_L_offdiag": float(off_diagonal.abs().max()),
+            "offdiag_frobenius_over_diag_frobenius": stats(off_diagonal_ratio),
+            "sigma_min_L": stats(sigma_min),
+            "sigma_max_L": stats(sigma_max),
+            "kappa_2_L": stats(factor_condition),
+            "lambda_min_LL_T": stats(eigen_min),
+            "lambda_max_LL_T": stats(eigen_max),
+            "kappa_2_LL_T": stats(scatter_condition),
+            "lambda_min_over_strict_threshold": stats(
+                eigen_min / float(certificate["threshold"])
+            ),
+            "lambda_min_vs_sigma_min_squared_max_abs": float(
+                (eigen_min - sigma_min.square()).abs().max()
+            ),
+            "matrix_count": int(factor.shape[0]),
+        }
+
+    if batch is not None:
+        records: list[dict[str, object]] = []
+        frame_index = _batch_field(batch, "frame_index").detach().cpu().flatten()
+        visible = _batch_field(batch, "visible_joints").detach().cpu()
+        feature_norm = None
+        if isinstance(batch, dict) and "features" in batch:
+            feature_norm = torch.linalg.vector_norm(
+                batch["features"].detach().float(), dim=-1
+            ).cpu()
+        for index in range(min(10, frame_index.numel())):
+            record: dict[str, object] = {
+                "frame_index": int(frame_index[index]),
+                "visible_joint_fraction": float(visible[index].float().mean()),
+            }
+            if feature_norm is not None:
+                record["feature_norm"] = float(feature_norm[index])
+            records.append(record)
+        summary["sample_frames"] = records
+    return summary
+
+
 def _materialize_evaluation_scatter(
     spd_map,
     params: torch.Tensor,
+    *,
+    batch: Any | None = None,
 ) -> tuple[torch.Tensor, dict[str, object]]:
     """Materialize a diagnostic scatter matrix without changing the model law.
 
@@ -603,9 +723,13 @@ def _materialize_evaluation_scatter(
     _require_finite_tensor("evaluation FP64 scale", scale)
     certificate = certify_numerical_spd(scale, dtype=torch.float64)
     if not certificate.strict:
-        raise FloatingPointError(
+        diagnostic = _conditioning_summary(
+            spd_map, params, scale, certificate.as_dict(), batch=batch
+        )
+        raise EvaluationSPDCertificateError(
             "evaluation scatter failed the FP64 numerical SPD certificate: "
-            f"{certificate.as_dict()}"
+            f"{certificate.as_dict()}",
+            diagnostic,
         )
     return scale, certificate.as_dict()
 
@@ -620,6 +744,7 @@ def evaluate(
     student_t_dof: float,
     detailed: bool,
     use_bf16: bool,
+    split_name: str = "unknown",
 ) -> tuple[dict[str, Any], dict[str, torch.Tensor]]:
     model.eval()
     total_loss = 0.0
@@ -674,9 +799,18 @@ def evaluate(
         frame_indices.append(_batch_field(batch, "frame_index").cpu())
         view_ids.append(_batch_field(batch, "view_id").cpu())
         if detailed and model_kind != "deterministic":
-            scatter, scale_certificate = _materialize_evaluation_scatter(
-                model.spd_map, result["params"]
-            )
+            try:
+                scatter, scale_certificate = _materialize_evaluation_scatter(
+                    model.spd_map, result["params"], batch=batch
+                )
+            except EvaluationSPDCertificateError as error:
+                error.diagnostic.update(
+                    {
+                        "split": split_name,
+                        "stage": f"{split_name}_strict_spd_audit",
+                    }
+                )
+                raise
             scale_certificates.append(scale_certificate)
             covariance = (
                 (student_t_dof / (student_t_dof - 2.0)) * scatter
@@ -1222,24 +1356,49 @@ def main() -> None:
         )
     payload = _load_checkpoint(best_path)
     model.load_state_dict(payload["model_state"], strict=True)
-    side_metrics, side_artifact = evaluate(
-        model,
-        side_loader,
-        device,
-        model_kind=args.model,
-        student_t_dof=args.student_t_dof,
-        detailed=True,
-        use_bf16=use_bf16,
-    )
-    top_metrics, top_artifact = evaluate(
-        model,
-        top_loader,
-        device,
-        model_kind=args.model,
-        student_t_dof=args.student_t_dof,
-        detailed=True,
-        use_bf16=use_bf16,
-    )
+    try:
+        side_metrics, side_artifact = evaluate(
+            model,
+            side_loader,
+            device,
+            model_kind=args.model,
+            student_t_dof=args.student_t_dof,
+            detailed=True,
+            use_bf16=use_bf16,
+            split_name="side",
+        )
+        top_metrics, top_artifact = evaluate(
+            model,
+            top_loader,
+            device,
+            model_kind=args.model,
+            student_t_dof=args.student_t_dof,
+            detailed=True,
+            use_bf16=use_bf16,
+            split_name="top",
+        )
+    except EvaluationSPDCertificateError as error:
+        certificate = error.diagnostic["certificate"]
+        _write_json(
+            {
+                "schema_version": 1,
+                "status": "failed_certificate",
+                "stage": error.diagnostic["stage"],
+                "checkpoint": str(best_path),
+                "model": args.model,
+                "dtype": certificate["dtype"],
+                "min_eigenvalue": certificate["minimum_eigenvalue"],
+                "minimum_eigenvalue": certificate["minimum_eigenvalue"],
+                "threshold": certificate["threshold"],
+                "strict_spd_threshold": certificate["threshold"],
+                "metrics_complete": False,
+                "paper_eligible": False,
+                **error.diagnostic,
+            },
+            run_dir / "failure.json",
+        )
+        logger.exception("strict-SPD evaluation certificate failed")
+        raise
     ood = _ood_metrics(side_metrics, side_artifact, top_metrics, top_artifact)
     results = {"side": side_metrics, "top": top_metrics, "ood": ood}
     logger.info("results=%s", json.dumps(results, sort_keys=True))

@@ -90,7 +90,7 @@ Evidence paths:
 - local:
   `results/independent_teacher_recovery_bc0d297`;
 - design:
-  `docs/superpowers/specs/2026-08-11-independent-teacher-recovery-design.md`.
+  `docs/archive/2026-08-18/superpowers/specs/2026-08-11-independent-teacher-recovery-design.md`.
 
 ## Supported inference
 

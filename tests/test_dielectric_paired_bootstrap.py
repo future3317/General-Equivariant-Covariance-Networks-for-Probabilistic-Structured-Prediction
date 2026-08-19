@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 import torch
 
@@ -29,6 +31,26 @@ def test_paired_difference_uses_full_normalized_laws() -> None:
     assert values.shape == (2,)
     assert np.isfinite(values).all()
     assert not np.allclose(values, 0.0)
+
+
+def test_student_t_nll_uses_negative_log_normalization_constant() -> None:
+    prediction = _prediction([[0.0] * 6])
+    values = paired_difference(
+        prediction,
+        prediction,
+        left_law="gaussian",
+        right_law="student_t",
+    )
+
+    dimension = 6
+    nu = 5.0
+    expected = (
+        -math.lgamma((nu + dimension) / 2.0)
+        + math.lgamma(nu / 2.0)
+        + 0.5 * dimension * math.log(nu * math.pi)
+        - 0.5 * dimension * math.log(2.0 * math.pi)
+    )
+    assert np.allclose(values, expected)
 
 
 def test_cluster_bootstrap_is_reproducible_and_finite() -> None:

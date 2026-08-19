@@ -80,7 +80,7 @@ def _nll(prediction: dict[str, Any], law: str, nu: float = 5.0) -> np.ndarray:
             - torch.lgamma(torch.as_tensor(nu / 2.0, dtype=torch.float64))
             - 0.5 * dimension * math.log(nu * math.pi)
         )
-        values = normalization + 0.5 * logdet + 0.5 * (nu + dimension) * torch.log1p(
+        values = -normalization + 0.5 * logdet + 0.5 * (nu + dimension) * torch.log1p(
             mahalanobis2 / nu
         )
     else:

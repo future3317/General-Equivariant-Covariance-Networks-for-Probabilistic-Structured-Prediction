@@ -58,7 +58,7 @@ Evidence paths:
   `/home/workspace/lrh/RESULTS/Tpami/dielectric/family_factorial_formal_0b5ea92`;
 - local: `results/dielectric_family_factorial_0b5ea92`;
 - failed pilot record:
-  `docs/dielectric_family_factorial_pilot_v1_20260811.md`.
+  `docs/archive/2026-08-18/dielectric_family_factorial_pilot_v1_20260811.md`.
 
 ## New formal evidence
 

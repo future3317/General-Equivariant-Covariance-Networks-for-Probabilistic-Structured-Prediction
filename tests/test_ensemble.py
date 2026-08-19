@@ -9,6 +9,7 @@ from evaluation.ensemble import (
     sample_ensemble,
     variogram_score,
 )
+from evaluation.temperature import fit_mixture_temperature
 
 
 def test_chunked_energy_score_matches_dense_value_and_gradient():
@@ -129,3 +130,14 @@ def test_finite_mixture_log_prob_exposes_normalized_posteriors():
         ),
         -result["log_prob"].mean(),
     )
+
+
+def test_mixture_temperature_is_finite_and_optimizes_a_valid_scale():
+    torch.manual_seed(11)
+    means = torch.randn(3, 8, 2, dtype=torch.float64)
+    scales = torch.eye(2, dtype=torch.float64).reshape(1, 1, 2, 2).expand(3, 8, 2, 2).clone()
+    target = torch.randn(8, 2, dtype=torch.float64)
+    temperature = fit_mixture_temperature(
+        means, scales, target, distribution="student_t", student_t_dof=5.0
+    )
+    assert temperature > 0.0

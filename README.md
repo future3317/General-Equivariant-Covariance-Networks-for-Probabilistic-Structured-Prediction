@@ -94,10 +94,16 @@ These compact figures are included as a visual entry point to the scientific sto
 - Soundness is compositional relative to registered typed primitives, representation/decomposition oracles, and registered lowering rules.
 - The certificate is **not** a formal verification of arbitrary user code, a completeness theorem for all equivariant SPD programs, or a guarantee of calibration or physical uncertainty identification.
 - Dataset payloads, checkpoints, and large run artifacts are external to the source tree. Reproducibility is defined by the benchmark contract and recorded run manifests, not by committing private data.
+- The external Deep Ensemble control has a completed three-member staged run and validation-calibrated evaluator output; it remains an external diagnostic rather than a headline benchmark comparison.
+- The fixed-coordinate Cholesky smoke is retained as a numerical negative diagnostic and is not promoted by relaxing the strict-SPD gate.
 
 The repository is an active research implementation. Interfaces and experiment records may evolve while the manuscript and benchmark protocol are being consolidated.
 
 For the normative mathematical boundary, see [`mathematical_contract.md`](mathematical_contract.md). For the exact scope of compiler certificates, see [`docs/compiler_certificate_scope.md`](docs/compiler_certificate_scope.md).
+
+The maintained documentation map is [`docs/README.md`](docs/README.md). It
+links the current contracts and artifact-backed evidence; completed pilots and
+superseded plans are preserved separately in the bounded archive.
 
 ## Benchmark Contract / 基准协议
 

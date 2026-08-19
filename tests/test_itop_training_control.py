@@ -11,6 +11,7 @@ import pytest
 import torch
 from torch.utils.data import DataLoader, RandomSampler, TensorDataset
 
+from models.fixed_coordinate_baseline import FixedCoordinateCholeskyMap
 from scripts.evaluate_itop_final import _available_models
 from scripts.itop_reproducibility import training_contract
 from scripts.run_itop_e3a import _member_command
@@ -24,6 +25,7 @@ from scripts.run_itop_study import (
 )
 from scripts.train_itop import (
     MODEL_KINDS,
+    EvaluationSPDCertificateError,
     _build_model,
     _capture_rng_state,
     _configure_initialization,
@@ -156,6 +158,30 @@ def test_itop_evaluation_materializes_frozen_generator_in_fp64_without_repair():
         scale,
         torch.diag_embed(torch.exp(params.double().diagonal(dim1=-2, dim2=-1))),
     )
+
+
+def test_itop_evaluation_records_factor_conditioning_on_strict_spd_failure():
+    mapping = FixedCoordinateCholeskyMap(output_dim=45)
+    params = torch.full(
+        (1, mapping.parameter_count), 10.0, dtype=torch.float64
+    )
+    params[:, mapping.diagonal_index] = -20.0
+    batch = {
+        "frame_index": torch.tensor([17]),
+        "visible_joints": torch.ones(1, 15, dtype=torch.bool),
+        "features": torch.ones(1, 8),
+    }
+    with pytest.raises(EvaluationSPDCertificateError) as error:
+        _materialize_evaluation_scatter(mapping, params, batch=batch)
+    diagnostic = error.value.diagnostic
+    factor_audit = diagnostic["factor_audit"]
+    assert factor_audit["matrix_count"] == 1
+    assert "sigma_min_L" in factor_audit
+    assert "lambda_min_LL_T" in factor_audit
+    assert "lambda_min_vs_sigma_min_squared_max_abs" in factor_audit
+    assert diagnostic["sample_frames"] == [
+        {"frame_index": 17, "visible_joint_fraction": 1.0, "feature_norm": 2.8284270763397217}
+    ]
 
 
 def test_training_sample_order_is_seed_and_epoch_addressable():
@@ -435,6 +461,26 @@ def test_fixed_coordinate_control_bypasses_compiler():
     assert plan is None
     assert model.compilation is None
     assert model.joint_head.operator_head.projection.out_features == 45
+
+
+@pytest.mark.parametrize("model_name", ("fixed_coordinate_cholesky_gaussian", "fixed_coordinate_cholesky_student_t"))
+def test_fixed_coordinate_cholesky_control_bypasses_compiler(model_name):
+    model, plan = _build_model(
+        SimpleNamespace(
+            model=model_name,
+            hidden_dim=16,
+            max_radius=0.5,
+            lmax=2,
+            num_layers=1,
+            num_basis=4,
+            tp_backend="e3nn",
+            cueq_method="naive",
+            student_t_dof=5.0,
+        )
+    )
+    assert plan is None
+    assert model.compilation is None
+    assert model.joint_head.operator_head.parameter_count == 1035
 
 
 def test_end_to_end_phase_requires_independent_probabilistic_initialization():

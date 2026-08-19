@@ -79,6 +79,53 @@ def fit_temperature(
     return float(log_t.detach().exp().clamp(min_temperature, max_temperature).item())
 
 
+def fit_mixture_temperature(
+    means: Tensor,
+    scales: Tensor,
+    target: Tensor,
+    *,
+    distribution: str = "gaussian",
+    student_t_dof: float = 5.0,
+    min_temperature: float = 1e-3,
+    max_temperature: float = 1e3,
+    steps: int = 80,
+) -> float:
+    """Fit one validation-only scale temperature for an exact finite mixture."""
+    if means.ndim != 3 or scales.ndim != 4:
+        raise ValueError("expected means (M,N,d) and scales (M,N,d,d)")
+    if scales.shape[:2] != means.shape[:2] or scales.shape[-1] != means.shape[-1]:
+        raise ValueError("mixture means/scales have incompatible shapes")
+    if target.shape != means.shape[1:]:
+        raise ValueError("target must have shape (N,d)")
+    if not (0.0 < min_temperature < max_temperature):
+        raise ValueError("invalid temperature bounds")
+    from evaluation.ensemble import finite_mixture_nll
+
+    means = means.detach().clone()
+    scales = scales.detach().clone()
+    target = target.detach().clone()
+    log_t = torch.zeros((), dtype=scales.dtype, device=scales.device, requires_grad=True)
+    optimizer = torch.optim.LBFGS(
+        [log_t], lr=0.5, max_iter=steps, line_search_fn="strong_wolfe"
+    )
+
+    def closure() -> Tensor:
+        optimizer.zero_grad()
+        temperature = log_t.exp().clamp(min_temperature, max_temperature)
+        loss = finite_mixture_nll(
+            means,
+            scales * temperature,
+            target,
+            distribution=distribution,
+            student_t_dof=student_t_dof,
+        )
+        loss.backward()
+        return loss
+
+    optimizer.step(closure)
+    return float(log_t.detach().exp().clamp(min_temperature, max_temperature).item())
+
+
 def apply_temperature(scale: Tensor, temperature: float) -> Tensor:
     """Return a scaled SPD matrix without mutating the input."""
     if temperature <= 0:
