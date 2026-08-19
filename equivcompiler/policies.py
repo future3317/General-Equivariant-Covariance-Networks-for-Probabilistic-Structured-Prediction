@@ -66,6 +66,40 @@ class FullCovariance(OperatorFamilySpec):
 
 
 @dataclass(frozen=True)
+class AsinhExponentialCovariance(OperatorFamilySpec):
+    """Unrestricted SPD family using the full-image ``exp(asinh)`` map."""
+
+    def compile(self, output: O3IrrepsSpec) -> OperatorFamilyPlan:
+        base = IrrepsExpr(output.irreps, "output")
+        parameter = SymmetricSquareExpr(base)
+        symmetric = OperatorIR.symmetric_operator(
+            parameter=OperatorIR.parameter("operator"),
+            coordinate_space="output_representation",
+            output_irreps=str(output.irreps),
+        )
+        return OperatorFamilyPlan(
+            kind="asinh_exponential",
+            output_irreps=output.irreps,
+            parameter_bindings=(
+                ParameterBinding("operator", parameter, "covariance_projection"),
+            ),
+            parameter_count=output.dim * (output.dim + 1) // 2,
+            domain="scatter",
+            assembly=OperatorIR.spectral_positive(
+                symmetric, map="asinh_exponential"
+            ),
+            relation_to_full=FamilyRelation.EQUAL_TO_FULL,
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "kind": "asinh_exponential_covariance",
+            "scalar_map": "exp(asinh(lambda))",
+            "image": "SPD(output_dim)",
+        }
+
+
+@dataclass(frozen=True)
 class SpectralWindowCovariance(OperatorFamilySpec):
     """Full covariance with a compiler-certified log-variance interval.
 

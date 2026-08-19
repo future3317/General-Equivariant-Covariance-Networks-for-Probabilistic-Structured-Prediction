@@ -55,6 +55,7 @@ class FamilyRelation(str, Enum):
 
 _POSITIVE_SPECTRAL_MAPS = {
     "matrix_exponential",
+    "asinh_exponential",
     "spectral_window",
     "centered_spectral_window",
 }

@@ -29,6 +29,11 @@ def test_topology_manifest_is_seeded_and_unfiltered():
     assert first == second
     assert [item["topology_seed"] for item in first] == [91, 92, 93]
     assert all(item["degree_sequence"] == [1, 1, 1, 2, 3] for item in first)
+    assert all(
+        item["sampler"] == "connected_degree_preserving_edge_swap"
+        for item in first
+    )
+    assert any(item["edges"] != item["reference_edges"] for item in first)
 
 
 def test_degree_matched_tree_rejects_non_tree_reference():

@@ -1,6 +1,7 @@
 """SPD maps: structure-preserving maps from symmetric operators to SPD matrices."""
 
 from spd_maps.base import SPDMap
+from spd_maps.asinh_exponential import AsinhExponentialMap
 from spd_maps.centered_spectral_window import CenteredSpectralWindowMap
 from spd_maps.graph_precision import GraphStructuredPrecisionMap
 from spd_maps.irrep_block_diag import IrrepBlockDiagonalMap
@@ -15,6 +16,7 @@ from spd_maps.spectral_window import SpectralWindowMap
 from spd_maps.square_plus_identity import SquarePlusIdentityMap
 
 __all__ = [
+    "AsinhExponentialMap",
     "CenteredSpectralWindowMap",
     "GraphStructuredPrecisionMap",
     "IrrepBlockDiagonalMap",

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 
 from equivcompiler import (
+    AsinhExponentialCovariance,
     CenteredSpectralWindowCovariance,
     FirstFeasible,
     FullCovariance,
@@ -59,6 +60,7 @@ def covariance_policy_from_cli(
     """Translate an explicit CLI choice to one typed covariance policy."""
     policies = {
         "full": FullCovariance(),
+        "asinh_exponential": AsinhExponentialCovariance(),
         "low_rank": LowRankCovariance(rank),
         "block": IsotypicBlockCovariance(),
         "centered_spectral_window": CenteredSpectralWindowCovariance(

@@ -4,6 +4,7 @@ import pytest
 import torch
 
 from spd_maps import (
+    AsinhExponentialMap,
     CenteredSpectralWindowMap,
     LowRankPlusIsotropicMap,
     MatrixExponentialMap,
@@ -15,6 +16,7 @@ from spd_maps import (
 
 MAP_CLASSES = [
     MatrixExponentialMap,
+    AsinhExponentialMap,
     SpectralSoftplusMap,
     SquarePlusIdentityMap,
     PrecisionExponentialMap,
@@ -145,4 +147,23 @@ def test_centered_spectral_window_has_finite_repeated_eigenvalue_gradients():
     residual = torch.randn(3, 6)
     logdet, quadratic = spdm.statistics(generator, residual)
     (logdet + quadratic).sum().backward()
+    assert torch.isfinite(generator.grad).all()
+
+
+def test_asinh_exponential_matches_scalar_bijection_and_logdet():
+    mapping = AsinhExponentialMap().double()
+    values = torch.tensor([-3.0, -0.5, 0.0, 0.75, 4.0], dtype=torch.float64)
+    generator = torch.diag(values).unsqueeze(0)
+    expected = torch.diag(torch.exp(torch.asinh(values))).unsqueeze(0)
+    torch.testing.assert_close(mapping(generator), expected)
+    torch.testing.assert_close(mapping.logdet(generator), torch.asinh(values).sum().reshape(1))
+
+
+def test_asinh_exponential_has_repeated_eigenvalue_safe_gradients():
+    generator = (0.25 * torch.eye(6, dtype=torch.float64)).expand(2, 6, 6).clone()
+    generator.requires_grad_(True)
+    residual = torch.randn(2, 6, dtype=torch.float64)
+    mapping = AsinhExponentialMap().double()
+    logdet, quadratic = mapping.statistics(generator, residual)
+    (mapping(generator).sum() + logdet.sum() + quadratic.sum()).backward()
     assert torch.isfinite(generator.grad).all()

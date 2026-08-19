@@ -23,6 +23,7 @@ from equivcompiler.modules import CompiledProbabilisticReadout
 from equivcompiler.planning import CompilationPlan, plan_readout
 from equivcompiler.policies import (
     AutoBudget,
+    AsinhExponentialCovariance,
     CenteredSpectralWindowCovariance,
     ExactExecutorCandidates,
     ExactOnly,
@@ -58,6 +59,7 @@ from representations import (
 
 __all__ = [
     "AutoBudget",
+    "AsinhExponentialCovariance",
     "BenchmarkTask",
     "CandidateEnumerator",
     "CenteredSpectralWindowCovariance",

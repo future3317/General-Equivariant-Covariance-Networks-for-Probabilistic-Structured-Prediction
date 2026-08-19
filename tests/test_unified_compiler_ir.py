@@ -6,6 +6,7 @@ import pytest
 import torch
 
 from equivcompiler import (
+    AsinhExponentialCovariance,
     AutoBudget,
     CenteredSpectralWindowCovariance,
     ConditionalStudentTRadial,
@@ -113,6 +114,21 @@ def test_spectral_window_is_compiled_as_a_bounded_full_covariance_family():
     log_spectrum = torch.log(torch.linalg.eigvalsh(scale))
     assert log_spectrum.min() >= -3.0 - 2e-6
     assert log_spectrum.max() <= 2.0 + 2e-6
+
+
+def test_asinh_exponential_is_registered_as_an_unrestricted_spd_family():
+    plan = plan_readout(SEED, output="ij=ji", covariance=AsinhExponentialCovariance())
+    compilation = plan.compilation
+    assert compilation.operator_family.relation_to_full == FamilyRelation.EQUAL_TO_FULL
+    assert compilation.operator_family.assembly.attribute_dict() == {
+        "map": "asinh_exponential"
+    }
+    spd_map = compilation.build_spd_map()
+    assert spd_map.optimization_name == "asinh_exponential_spectral_oracle"
+    parameters = torch.randn(3, compilation.covariance_parameter_count)
+    scale = spd_map(parameters)
+    assert torch.isfinite(scale).all()
+    assert torch.linalg.eigvalsh(scale).min() > 0
 
 
 def test_centered_spectral_window_compiles_without_conflating_volume_and_shape():

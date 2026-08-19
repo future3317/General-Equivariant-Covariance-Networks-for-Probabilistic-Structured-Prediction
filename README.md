@@ -125,7 +125,7 @@ The benchmark contract is deliberately stronger than “the model trains.” It 
 | --- | --- |
 | `equivcompiler/` | Declarative API, typed specifications, policies, planning, and checkpoint contracts |
 | `representations/` | Representation decomposition, reachability, operator IR, and lowering |
-| `spd_maps/` | Full, block, low-rank, spectral, and graph-precision SPD maps |
+| `spd_maps/` | Full-image (`matrix_exp`, `asinh_exponential`), bounded spectral, block, low-rank, and graph-precision SPD maps |
 | `distributions/` | Gaussian, Student-t, conditional-t, and mixture likelihood components |
 | `models/` | Equivariant backbones and structured predictive readouts |
 | `data/` | Dataset interfaces and frozen feature/data contracts |

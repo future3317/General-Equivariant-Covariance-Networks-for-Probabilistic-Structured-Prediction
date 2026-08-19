@@ -187,6 +187,18 @@ PSD.  Graph precision becomes SPD only after adding the independently SPD
 unary block.  A verifier must not promote a pullback to SPD merely because its
 input is SPD or because (T) is an intertwiner.
 
+The registered full-image `asinh_exponential` map is also a valid SPD
+primitive.  For a symmetric generator (A=U\operatorname{diag}(\lambda_i)U^T),
+
+\[
+S=U\operatorname{diag}\!\left(\exp(\operatorname{asinh}\lambda_i)\right)U^T.
+\]
+
+Because (\exp(\operatorname{asinh}\lambda)) is a smooth bijection from
+\(\mathbb R\) to \(\mathbb R_{>0}\), this is an unrestricted full-image SPD
+family.  Its reference executor uses Löwner divided differences at repeated
+eigenvalues; finite-precision stability remains an empirical runtime gate.
+
 The centered spectral map is fully defined as follows. Let
 \(s=\operatorname{tr}(A)/d\), \(\bar A=A-sI\), and
 \(\bar A=U\operatorname{diag}(\lambda_i)U^T\). Map the common mean

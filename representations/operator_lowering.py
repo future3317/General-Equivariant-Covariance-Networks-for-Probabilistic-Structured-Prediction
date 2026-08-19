@@ -413,6 +413,7 @@ def _registered_optimization_templates(
     family: OperatorFamilyPlan,
 ) -> tuple[_OptimizationTemplate, ...]:
     from equivcompiler.policies import (
+        AsinhExponentialCovariance,
         FullCovariance,
         GraphPrecision,
         IsotypicBlockCovariance,
@@ -426,6 +427,11 @@ def _registered_optimization_templates(
         _OptimizationTemplate(
             FullCovariance().compile(output),
             "spectral_trace_and_exponential_oracle",
+            ("operator: Sym^2(V) coefficients -> dense symmetric generator",),
+        ),
+        _OptimizationTemplate(
+            AsinhExponentialCovariance().compile(output),
+            "asinh_exponential_spectral_oracle",
             ("operator: Sym^2(V) coefficients -> dense symmetric generator",),
         ),
     ]
@@ -521,6 +527,7 @@ def match_optimized_program(
 
 def _try_optimized_map(compilation: O3Compilation) -> OptimizedProgramMap | None:
     from spd_maps import (
+        AsinhExponentialMap,
         GraphStructuredPrecisionMap,
         IsotropicMap,
         IsotypicBlockMap,
@@ -547,6 +554,22 @@ def _try_optimized_map(compilation: O3Compilation) -> OptimizedProgramMap | None
             compilation,
             MatrixExponentialMap(),
             full_transform,
+            certificate,
+        )
+
+    if certificate.optimization_name == "asinh_exponential_spectral_oracle":
+        basis = O3SymmetricOperatorBasis(compilation.output_spec.irreps).basis
+
+        def asinh_transform(params: torch.Tensor) -> torch.Tensor:
+            coefficients = params[..., slices["operator"]]
+            return symmetrize(
+                torch.einsum("...q,qij->...ij", coefficients, basis.to(params))
+            )
+
+        return OptimizedProgramMap(
+            compilation,
+            AsinhExponentialMap(),
+            asinh_transform,
             certificate,
         )
 
@@ -687,6 +710,7 @@ def _registered_runtime_node(node: OperatorIR) -> None:
     attributes = node.attribute_dict()
     if node.kind == "spectral_positive" and attributes.get("map") not in {
         "matrix_exponential",
+        "asinh_exponential",
         "spectral_window",
         "centered_spectral_window",
     }:

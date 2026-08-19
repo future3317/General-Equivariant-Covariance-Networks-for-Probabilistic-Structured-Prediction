@@ -41,6 +41,8 @@ ELASTICITY_ARMS = (
     "low_rank_student_t",
     "full_student_t",
 )
+ELASTICITY_CANDIDATE_ARMS = ("full_asinh_exp_student_t",)
+ELASTICITY_ALL_ARMS = ELASTICITY_ARMS + ELASTICITY_CANDIDATE_ARMS
 
 
 def _configure_arm(args: argparse.Namespace) -> None:
@@ -63,6 +65,10 @@ def elasticity_arm_configuration(arm: str) -> dict[str, str | None]:
             "covariance": "low_rank",
         },
         "full_student_t": {"objective": "student_t", "covariance": "full"},
+        "full_asinh_exp_student_t": {
+            "objective": "student_t",
+            "covariance": "asinh_exponential",
+        },
     }
     try:
         return configurations[arm]
@@ -319,7 +325,7 @@ def collect_predictions(model, dataloader, device, *, non_blocking: bool = False
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--arm", choices=ELASTICITY_ARMS, default=None)
+    parser.add_argument("--arm", choices=ELASTICITY_ALL_ARMS, default=None)
     parser.add_argument("--data_dir", default=None)
     parser.add_argument("--save_dir", default="checkpoints_elasticity")
     parser.add_argument("--hidden_dim", type=int, default=48)
@@ -335,6 +341,7 @@ def main():
             "block",
             "low_rank",
             "centered_spectral_window",
+            "asinh_exponential",
         ],
         default="auto",
     )

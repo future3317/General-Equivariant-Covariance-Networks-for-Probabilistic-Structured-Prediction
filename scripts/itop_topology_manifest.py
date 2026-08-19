@@ -52,21 +52,49 @@ def _degree_sequence(edges: tuple[tuple[int, int], ...], num_nodes: int) -> list
 def generate_degree_matched_tree(
     reference_edges: Iterable[tuple[int, int]], *, num_nodes: int, seed: int
 ) -> tuple[tuple[int, int], ...]:
-    """Sample one labeled tree with the reference tree's degree multiset."""
+    """Sample one labeled tree with fixed degrees by deterministic edge swaps.
+
+    The sampler starts from the registered tree and accepts only simple,
+    connected two-edge switches.  It therefore preserves the labeled degree
+    sequence while making the null distribution an explicit edge-swap process,
+    rather than silently changing the node labels through a new tree draw.
+    """
     reference = _validate_tree(reference_edges, num_nodes)
-    degrees = _degree_sequence(reference, num_nodes)
-    prufer = [node for node, degree in enumerate(degrees) for _ in range(degree - 1)]
-    random.Random(int(seed)).shuffle(prufer)
-    remaining = degrees.copy()
-    generated: list[tuple[int, int]] = []
-    for node in prufer:
-        leaf = min(index for index, degree in enumerate(remaining) if degree == 1)
-        generated.append((leaf, node))
-        remaining[leaf] -= 1
-        remaining[node] -= 1
-    leaves = [index for index, degree in enumerate(remaining) if degree == 1]
-    generated.append((leaves[0], leaves[1]))
-    return tuple(generated)
+    rng = random.Random(int(seed))
+    current = list(reference)
+    edge_count = len(current)
+    accepted = 0
+    target_swaps = max(8, 4 * num_nodes)
+    max_attempts = target_swaps * 40
+    for _ in range(max_attempts):
+        first, second = rng.sample(range(edge_count), 2)
+        a, b = current[first]
+        c, d = current[second]
+        if rng.random() < 0.5:
+            candidates = ((a, c, b, d), (a, d, b, c))
+        else:
+            candidates = ((a, c, b, d), (a, d, b, c))[::-1]
+        proposal = None
+        for left, right, other_left, other_right in candidates:
+            candidate = list(current)
+            candidate[first] = (left, right)
+            candidate[second] = (other_left, other_right)
+            try:
+                normalized = _validate_tree(candidate, num_nodes)
+            except ValueError:
+                continue
+            if normalized != tuple(current):
+                proposal = list(normalized)
+                break
+        if proposal is None:
+            continue
+        current = proposal
+        accepted += 1
+        if accepted >= target_swaps:
+            break
+    if accepted == 0:
+        raise RuntimeError("edge-swap sampler made no valid topology move")
+    return tuple(current)
 
 
 def topology_manifest(
@@ -90,6 +118,7 @@ def topology_manifest(
                 "edges": [list(edge) for edge in edges],
                 "labeled_degree_sequence": degrees,
                 "degree_sequence": sorted(degrees),
+                "sampler": "connected_degree_preserving_edge_swap",
                 "outcome_filtered": False,
             }
         )
