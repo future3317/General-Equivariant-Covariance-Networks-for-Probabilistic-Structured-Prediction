@@ -1,18 +1,21 @@
 # ITOP reviewer-control evidence — 2026-08-17
 
-This report records the read-only audit of the completed ITOP topology controls.
-It is an evidence ledger, not a model-selection record.  Top-view data were
-used only for final evaluation.
+Last updated: 2026-08-18
+
+This report records the read-only audit of the completed ITOP topology controls
+and a subsequent reviewer-control diagnostic.  It is an evidence ledger, not a
+model-selection record.  Top-view data were used only for final evaluation.
 
 ## Protocol and artifact status
 
 - Formal control audit: `results/itop_reviewer_controls_2c7cb38/control_audit.json`.
 - Split-matched replication: `results/itop_reviewer_controls_matched_20260816/`.
-- Matched topology audit: `results/itop_topology_pairing_audit_20260817.json`.
+- Matched topology audit: `results/itop_topology_pairing_audit_20260817_subject_cluster.json`.
 - Frozen backbone/cache: seed-42 deterministic checkpoint and feature cache.
 - Distribution: fixed Student-$t$, $\nu=5$.
 - Selection: Side train/validation only; Top evaluation only.
-- Required compact artifacts are present for seeds 42--44 where applicable:
+- Required compact artifacts are present for the formal completed topology
+  controls (seeds 42--44 where applicable):
   `args.json`, `environment.json`, `history.json`, `metrics.json`,
   `compilation.json`, `provenance.json`, and `train.log`.
 - For the matched replication, both seed 43 and seed 44 prediction files are
@@ -31,12 +34,21 @@ reported descriptively and are not used as sole success criteria.
 | Shuffled Graph-$t$ | $-34.992 \pm 0.060$ | $32.107 \pm 0.865$ | $0.726 \pm 0.000$ | $2.547 \pm 0.030$ | $0.135 \pm 0.004$ | $0.700 \pm 0.019$ |
 
 The true-versus-shuffled result therefore supports a topology-specific
-likelihood effect under the audited protocol.  Pooled paired per-frame NLL
-differences (shuffled minus true) are $+20.987$ with 95\% bootstrap CI
-$[20.891,21.079]$ on Side and $+26.820$ with CI $[26.741,26.899]$ on Top
-(14,589 paired frames per view).  It does not support a claim of cross-view
-calibration: Top coverage remains strongly below nominal for both structured
-heads.
+likelihood effect under the audited protocol.  Pooled paired frame-level NLL
+differences (shuffled minus true) are $+20.987$ on Side and $+26.820$ on Top
+(4 subject clusters; 14,589 seed-frame pairs per view), distinct from the
+seed-averaged marginal means in the table above.  The four subject-level
+effects are $[18.91,22.44,22.22,20.78]$ on Side and
+$[26.67,28.01,27.11,25.76]$ on Top for IDs 00--03; all are positive.  We
+retain subject-level effects as descriptive evidence rather than treating a
+four-cluster percentile interval as strong inferential evidence.  The official Zenodo
+schema identifies each released `id` as `XX_YYYYY`, where `XX` is the person ID
+and `YYYYY` is the frame number; it provides no action label or sequence-boundary
+field (Zenodo record 3932973).  The local raw label HDF5 files expose the same
+schema.  We therefore use subject clusters and do not infer sequence boundaries
+from frame-number gaps or validity masks; this audit makes no sequence-level
+correction claim.  It does not support a claim of cross-view calibration: Top
+coverage remains strongly below nominal for both structured heads.
 
 ## Secondary one-seed controls
 
@@ -47,6 +59,20 @@ heads.
 
 The fixed-coordinate row remains a negative rotation-consistency diagnostic,
 not a competitive equivariant baseline.
+
+### Fixed-coordinate Cholesky smoke diagnostic (2026-08-18)
+
+A two-epoch frozen-head smoke run for the full fixed-coordinate Cholesky
+Student-$t$ control was stopped at evaluation.  Training remained finite
+through both epochs, but Top evaluation failed the unchanged FP64 strict-SPD
+certificate: the smallest observed eigenvalue was
+$1.889\times 10^{-15}$ versus the numerical threshold
+$8.191\times 10^{-15}$.  The run therefore has no complete Side/Top metrics
+or prediction artifacts and is not used as a baseline result.  This is a
+numerical negative diagnostic for the tested coordinate-dependent
+full-Cholesky control.  It does not imply that Cholesky parameterizations are
+invalid in general; this run failed the paper's unchanged finite-precision
+strict-SPD evidence gate and is therefore excluded from baseline ranking.
 
 ## Pairing and artifact conclusion
 
