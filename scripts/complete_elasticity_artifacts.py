@@ -32,6 +32,39 @@ _EPOCH_RE = re.compile(
     r"val_mae=(?P<val_mae>[-+0-9.eE]+)"
 )
 
+_ARG_RE = re.compile(r"-\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*):\s*(?P<value>.*)$")
+
+
+def _logged_value(value: str) -> object:
+    if value == "None":
+        return None
+    if value in {"True", "False"}:
+        return value == "True"
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value
+
+
+def _load_args(run_dir: Path) -> dict[str, object]:
+    args_path = run_dir / "args.json"
+    if args_path.exists():
+        return json.loads(args_path.read_text(encoding="utf-8"))
+    values: dict[str, object] = {}
+    for line in (run_dir / "train.log").read_text(encoding="utf-8").splitlines():
+        match = _ARG_RE.search(line)
+        if match is None:
+            if "Model parameters:" in line:
+                break
+            continue
+        values[match.group("name")] = _logged_value(match.group("value"))
+    required = {"arm", "data_dir", "save_dir", "seed", "target_normalization"}
+    missing = sorted(required - values.keys())
+    if missing:
+        raise ValueError(f"cannot recover recorded arguments; missing {missing}")
+    args_path.write_text(json.dumps(values, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return values
+
 
 def _history_from_log(path: Path) -> list[dict[str, float | int]]:
     history = []
@@ -56,7 +89,7 @@ def _history_from_log(path: Path) -> list[dict[str, float | int]]:
 
 
 def complete_run(run_dir: Path, *, device: str | None = None) -> None:
-    args = Namespace(**json.loads((run_dir / "args.json").read_text(encoding="utf-8")))
+    args = Namespace(**_load_args(run_dir))
     args.data_dir = str(dataset_dir(args.data_dir, "mp_elastic"))
     if device is not None:
         args.device = device
