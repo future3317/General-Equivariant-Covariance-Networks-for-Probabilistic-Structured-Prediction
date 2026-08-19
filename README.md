@@ -58,7 +58,7 @@ The current journal direction treats predictive-law selection as part of the typ
 | Representation compilation | Irrep decomposition, parity checks, multiplicity accounting, target-pruned reachability, shortest CG plans | reachability and representation certificate |
 | Covariance families | Full, isotypic/block, low-rank, centered spectral-window, and graph-precision families | canonical vs. active target and parameter budget |
 | Positive-definite maps | Full-image matrix-exponential and asinh-exponential charts, bounded spectral maps, and graph-precision assembly | SPD effect and numerical validity |
-| Predictive laws | Gaussian, Student-t, and conditional-t compiler contracts; exact finite-mixture evaluation utilities | normalized density, moments, sampling, diagnostics |
+| Predictive laws | Gaussian, Student-t, invariant conditional-$\nu$ and conditional-log-scatter contracts; exact finite-mixture evaluation utilities | normalized density, moments, sampling, diagnostics |
 | Lowering | Spherical-CG and Cartesian/STF execution paths with explicit fidelity | backend, exactness, and checkpoint mapping |
 | Statistical audit | Proper NLL, Energy Score, coverage, MACE, radial PIT, whitening defects, directional tests, risk--coverage | split, law, and diagnostic provenance |
 
