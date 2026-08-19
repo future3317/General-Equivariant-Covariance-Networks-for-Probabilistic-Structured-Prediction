@@ -249,6 +249,101 @@ class ConditionalStudentTRadial(RadialLaw):
         }
 
 
+@dataclass(frozen=True)
+class ConditionalScaleStudentTRadial(RadialLaw):
+    """Student-t radial law with an invariant log-scale field.
+
+    The field multiplies the declared scatter as ``S'(x)=exp(delta(x))S(x)``.
+    It is a scalar equivariant parameter, so it adds one ``0e`` channel to the
+    active representation without changing the output representation.
+    """
+
+    feature_irreps: str
+    degrees_of_freedom: float = 5.0
+    quadratic_oracle: Literal["direct", "shifted_log"] = "direct"
+
+    def __post_init__(self) -> None:
+        if self.degrees_of_freedom <= 2.0:
+            raise ValueError("conditional-scale Student-t requires nu > 2")
+        if self.quadratic_oracle not in {"direct", "shifted_log"}:
+            raise ValueError("quadratic_oracle must be 'direct' or 'shifted_log'")
+
+    @property
+    def name(self) -> str:
+        return "conditional_scale_student_t"
+
+    def materialize_log_prob(self) -> torch.nn.Module:
+        from distributions import StudentTNLL
+
+        return StudentTNLL(
+            nu=self.degrees_of_freedom, quadratic_oracle=self.quadratic_oracle
+        )
+
+    def calibration_reference(self) -> dict[str, Any]:
+        return {
+            "residual_statistic": "squared_mahalanobis",
+            "reference": "scaled_f_distribution",
+            "degrees_of_freedom": self.degrees_of_freedom,
+            "scatter_field": "exp(delta(x)) * S(x)",
+        }
+
+    def parameter_representation(self) -> RepExpr:
+        return TrivialScalarsExpr(1)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "kind": "conditional_scale_student_t_radial",
+            "feature_representation": self.feature_irreps,
+            "parameter_representation": self.parameter_representation().as_dict(),
+            "scale": {
+                "field": "delta(x)",
+                "transformation": "exp",
+                "scatter": "exp(delta(x)) * S(x)",
+                "equivariance": "delta(gx)=delta(x)",
+            },
+            "degrees_of_freedom": {
+                "kind": "constant",
+                "value": self.degrees_of_freedom,
+            },
+            "quadratic_oracle": self.quadratic_oracle,
+        }
+
+    def predictive_law_contract(self) -> dict[str, Any]:
+        return {
+            "log_prob": "normalized_multivariate_student_t",
+            "sample": "student_t_scale_mixture",
+            "parameters": {
+                "scatter": {
+                    "kind": "sample_conditional",
+                    "field": "exp(delta(x)) * S(x)",
+                    "equivariance": "delta(gx)=delta(x)",
+                },
+                "nu": {
+                    "kind": "constant",
+                    "value": self.degrees_of_freedom,
+                },
+            },
+            "quadratic_oracle": self.quadratic_oracle,
+            "moment_existence": {
+                "mean": "finite",
+                "covariance": "finite_for_nu>2",
+            },
+            "scatter_to_covariance": "nu/(nu-2) * exp(delta(x)) * S(x)",
+            "marginal_quantile": {
+                "kind": "student_t",
+                "cdf": "StudentT_nu",
+            },
+            "radial_reference": {
+                "kind": "scaled_f_distribution",
+                "cdf": "F_{d,nu}(q/d)",
+            },
+            "diagnostic_oracle": {
+                "kind": "scaled_f_distribution",
+                "radius_direction_null": "independent_uniform_direction",
+            },
+        }
+
+
 class DistributionSpec(ABC):
     """Map output and operator semantics to an executable probability law."""
 

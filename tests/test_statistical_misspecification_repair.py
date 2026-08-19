@@ -4,13 +4,19 @@
 import torch
 
 from compatibility.e3nn import o3
-from distributions import FiniteMixtureStudentTNLL, StudentTNLL
+from distributions import (
+    FiniteMixtureStudentTNLL,
+    StudentTNLL,
+)
+from equivcompiler import ConditionalScaleStudentTRadial
 from models.frozen_distribution_readout import (
+    FrozenConditionalScaleStudentT,
     FrozenIsospectralOrientationStudentT,
     FrozenMultimodalStudentTMixture,
     FrozenSharedMeanStudentTMixture,
     GlobalDegreesOfFreedomReadout,
     InvariantDegreesOfFreedomReadout,
+    InvariantLogScaleReadout,
     InvariantMixtureLogitsReadout,
 )
 from spd_maps import MatrixExponentialMap
@@ -92,6 +98,35 @@ def test_global_and_conditional_nu_are_invariant_and_have_finite_second_moment()
     )
     assert bool((global_nu(features) > 2.0).all())
     assert bool((conditional_nu(features) > 2.0).all())
+
+
+def test_conditional_scale_is_typed_invariant_and_starts_at_fixed_scatter():
+    torch.manual_seed(15)
+    feature_irreps = o3.Irreps("2x0e + 1x1o")
+    law = ConditionalScaleStudentTRadial(str(feature_irreps), degrees_of_freedom=5.0)
+    assert law.parameter_representation().as_dict()["kind"] == "trivial_scalars"
+    assert law.predictive_law_contract()["parameters"]["scatter"]["field"] == (
+        "exp(delta(x)) * S(x)"
+    )
+    readout = InvariantLogScaleReadout(feature_irreps).double()
+    features = torch.randn(7, feature_irreps.dim, dtype=torch.float64)
+    rotation = o3.rand_matrix(dtype=torch.float64)
+    transformed = features @ feature_irreps.D_from_matrix(rotation).T
+    torch.testing.assert_close(readout(features), readout(transformed))
+    torch.testing.assert_close(readout(features), torch.zeros(7, dtype=torch.float64))
+
+    model = FrozenConditionalScaleStudentT(
+        feature_irreps, MatrixExponentialMap(), student_t_dof=5.0
+    ).double()
+    mean = torch.randn(7, 3, dtype=torch.float64)
+    target = torch.randn_like(mean)
+    raw = torch.randn(7, 3, 3, dtype=torch.float64)
+    params = 0.2 * (raw + raw.transpose(-1, -2))
+    result = model(features, mean, params, target)
+    base = model.spd_map(params)
+    torch.testing.assert_close(result["scale"], base)
+    assert bool((torch.linalg.eigvalsh(result["scale"]) > 0).all())
+    assert bool(torch.isfinite(result["loss"]))
 
 
 def test_mixture_logits_are_invariant_and_multimodal_mean_is_weight_centered():

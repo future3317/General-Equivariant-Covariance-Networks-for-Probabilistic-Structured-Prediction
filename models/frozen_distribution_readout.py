@@ -51,6 +51,34 @@ class InvariantDegreesOfFreedomReadout(torch.nn.Module):
         }
 
 
+class InvariantLogScaleReadout(torch.nn.Module):
+    """Predict an invariant log-scatter scale from typed features."""
+
+    def __init__(self, feature_irreps, *, initial_scale: float = 1.0) -> None:
+        super().__init__()
+        if initial_scale <= 0.0:
+            raise ValueError("initial scale must be positive")
+        self.feature_irreps = o3.Irreps(feature_irreps)
+        self.projection = o3.Linear(self.feature_irreps, o3.Irreps("0e"))
+        for parameter in self.projection.parameters():
+            torch.nn.init.zeros_(parameter)
+        self.log_intercept = torch.nn.Parameter(
+            torch.tensor(math.log(initial_scale), dtype=torch.get_default_dtype())
+        )
+
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
+        return self.projection(features).squeeze(-1) + self.log_intercept
+
+    def schema(self) -> dict[str, Any]:
+        return {
+            "kind": "conditional_invariant_log_scatter_scale",
+            "input": str(self.feature_irreps),
+            "output": "0e",
+            "parameterization": "exp(delta(x))",
+            "initial_scale": float(self.log_intercept.detach().exp()),
+        }
+
+
 class GlobalDegreesOfFreedomReadout(torch.nn.Module):
     """Train one invariant Student-t degrees-of-freedom scalar."""
 
@@ -179,6 +207,65 @@ class FrozenConditionalStudentT(torch.nn.Module):
             "objective": "exact_student_t_log_likelihood",
         }
 
+
+class FrozenConditionalScaleStudentT(torch.nn.Module):
+    """Keep mean and base scatter fixed while fitting invariant scatter scale."""
+
+    def __init__(
+        self,
+        feature_irreps,
+        spd_map: SPDMap,
+        *,
+        student_t_dof: float = 5.0,
+    ) -> None:
+        super().__init__()
+        if student_t_dof <= 2.0:
+            raise ValueError("conditional-scale Student-t requires nu > 2")
+        self.spd_map = spd_map
+        self.student_t_dof = float(student_t_dof)
+        self.objective = StudentTNLL(nu=student_t_dof)
+        self.scale_readout = InvariantLogScaleReadout(feature_irreps)
+
+    def forward(
+        self,
+        features: torch.Tensor,
+        mean: torch.Tensor,
+        params: torch.Tensor,
+        target: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        log_scale = self.scale_readout(features)
+        base_logdet = self.spd_map.logdet(params)
+        base_quadratic = self.spd_map.precision_action(params, target - mean)
+        dimension = target.shape[-1]
+        scaled_logdet = base_logdet + dimension * log_scale
+        scaled_quadratic = base_quadratic * torch.exp(-log_scale)
+        log_prob = student_t_log_prob_from_statistics(
+            scaled_logdet, scaled_quadratic, dimension, self.student_t_dof
+        )
+        scale = self.spd_map(params) * torch.exp(log_scale)[..., None, None]
+        return {
+            "loss": -log_prob.mean(),
+            "log_prob": log_prob,
+            "params": params,
+            "scale": scale,
+            "log_scale": log_scale,
+            "nu": mean.new_tensor(self.student_t_dof),
+            "mahalanobis2": scaled_quadratic,
+            "logdet": scaled_logdet,
+        }
+
+    def schema(self) -> dict[str, Any]:
+        return {
+            "kind": "single_elliptical_conditional_scale_student_t",
+            "mean": "frozen_artifact",
+            "base_scatter": "frozen_compiled_operator_artifact",
+            "scatter_scale": self.scale_readout.schema(),
+            "degrees_of_freedom": {
+                "kind": "fixed",
+                "value": self.student_t_dof,
+            },
+            "objective": "exact_student_t_log_likelihood",
+        }
 
 class FrozenIsospectralOrientationStudentT(torch.nn.Module):
     """Freeze mean/eigenvalues and learn only an equivariant scatter orientation."""

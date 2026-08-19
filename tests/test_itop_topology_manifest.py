@@ -35,10 +35,26 @@ def test_topology_manifest_is_seeded_and_unfiltered():
     assert [item["topology_seed"] for item in first] == [91, 92, 93]
     assert all(item["degree_sequence"] == [1, 1, 1, 2, 3] for item in first)
     assert all(
-        item["sampler"] == "connected_degree_preserving_edge_swap"
+        item["sampler"] == "uniform_labeled_degree_sequence_prufer"
         for item in first
     )
     assert any(item["edges"] != item["reference_edges"] for item in first)
+
+
+def test_prufer_sampler_is_deterministic_and_preserves_labeled_degrees():
+    true_edges = ((0, 1), (1, 2), (1, 3), (3, 4))
+    first = generate_degree_matched_tree(true_edges, num_nodes=5, seed=17)
+    second = generate_degree_matched_tree(true_edges, num_nodes=5, seed=17)
+    assert first == second
+    expected = [0] * 5
+    for source, target in true_edges:
+        expected[source] += 1
+        expected[target] += 1
+    actual = [0] * 5
+    for source, target in first:
+        actual[source] += 1
+        actual[target] += 1
+    assert actual == expected
 
 
 def test_degree_matched_tree_rejects_non_tree_reference():

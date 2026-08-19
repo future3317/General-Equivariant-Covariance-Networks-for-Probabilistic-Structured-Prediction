@@ -7,6 +7,7 @@ from equivcompiler.api import (
 from equivcompiler.autotune import BenchmarkTask, DeviceAutotuner
 from equivcompiler.checkpoint import convert_checkpoint
 from equivcompiler.distributions import (
+    ConditionalScaleStudentTRadial,
     ConditionalStudentTRadial,
     DistributionSpec,
     EllipticalDistribution,
@@ -22,8 +23,8 @@ from equivcompiler.executors import (
 from equivcompiler.modules import CompiledProbabilisticReadout
 from equivcompiler.planning import CompilationPlan, plan_readout
 from equivcompiler.policies import (
-    AutoBudget,
     AsinhExponentialCovariance,
+    AutoBudget,
     CenteredSpectralWindowCovariance,
     ExactExecutorCandidates,
     ExactOnly,
@@ -58,8 +59,8 @@ from representations import (
 )
 
 __all__ = [
-    "AutoBudget",
     "AsinhExponentialCovariance",
+    "AutoBudget",
     "BenchmarkTask",
     "CandidateEnumerator",
     "CenteredSpectralWindowCovariance",
@@ -68,6 +69,7 @@ __all__ = [
     "CompilationPlan",
     "CompilationReport",
     "CompiledProbabilisticReadout",
+    "ConditionalScaleStudentTRadial",
     "ConditionalStudentTRadial",
     "DeviceAutotuner",
     "DistributionSpec",

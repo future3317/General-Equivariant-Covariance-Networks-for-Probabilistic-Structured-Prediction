@@ -128,7 +128,12 @@ def test_repair_variants_publish_exact_family_artifacts(tmp_path, monkeypatch):
         "splits": splits,
     }
     (cache / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
-    for variant in ("global_nu", "conditional_nu", "shared_mean_mixture"):
+    for variant in (
+        "global_nu",
+        "conditional_scale",
+        "conditional_nu",
+        "shared_mean_mixture",
+    ):
         run = tmp_path / variant
         monkeypatch.setattr(
             sys,

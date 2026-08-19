@@ -33,6 +33,7 @@ from evaluation import (
     sample_finite_mixture,
 )
 from models.frozen_distribution_readout import (
+    FrozenConditionalScaleStudentT,
     FrozenConditionalStudentT,
     FrozenGlobalStudentT,
     FrozenIsospectralOrientationStudentT,
@@ -53,6 +54,7 @@ from spd_maps import RepresentationMetricMap
 DISTRIBUTION_VARIANTS = (
     "fixed",
     "global_nu",
+    "conditional_scale",
     "conditional_nu",
     "orientation",
     "uncertainty_branch_conditional_nu",
@@ -151,6 +153,12 @@ def _build_model(metadata: dict, variant: str, spd_map, device: torch.device):
         return None
     if variant == "global_nu":
         return FrozenGlobalStudentT(spd_map).to(device)
+    if variant == "conditional_scale":
+        return FrozenConditionalScaleStudentT(
+            metadata["feature_irreps"],
+            spd_map,
+            student_t_dof=float(metadata["student_t_dof"]),
+        ).to(device)
     if variant == "conditional_nu":
         return FrozenConditionalStudentT(metadata["feature_irreps"], spd_map).to(device)
     if variant == "orientation":
@@ -231,9 +239,9 @@ def _forward(
         return {"loss": loss, "params": params, **components}
     if variant in {
         "global_nu",
+        "conditional_scale",
         "conditional_nu",
         "orientation",
-        "uncertainty_branch_conditional_nu",
         "uncertainty_branch_conditional_nu",
         "shared_mean_mixture",
         "multimodal_mean_mixture",
@@ -367,8 +375,10 @@ def _predict(
             }
             if variant in {"conditional_nu", "orientation", "uncertainty_branch_conditional_nu"}:
                 output["nu"] = result["nu"]
-            if variant == "global_nu":
+            if variant in {"global_nu", "conditional_scale"}:
                 output["nu"] = result["nu"]
+            if variant == "conditional_scale":
+                output["log_scale"] = result["log_scale"]
         for key, value in output.items():
             if value.ndim == 0:
                 value = value.expand(size)
