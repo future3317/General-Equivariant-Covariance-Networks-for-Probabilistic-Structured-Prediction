@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Any
@@ -81,7 +82,18 @@ def _frame_mpjpe_cm(prediction: dict[str, Any]) -> np.ndarray:
 def _frame_nll(prediction: dict[str, Any], nu: float = 5.0) -> np.ndarray:
     """Return exact per-frame Student-t NLL from saved sufficient statistics."""
 
-    logdet = torch.as_tensor(prediction["frame_uncertainty"], dtype=torch.float64)
+    if "scale" in prediction:
+        scale = torch.as_tensor(prediction["scale"], dtype=torch.float64)
+        logdet = torch.linalg.slogdet(scale)[1]
+    else:
+        # train_itop stores frame_uncertainty as log|Cov| for Student-t
+        # diagnostics, while the proper law is parameterized by scatter S.
+        covariance_logdet = torch.as_tensor(
+            prediction["frame_uncertainty"], dtype=torch.float64
+        )
+        dimension = 45
+        scatter_factor = nu / (nu - 2.0)
+        logdet = covariance_logdet - dimension * math.log(scatter_factor)
     mahalanobis2 = torch.as_tensor(prediction["frame_mahalanobis2"], dtype=torch.float64)
     log_prob = student_t_log_prob_from_statistics(logdet, mahalanobis2, 45, nu)
     values = (-log_prob).detach().cpu().numpy()

@@ -240,6 +240,8 @@ def _paired_nll(
     values = _frame_nll(shuffled_prediction) - _frame_nll(true_prediction)
     return {
         "direction": "shuffled_minus_true",
+        "true_frame_nll_mean": float(_frame_nll(true_prediction).mean()),
+        "shuffled_frame_nll_mean": float(_frame_nll(shuffled_prediction).mean()),
         "mean": float(values.mean()),
         "bootstrap_95": list(bootstrap_mean_interval(values, seed=seed, samples=4000)),
         "subject_cluster_bootstrap_95": list(
@@ -258,6 +260,8 @@ def audit(
 ) -> dict[str, Any]:
     records = []
     pooled: dict[str, list[np.ndarray]] = {"side": [], "top": []}
+    pooled_true: dict[str, list[np.ndarray]] = {"side": [], "top": []}
+    pooled_shuffled: dict[str, list[np.ndarray]] = {"side": [], "top": []}
     subject_ids_by_seed: dict[int, np.ndarray] = {}
     for seed in SEEDS:
         true = _run_record(true_runs[seed], seed)
@@ -278,6 +282,8 @@ def audit(
             subject_ids = _subject_ids(labels_path, true_prediction["frame_index"].numpy())
             subject_ids_by_seed[seed] = subject_ids
             pooled[view].append(values)
+            pooled_true[view].append(_frame_nll(true_prediction))
+            pooled_shuffled[view].append(_frame_nll(shuffled_prediction))
             paired[view] = _paired_nll(
                 true,
                 shuffled,
@@ -304,6 +310,10 @@ def audit(
         subject_ids = np.concatenate([subject_ids_by_seed[seed] for seed in SEEDS])
         pooled_result[view] = {
             "direction": "shuffled_minus_true",
+            "true_frame_nll_mean": float(np.concatenate(pooled_true[view]).mean()),
+            "shuffled_frame_nll_mean": float(
+                np.concatenate(pooled_shuffled[view]).mean()
+            ),
             "mean": float(values.mean()),
             "bootstrap_95": list(
                 bootstrap_mean_interval(values, seed=20260816, samples=4000)
