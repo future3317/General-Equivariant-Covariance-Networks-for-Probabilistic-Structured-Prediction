@@ -59,7 +59,7 @@ def evaluate_elasticity_predictions(
     }
     if arm == "deterministic":
         return result
-    if arm not in {"low_rank_student_t", "full_student_t"}:
+    if arm not in {"low_rank_student_t", "full_student_t", "full_asinh_exp_student_t"}:
         raise ValueError(f"unsupported elasticity arm: {arm}")
     if "scale" not in predictions:
         raise KeyError("probabilistic prediction artifact is missing scale")

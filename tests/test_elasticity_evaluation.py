@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import torch
+import pytest
 
 from scripts.evaluate_elasticity import evaluate_elasticity_predictions
 
@@ -21,7 +22,8 @@ def test_deterministic_evaluation_reports_point_metrics_only():
     assert "nll" not in result
 
 
-def test_student_t_evaluation_reuses_proper_metrics_and_falsification():
+@pytest.mark.parametrize("arm", ["full_student_t", "full_asinh_exp_student_t"])
+def test_student_t_evaluation_reuses_proper_metrics_and_falsification(arm):
     generator = torch.Generator().manual_seed(7)
     target = torch.randn(64, 3, generator=generator, dtype=torch.float64)
     mean = torch.zeros_like(target)
@@ -34,7 +36,7 @@ def test_student_t_evaluation_reuses_proper_metrics_and_falsification():
             "target": target,
             "scale": scale,
         },
-        arm="full_student_t",
+        arm=arm,
         student_t_dof=5.0,
         energy_samples=16,
         diagnostic_directions=8,
