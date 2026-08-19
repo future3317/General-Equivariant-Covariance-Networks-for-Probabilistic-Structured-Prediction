@@ -156,6 +156,30 @@ def test_observation_descriptor_contract_rejects_label_derived_fields():
                 raise AssertionError(f"descriptor field {key!r} was accepted")
 
 
+def test_frozen_distribution_attachment_rejects_camera_frame_scalars(tmp_path):
+    from data.frozen_distribution_features import FrozenDistributionDataset
+
+    payload = {
+        "features": torch.zeros(2, 1),
+        "mean": torch.zeros(2, 1),
+        "params": torch.zeros(2, 1),
+        "target": torch.zeros(2, 1),
+        "sample_id": torch.arange(2),
+    }
+    path = tmp_path / "split.pt"
+    torch.save(payload, path)
+    dataset = FrozenDistributionDataset(path)
+    with torch.no_grad():
+        try:
+            dataset.attach_observation_descriptors(
+                torch.arange(2), torch.ones(2, 1), ["centroid_depth"]
+            )
+        except ValueError as error:
+            assert "O(3)-invariant" in str(error)
+        else:
+            raise AssertionError("camera-frame descriptor reached the equivariant cache")
+
+
 def test_component_valued_mixture_sampling_is_finite():
     from evaluation.ensemble import sample_finite_mixture
 

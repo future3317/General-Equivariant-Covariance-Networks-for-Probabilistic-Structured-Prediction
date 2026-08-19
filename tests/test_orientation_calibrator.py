@@ -34,6 +34,16 @@ def test_eioc_compiles_expected_skew_representation():
     )
     assert str(calibrator.generator_irreps) == "1x1e+1x2e+1x3e"
     assert calibrator.operator_basis.operator_dim == 15
+    assert calibrator.coefficient_head.depth == 1
+
+
+def test_eioc_uses_target_directed_lifting_for_reachable_skew_channels():
+    calibrator = EquivariantIsospectralOrientationCalibrator(
+        "3x0e + 3x2e + 1x4e", "0e + 2e"
+    )
+    assert calibrator.coefficient_head.plan.target_irreps == o3.Irreps(
+        "1x1e + 1x2e + 1x3e"
+    )
 
 
 def test_eioc_generator_transforms_by_conjugation():

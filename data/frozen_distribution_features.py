@@ -9,6 +9,10 @@ import torch
 from torch.utils.data import DataLoader, Dataset, RandomSampler
 
 from compatibility.e3nn import o3
+from data.observation_descriptors import (
+    o3_invariant_descriptor_names,
+    observation_descriptor_semantics,
+)
 from scripts.itop_reproducibility import sha256_file
 
 REQUIRED_FIELDS = ("features", "mean", "params", "target", "sample_id")
@@ -116,6 +120,7 @@ class FrozenDistributionDataset(Dataset):
         validate_observation_descriptors(
             descriptor_columns, count=int(sample_ids.shape[0])
         )
+        o3_invariant_descriptor_names(tuple(names))
         if torch.unique(sample_ids).numel() != sample_ids.numel():
             raise ValueError("descriptor sample IDs must be unique")
         if torch.unique(self.payload["sample_id"]).numel() != len(self):
@@ -200,6 +205,9 @@ def frozen_distribution_loaders(
         metadata["observation_descriptors"] = {
             "directory": str(descriptor_root.resolve()),
             "names": list(names),
+            "semantics": {
+                name: observation_descriptor_semantics(name) for name in names
+            },
             "metadata_sha256": sha256_file(descriptor_root / "metadata.json"),
         }
     common = {

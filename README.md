@@ -58,7 +58,7 @@ The current journal direction treats predictive-law selection as part of the typ
 | Representation compilation | Irrep decomposition, parity checks, multiplicity accounting, target-pruned reachability, shortest CG plans | reachability and representation certificate |
 | Covariance families | Full, isotypic/block, low-rank, centered spectral-window, and graph-precision families | canonical vs. active target and parameter budget |
 | Positive-definite maps | Matrix-exponential and spectral SPD constructions; graph precision assembly | SPD effect and numerical validity |
-| Predictive laws | Gaussian, Student-t, conditional-t, and exact finite-mixture contracts | normalized density, moments, sampling, diagnostics |
+| Predictive laws | Gaussian, Student-t, and conditional-t compiler contracts; exact finite-mixture evaluation utilities | normalized density, moments, sampling, diagnostics |
 | Lowering | Spherical-CG and Cartesian/STF execution paths with explicit fidelity | backend, exactness, and checkpoint mapping |
 | Statistical audit | Proper NLL, Energy Score, coverage, MACE, radial PIT, whitening defects, directional tests, risk--coverage | split, law, and diagnostic provenance |
 
@@ -88,13 +88,13 @@ These compact figures are included as a visual entry point to the scientific sto
 
 ## Scope and status / 范围与状态
 
-- The semantic contract is group-agnostic for finite-dimensional orthogonal output representations.
-- The currently validated executable backend targets orthonormal `O(3)` contracts using real e3nn-compatible layouts.
-- A group-agnostic semantic IR does not imply that a numerical backend for every compact orthogonal group is shipped.
+- The semantic formulation is group-parametric for finite-dimensional orthogonal output representations; the released IR and executable lowering are currently O(3)-specialized.
+- The currently validated executable backend targets orthonormal `O(3)` contracts using real e3nn-compatible layouts; SO(3) declarations are rejected as unsupported by the released compiler path.
+- This backend scope is an implementation boundary, not a claim that a numerical backend for every compact orthogonal group is shipped.
 - Soundness is compositional relative to registered typed primitives, representation/decomposition oracles, and registered lowering rules.
 - The certificate is **not** a formal verification of arbitrary user code, a completeness theorem for all equivariant SPD programs, or a guarantee of calibration or physical uncertainty identification.
 - Dataset payloads, checkpoints, and large run artifacts are external to the source tree. Reproducibility is defined by the benchmark contract and recorded run manifests, not by committing private data.
-- The external Deep Ensemble control has a completed three-member staged run and validation-calibrated evaluator output; it remains an external diagnostic rather than a headline benchmark comparison.
+- The external Deep Ensemble control has a completed three-member staged run from the compiled O(3) dielectric path. Its exact density is an equally weighted Student-t member mixture; reported coverage is explicitly a moment-Gaussian diagnostic, so it remains an external diagnostic rather than a headline benchmark comparison.
 - The fixed-coordinate Cholesky smoke is retained as a numerical negative diagnostic and is not promoted by relaxing the strict-SPD gate.
 
 The repository is an active research implementation. Interfaces and experiment records may evolve while the manuscript and benchmark protocol are being consolidated.

@@ -26,11 +26,15 @@ artifact-backed evidence.
 - Existing formal dielectric, elasticity, and ITOP evidence remains separate
   by dataset, split, checkpoint, seed, and protocol. Numerical claims are not
   merged merely because they use the same metric.
-- The Deep Ensemble external-control work has completed three staged members
-  and a validation-calibrated ensemble evaluation. Its raw test mixture NLL is
-  `-3.595` with Energy Score `0.405`; calibration worsens these to `-3.190`
-  and `0.419`, so it remains an external diagnostic rather than a headline
-  benchmark result.
+- The Deep Ensemble external-control work has completed three independently
+  initialized members from the compiled O(3) dielectric path (artifact source
+  commit `5141d709903fe36c63b168f64f86a6981d9d0d60`). The exact density is an
+  equally weighted Student-t member mixture. Its raw test mixture NLL is
+  `-3.595` with Energy Score `0.405`; validation temperature calibration
+  worsens these to `-3.190` and `0.419`. Coverage is reported only as the
+  explicitly named `moment_gaussian_coverage`, so this remains an external
+  diagnostic rather than a fixed-coordinate/non-equivariant baseline or a
+  headline benchmark result.
 - The fixed-coordinate Cholesky smoke is retained as a numerical negative
   diagnostic. It is not a ranked baseline and is not being silently repaired
   or promoted.

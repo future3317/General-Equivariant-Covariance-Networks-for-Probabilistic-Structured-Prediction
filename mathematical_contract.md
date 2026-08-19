@@ -1,9 +1,11 @@
 # Mathematical contract
 
 This file is the single semantic contract for the representation compiler and
-its probabilistic heads. Code and manuscript claims must refer to these
-definitions; implementation-specific optimizations are valid only when they
-are numerically equivalent to the reference semantics below.
+its probabilistic heads. The semantic definitions are group-parametric, while
+the released decomposition and lowering implementation is currently
+O(3)-specialized. Code and manuscript claims must refer to these definitions;
+implementation-specific optimizations are valid only when they are numerically
+equivalent to the reference semantics below.
 
 ## 1. Representation and coordinates
 

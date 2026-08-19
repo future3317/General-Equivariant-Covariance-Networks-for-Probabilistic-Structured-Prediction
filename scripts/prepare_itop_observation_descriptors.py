@@ -12,7 +12,12 @@ import torch
 
 from data.frozen_distribution_features import validate_observation_descriptors
 from data.itop_dataset import itop_train_validation_indices
-from data.observation_descriptors import point_cloud_observation_descriptors
+from data.observation_descriptors import (
+    O3_INVARIANT_DESCRIPTOR_NAMES,
+    o3_invariant_descriptor_names,
+    observation_descriptor_semantics,
+    point_cloud_observation_descriptors,
+)
 from scripts.itop_reproducibility import (
     atomic_write_json,
     sha256_file,
@@ -44,10 +49,15 @@ def _descriptor_payload(
         for name in raw
         if name not in {"sample_id", "visible_fraction_diagnostic_only"}
     )
-    selected_names = available if names is None else names
+    selected_names = (
+        tuple(name for name in available if name in O3_INVARIANT_DESCRIPTOR_NAMES)
+        if names is None
+        else names
+    )
     if not set(selected_names).issubset(set(available)):
         missing = sorted(set(selected_names) - set(available))
         raise ValueError(f"requested descriptors are unavailable: {missing}")
+    o3_invariant_descriptor_names(selected_names)
     sample_ids = raw["sample_id"]
     descriptor_columns = {
         name: raw[name].float() for name in selected_names
@@ -117,6 +127,9 @@ def main() -> None:
         "schema_version": 1,
         "kind": "itop_observation_descriptors",
         "descriptor_names": list(names or ()),
+        "descriptor_semantics": {
+            name: observation_descriptor_semantics(name) for name in names or ()
+        },
         "selection": {
             "seed": args.seed,
             "validation": "side_train held-out indices",

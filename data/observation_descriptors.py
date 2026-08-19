@@ -8,6 +8,57 @@ import h5py
 import numpy as np
 import torch
 
+O3_INVARIANT_DESCRIPTOR_NAMES = frozenset(
+    {
+        "centroid_norm",
+        "radius_mean",
+        "radius_std",
+        "radius_q90",
+        "covariance_eigenvalue_min",
+        "covariance_eigenvalue_mid",
+        "covariance_eigenvalue_max",
+        "covariance_anisotropy",
+        "knn_distance_mean",
+        "knn_distance_q90",
+    }
+)
+CAMERA_FRAME_DESCRIPTOR_NAMES = frozenset(
+    {
+        "centroid_depth",
+        "extent_volume",
+        "valid_depth_fraction",
+        "valid_depth_mean",
+        "valid_depth_std",
+        "valid_depth_min",
+        "valid_depth_max",
+    }
+)
+
+
+def observation_descriptor_semantics(name: str) -> str:
+    """Return the geometric type of a supported observation descriptor."""
+    if name in O3_INVARIANT_DESCRIPTOR_NAMES:
+        return "o3_invariant_scalar"
+    if name in CAMERA_FRAME_DESCRIPTOR_NAMES:
+        return "camera_frame_scalar"
+    raise ValueError(f"unsupported observation descriptor {name!r}")
+
+
+def o3_invariant_descriptor_names(names: tuple[str, ...] | list[str]) -> tuple[str, ...]:
+    """Validate names legal for an equivariant scalar input contract."""
+    normalized = tuple(names)
+    invalid = [
+        name
+        for name in normalized
+        if observation_descriptor_semantics(name) != "o3_invariant_scalar"
+    ]
+    if invalid:
+        raise ValueError(
+            "equivariant observation descriptors must be O(3)-invariant scalars; "
+            f"camera-frame or unsupported fields: {invalid}"
+        )
+    return normalized
+
 
 def point_cloud_observation_descriptors(
     cache: str | Path,

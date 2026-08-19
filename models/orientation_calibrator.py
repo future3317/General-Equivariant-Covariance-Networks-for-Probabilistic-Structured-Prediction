@@ -5,15 +5,16 @@ from __future__ import annotations
 import torch
 
 from compatibility.e3nn import o3
-from representations.exterior_square import O3SkewOperatorBasis
+from representations import O3AdaptiveLifting, O3SkewOperatorBasis
 
 
 class EquivariantIsospectralOrientationCalibrator(torch.nn.Module):
     """Predict an equivariant skew generator and conjugate an SPD scale.
 
-    The coefficient head is representation-generic: its output is compiled
-    from ``Lambda^2(output_irreps)``.  Zero initialization makes the module an
-    exact identity calibrator at the start of a staged calibration phase.
+    The coefficient head is target-directed: its output is compiled from
+    ``Lambda^2(output_irreps)`` by the same O(3) lifting planner used by the
+    probabilistic readout.  Zero initialization makes the module an exact
+    identity calibrator at the start of a staged calibration phase.
     """
 
     def __init__(
@@ -27,10 +28,9 @@ class EquivariantIsospectralOrientationCalibrator(torch.nn.Module):
         self.hidden_irreps = o3.Irreps(hidden_irreps)
         self.output_irreps = o3.Irreps(output_irreps)
         self.operator_basis = O3SkewOperatorBasis(self.output_irreps)
-        self.coefficient_head = o3.Linear(
+        self.coefficient_head = O3AdaptiveLifting(
             self.hidden_irreps,
             self.operator_basis.operator_irreps,
-            biases=False,
         )
         if zero_init:
             for parameter in self.coefficient_head.parameters():

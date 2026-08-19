@@ -14,7 +14,7 @@ selection decisions.
 | ITOP shuffled controls | `results/itop_reviewer_controls_2c7cb38/seed_{42,43,44}/shuffled_graph_student_t` plus `results/itop_reviewer_controls_matched_20260816/seed_{43,44}` | Completed three-seed true-vs-shuffled topology pairing; shared protocol/cache, effective split seed, frame IDs, and targets verified per seed; pooled paired $\Delta$NLL is +20.987 (Side) and +26.820 (Top), with positive subject-level effects for all four subject clusters; the pooled contrast is distinct from seed-averaged marginal means and is reported descriptively; official Zenodo IDs encode person/frame only (`XX_YYYYY`), with no action-sequence field |
 | Elasticity formal study | `results/elasticity_end_to_end_feb75b9` | Existing legacy-Voigt deterministic/LR-t/Full-t study; not representation-compatible evidence |
 | Elasticity compatible feasibility | `results/elasticity_stability_20260816/{D2_seed43,D3_seed43,D4_seed43}` plus server-side checkpoints | D2 and D3 fail fast under unrestricted Full; D4 bounded-window diagnostic is finite and strict-SPD for seed 43; no promoted unrestricted result |
-| External Deep Ensemble control | `reviewer_external_controls_20260818/dielectric_ensemble_formal_20260818`, seeds 42, 43, and 44; staged mean → covariance → joint training; `ensemble_3member_metrics.json` | Three-member evaluation completed with a common inference contract; raw test mixture NLL $-3.595$ and Energy Score $0.405$, versus validation-calibrated NLL $-3.190$ and Energy Score $0.419$; coverage remains under nominal, so this is an external diagnostic and not a headline benchmark comparison |
+| External Deep Ensemble control | `reviewer_external_controls_20260818/dielectric_ensemble_formal_20260818`, seeds 42, 43, and 44; staged mean → covariance → joint training; `ensemble_3member_metrics.json`; artifact source commit `5141d709903fe36c63b168f64f86a6981d9d0d60` | Three independently initialized members from the compiled O(3) dielectric path share one inference contract. The exact density is an equally weighted Student-t member mixture; raw test mixture NLL is $-3.595$ and Energy Score $0.405$, versus validation-calibrated NLL $-3.190$ and Energy Score $0.419$. Coverage is the explicitly named moment-Gaussian diagnostic, so this remains an external diagnostic and not a fixed-coordinate/non-equivariant or headline benchmark comparison |
 
 ## Current decision ledger
 
@@ -33,6 +33,9 @@ selection decisions.
 - Train/validation may select checkpoints and hyperparameters; test is never used
   for selection.
 - ITOP Top is evaluation-only.
+- Any new repair remains exploratory until its method, hyperparameters, and
+  stopping rule are frozen from development/validation evidence and evaluated
+  once on a separately hash-locked confirmation split.
 - A mixture cannot be promoted from NLL alone; it needs a law-correct joint
   diagnostic improvement.
 - A representation-compatible elasticity claim requires all predetermined seeds
