@@ -370,6 +370,8 @@ def _predict(
             if variant == "global_nu":
                 output["nu"] = result["nu"]
         for key, value in output.items():
+            if value.ndim == 0:
+                value = value.expand(size)
             records.setdefault(key, []).append(value.detach().cpu())
     concatenated = {}
     for key, values in records.items():
@@ -548,6 +550,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cache_dir", type=Path, required=True)
     parser.add_argument("--run_dir", type=Path, required=True)
+    parser.add_argument(
+        "--complete_existing",
+        action="store_true",
+        help="complete predictions and audits from an existing selected checkpoint",
+    )
     parser.add_argument("--variant", choices=VARIANTS, required=True)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max_epochs", type=int, default=60)
@@ -582,7 +589,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     args.diagnostic_splits = _parse_diagnostic_splits(args.diagnostic_splits)
-    if args.run_dir.exists():
+    if args.run_dir.exists() and not args.complete_existing:
         raise FileExistsError(f"refusing to overwrite E1 run: {args.run_dir}")
     if args.max_epochs < 1 or args.patience < 1:
         raise ValueError("max_epochs and patience must be positive")
@@ -627,13 +634,28 @@ def main() -> None:
         metadata, args.fixed_operator_checkpoint, device
     )
     objective = StudentTNLL(nu=float(metadata["student_t_dof"]))
-    args.run_dir.mkdir(parents=True)
+    args.run_dir.mkdir(parents=True, exist_ok=True)
     history = []
     best = float("inf")
     stale = 0
     selected_epoch = 0
     best_path = args.run_dir / "best_model.pt"
-    if model is None:
+    if args.complete_existing:
+        if not best_path.is_file() or not (args.run_dir / "history.json").is_file():
+            raise FileNotFoundError(
+                "--complete_existing requires best_model.pt and history.json"
+            )
+        checkpoint = torch.load(best_path, map_location=device, weights_only=True)
+        if model is not None:
+            model.load_state_dict(checkpoint["model_state"], strict=True)
+        history = json.loads((args.run_dir / "history.json").read_text(encoding="utf-8"))
+        selected = [row for row in history if row.get("validation_nll") is not None]
+        if not selected:
+            raise ValueError("existing history has no validation_nll selection records")
+        selected_record = min(selected, key=lambda row: row["validation_nll"])
+        selected_epoch = int(selected_record["epoch"])
+        best = float(selected_record["validation_nll"])
+    elif model is None:
         best = _loss(
             None,
             args.variant,
