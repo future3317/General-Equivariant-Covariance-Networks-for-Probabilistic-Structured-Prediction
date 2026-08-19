@@ -34,10 +34,20 @@ artifact-backed evidence.
   worsens these to `-3.190` and `0.419`. Coverage is reported only as the
   explicitly named `moment_gaussian_coverage`, so this remains an external
   diagnostic rather than a fixed-coordinate/non-equivariant baseline or a
-  headline benchmark result.
+  headline benchmark result. The metadata-only gate is
+  `python scripts/audit_dielectric_ensemble_provenance.py`; it verifies clean
+  source, shared dataset and inference-contract identity, staged training, and
+  validation-to-test evaluation before the result is cited.
 - The fixed-coordinate Cholesky smoke is retained as a numerical negative
   diagnostic. It is not a ranked baseline and is not being silently repaired
   or promoted.
+- The exterior-square orientation refinement and shared-mean $K=2$ mixture are
+  retained as diagnosis-driven negative pilots. They remain outside the public
+  compiler-law surface because neither passed the predeclared adequacy gate.
+- The registered `exp(asinh(lambda))` full-image chart is the current
+  representation-compatible elasticity candidate; its three-seed result is
+  not cited until the server-side finite, FP64-SPD, equivariance, and
+  validation-selection audit is complete.
 
 ## Reproducibility boundary
 

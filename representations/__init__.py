@@ -13,6 +13,11 @@ from representations.adaptive_lifting import (
     required_lifting_depth,
 )
 from representations.base import OrthogonalRepresentationSpec, SymmetricSquareSpec
+from representations.backends import (
+    O3RepresentationBackend,
+    RepresentationBackend,
+    get_representation_backend,
+)
 from representations.cartesian_outputs import (
     rank2_symmetric_irreps,
     rank4_elasticity_irreps,
@@ -91,6 +96,7 @@ __all__ = [
     "MultiplicityFirstCartesianTensorSquare",
     "MultiplicityFirstDenseTensorProduct",
     "NumericalSPDCertificate",
+    "O3RepresentationBackend",
     "O3AdaptiveLifting",
     "O3Compilation",
     "O3CompiledOutputHead",
@@ -109,6 +115,7 @@ __all__ = [
     "Positivity",
     "Rank2CartesianSTFOperatorBasis",
     "RepExpr",
+    "RepresentationBackend",
     "RepeatedExpr",
     "SymmetricSquareExpr",
     "SymmetricSquareSpec",
@@ -122,6 +129,7 @@ __all__ = [
     "direct_sum_irreps",
     "exterior_square_irreps",
     "irrep_multiplicities",
+    "get_representation_backend",
     "is_rank2_stf_output",
     "plan_lifting_graph",
     "rank2_symmetric_irreps",

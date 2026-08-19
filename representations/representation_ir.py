@@ -15,6 +15,17 @@ from representations.o3_irreps import O3IrrepsSpec
 class RepExpr(ABC):
     """Symbolic representation expression before backend decomposition."""
 
+    def decompose(self, *, backend: str = "o3") -> DecomposedRep:
+        """Decompose through a named registered representation backend.
+
+        The compatibility method :meth:`decompose_o3` remains the direct
+        implementation entry point for existing callers.
+        """
+
+        from representations.backends import get_representation_backend
+
+        return get_representation_backend(backend).decompose(self)
+
     @abstractmethod
     def decompose_o3(self) -> DecomposedRep:
         """Decompose this expression with the released O(3) backend."""

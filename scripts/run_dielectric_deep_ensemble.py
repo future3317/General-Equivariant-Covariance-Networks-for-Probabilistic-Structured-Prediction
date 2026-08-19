@@ -11,6 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+DEFAULT_ENSEMBLE_SEEDS = (42, 43, 44)
+
 
 def member_command(
     args: argparse.Namespace,
@@ -69,7 +71,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_dir", type=Path, required=True)
     parser.add_argument("--output_root", type=Path, required=True)
-    parser.add_argument("--seeds", default="42,43,44,45,46")
+    parser.add_argument(
+        "--seeds",
+        default=",".join(str(seed) for seed in DEFAULT_ENSEMBLE_SEEDS),
+        help="independent member seeds; the default is the three-member research contract",
+    )
     parser.add_argument("--distribution", choices=("gaussian", "student_t"), default="student_t")
     parser.add_argument("--student_t_dof", type=float, default=5.0)
     parser.add_argument(

@@ -57,7 +57,7 @@ The current journal direction treats predictive-law selection as part of the typ
 | Structured outputs | Symmetric rank-2 and higher-order tensor declarations, Cartesian symmetry formulas, graph-structured repeated outputs | output representation and active target |
 | Representation compilation | Irrep decomposition, parity checks, multiplicity accounting, target-pruned reachability, shortest CG plans | reachability and representation certificate |
 | Covariance families | Full, isotypic/block, low-rank, centered spectral-window, and graph-precision families | canonical vs. active target and parameter budget |
-| Positive-definite maps | Matrix-exponential and spectral SPD constructions; graph precision assembly | SPD effect and numerical validity |
+| Positive-definite maps | Full-image matrix-exponential and asinh-exponential charts, bounded spectral maps, and graph-precision assembly | SPD effect and numerical validity |
 | Predictive laws | Gaussian, Student-t, and conditional-t compiler contracts; exact finite-mixture evaluation utilities | normalized density, moments, sampling, diagnostics |
 | Lowering | Spherical-CG and Cartesian/STF execution paths with explicit fidelity | backend, exactness, and checkpoint mapping |
 | Statistical audit | Proper NLL, Energy Score, coverage, MACE, radial PIT, whitening defects, directional tests, risk--coverage | split, law, and diagnostic provenance |
@@ -95,6 +95,8 @@ These compact figures are included as a visual entry point to the scientific sto
 - The certificate is **not** a formal verification of arbitrary user code, a completeness theorem for all equivariant SPD programs, or a guarantee of calibration or physical uncertainty identification.
 - Dataset payloads, checkpoints, and large run artifacts are external to the source tree. Reproducibility is defined by the benchmark contract and recorded run manifests, not by committing private data.
 - The external Deep Ensemble control has a completed three-member staged run from the compiled O(3) dielectric path. Its exact density is an equally weighted Student-t member mixture; reported coverage is explicitly a moment-Gaussian diagnostic, so it remains an external diagnostic rather than a headline benchmark comparison.
+- The exterior-square orientation refinement and shared-mean finite-mixture path are retained as diagnosis-driven negative pilots. They are tested utilities, not promoted public compiler laws or positive adequacy claims.
+- The full-image `exp(asinh(lambda))` chart is registered as a semantics-compatible SPD family; its elasticity evidence is manuscript-eligible only after the fixed three-seed finite/SPD/equivariance audit closes.
 - The fixed-coordinate Cholesky smoke is retained as a numerical negative diagnostic and is not promoted by relaxing the strict-SPD gate.
 
 The repository is an active research implementation. Interfaces and experiment records may evolve while the manuscript and benchmark protocol are being consolidated.

@@ -10,7 +10,7 @@ model-selection record.  Top-view data were used only for final evaluation.
 
 - Formal control audit: `results/itop_reviewer_controls_2c7cb38/control_audit.json`.
 - Split-matched replication: `results/itop_reviewer_controls_matched_20260816/`.
-- Matched topology audit: `results/itop_topology_pairing_audit_20260817_subject_cluster.json`.
+- Matched topology audit: `results/itop_topology_pairing_audit_20260819_corrected.json`.
 - Frozen backbone/cache: seed-42 deterministic checkpoint and feature cache.
 - Distribution: fixed Student-$t$, $\nu=5$.
 - Selection: Side train/validation only; Top evaluation only.
@@ -34,14 +34,14 @@ reported descriptively and are not used as sole success criteria.
 | Shuffled Graph-$t$ | $-34.992 \pm 0.060$ | $32.107 \pm 0.865$ | $0.726 \pm 0.000$ | $2.547 \pm 0.030$ | $0.135 \pm 0.004$ | $0.700 \pm 0.019$ |
 
 The true-versus-shuffled result therefore supports a topology-specific
-likelihood effect under the audited protocol.  Pooled paired frame-level NLL
-differences (shuffled minus true) are $+20.987$ on Side and $+26.820$ on Top
-(4 subject clusters; 14,589 seed-frame pairs per view), distinct from the
-seed-averaged marginal means in the table above.  The four subject-level
-effects are $[18.91,22.44,22.22,20.78]$ on Side and
-$[26.67,28.01,27.11,25.76]$ on Top for IDs 00--03; all are positive.  We
-retain subject-level effects as descriptive evidence rather than treating a
-four-cluster percentile interval as strong inferential evidence.  The official Zenodo
+likelihood effect under the audited protocol.  The corrected pooled paired
+frame-level NLL differences (shuffled minus true) are $+20.944$ on Side and
+$+28.039$ on Top (4 subject clusters; 14,589 seed-frame pairs per view), using
+the same FP64 Student-$t$ sufficient-statistic estimand as the marginal table
+means.  The four subject-level effects for IDs 00--03 are
+$[18.89,22.40,22.14,20.77]$ on Side and
+$[27.93,29.10,28.30,27.06]$ on Top; all are positive.  We retain subject-level effects as descriptive evidence rather than
+treating a four-cluster percentile interval as strong inferential evidence.  The official Zenodo
 schema identifies each released `id` as `XX_YYYYY`, where `XX` is the person ID
 and `YYYYY` is the frame number; it provides no action label or sequence-boundary
 field (Zenodo record 3932973).  The local raw label HDF5 files expose the same
