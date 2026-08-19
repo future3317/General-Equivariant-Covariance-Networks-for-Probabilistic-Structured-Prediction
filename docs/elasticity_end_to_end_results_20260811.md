@@ -13,6 +13,9 @@ coordinates, was compiled, trained, and evaluated end to end.
 The result does not support a calibration claim. Full-t gives the better
 proper likelihood, while rank-2 Low-rank-t gives better point error, Energy
 Score, and coverage. Both families strongly fail the elliptical diagnostics.
+The legacy Voigt protocol is not representation-compatible; it is therefore
+kept as a historical stress test rather than pooled with the separate
+representation-compatible chart audit below.
 
 ## Protocol and artifact audit
 
@@ -74,6 +77,31 @@ cell rejects radius-direction independence at the minimum 199-permutation
 resolution. Algebraic validity and end-to-end trainability therefore do not
 imply a statistically adequate elliptical predictive law.
 
+## Representation-compatible full-image chart audit (2026-08-19)
+
+The full rank-4 target was rerun with the registered full-image spectral chart
+
+\[
+f(\lambda)=\exp(\operatorname{asinh}\lambda),
+\]
+
+under representation-compatible target normalization. This is a separate
+three-seed evidence contract, not a repair of or numerical ranking against the
+legacy Voigt protocol. All seeds used the same 231-coordinate Full target,
+three exact lifting edges through $\ell=8$, fixed $\nu=5$, and validation-only
+selection. The compact audit is
+`results/elasticity_stability_20260819/asinh_exp_formal_20260819/asinh_elasticity_audit.json`.
+
+| Chart | MAE (GPa) $\downarrow$ | NLL $\downarrow$ | Energy $\downarrow$ | Cov90 $\uparrow$ | Cov95 $\uparrow$ | FP64 strict SPD |
+|---|---:|---:|---:|---:|---:|---|
+| $\exp(\operatorname{asinh}\lambda)$ | 13.333 $\pm$ 0.713 | 18.809 $\pm$ 0.389 | 2.788 $\pm$ 0.023 | 0.534 $\pm$ 0.049 | 0.657 $\pm$ 0.057 | 3/3 |
+
+All predictions are finite, all three active and canonical reachability audits
+record depth 3 with the $\ell=8$ obligation, and the independent FP64 minimum
+eigenvalues are positive. These values establish representation-compatible
+execution evidence for the full-image chart; they do not establish calibration
+or a cross-normalization family ranking.
+
 ## Existing evidence
 
 - The compiler already constructed the rank-4 elasticity output
@@ -120,8 +148,10 @@ imply a statistically adequate elliptical predictive law.
 - Runtime evidence is workload-level only. A claim about asymptotic or
   kernel-level speed would require isolated matched profiling and is not needed
   for the present scientific gate.
-- No additional family sweep, temperature correction, ensemble, or backbone
-  expansion is authorized by these results.
+- No additional elasticity family sweep, temperature correction, or backbone
+  expansion is needed for the current paper; the asinh chart is reported as a
+  separate representation-compatible audit rather than merged with legacy
+  Voigt values.
 
 ## Artifact hashes
 
