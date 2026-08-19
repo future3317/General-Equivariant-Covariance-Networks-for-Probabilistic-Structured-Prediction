@@ -44,10 +44,10 @@ artifact-backed evidence.
 - The exterior-square orientation refinement and shared-mean $K=2$ mixture are
   retained as diagnosis-driven negative pilots. They remain outside the public
   compiler-law surface because neither passed the predeclared adequacy gate.
-- The registered `exp(asinh(lambda))` full-image chart is the current
-  representation-compatible elasticity candidate; its three-seed result is
-  not cited until the server-side finite, FP64-SPD, equivariance, and
-  validation-selection audit is complete.
+- The registered `exp(asinh(lambda))` full-image chart has a complete audited
+  three-seed representation-compatible elasticity result (mean NLL `18.809`,
+  Energy `2.788`, MAE `13.333`); it is reported separately from the
+  legacy-Voigt protocol and is not cross-protocol ranked.
 
 ## Reproducibility boundary
 

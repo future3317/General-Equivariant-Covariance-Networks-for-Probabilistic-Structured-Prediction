@@ -96,7 +96,7 @@ These compact figures are included as a visual entry point to the scientific sto
 - Dataset payloads, checkpoints, and large run artifacts are external to the source tree. Reproducibility is defined by the benchmark contract and recorded run manifests, not by committing private data.
 - The external Deep Ensemble control has a completed three-member staged run from the compiled O(3) dielectric path. Its exact density is an equally weighted Student-t member mixture; reported coverage is explicitly a moment-Gaussian diagnostic, so it remains an external diagnostic rather than a headline benchmark comparison.
 - The exterior-square orientation refinement and shared-mean finite-mixture path are retained as diagnosis-driven negative pilots. They are tested utilities, not promoted public compiler laws or positive adequacy claims.
-- The full-image `exp(asinh(lambda))` chart is registered as a semantics-compatible SPD family; its elasticity evidence is manuscript-eligible only after the fixed three-seed finite/SPD/equivariance audit closes.
+- The full-image `exp(asinh(lambda))` chart is registered as a semantics-compatible SPD family; its three-seed elasticity evidence is complete and is reported separately from the legacy-Voigt protocol.
 - The fixed-coordinate Cholesky smoke is retained as a numerical negative diagnostic and is not promoted by relaxing the strict-SPD gate.
 
 The repository is an active research implementation. Interfaces and experiment records may evolve while the manuscript and benchmark protocol are being consolidated.

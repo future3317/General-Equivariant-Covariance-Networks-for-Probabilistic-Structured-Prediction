@@ -23,7 +23,7 @@ def test_asinh_campaign_audit_accepts_complete_contract(tmp_path):
         (run / "compilation.json").write_text(
             json.dumps(
                 {
-                    "operator_family": {"kind": "asinh_exponential"},
+                    "family": {"kind": "asinh_exponential"},
                     "representation_reachability": {
                         "active": {
                             "reachable": True,

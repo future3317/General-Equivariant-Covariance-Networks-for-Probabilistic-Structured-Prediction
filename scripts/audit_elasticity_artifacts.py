@@ -66,7 +66,7 @@ def audit_run(run_dir: Path, *, seed: int) -> dict[str, Any]:
     if args.get("objective") != "student_t" or float(args.get("student_t_dof", 0)) != 5.0:
         failures.append("Student-t objective contract is not fixed nu=5")
 
-    family = compilation.get("operator_family", {})
+    family = compilation.get("family", {})
     reachability = compilation.get("representation_reachability", {})
     if family.get("kind") != "asinh_exponential":
         failures.append(f"unexpected compiler family: {family.get('kind')!r}")
