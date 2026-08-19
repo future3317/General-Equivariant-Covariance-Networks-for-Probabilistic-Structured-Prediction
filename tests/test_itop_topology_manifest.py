@@ -1,9 +1,14 @@
+import json
+from types import SimpleNamespace
+
 import pytest
 
+from data.itop_dataset import ITOP_OUTPUT_GRAPH, ITOP_SKELETON_EDGES
 from scripts.itop_topology_manifest import (
     generate_degree_matched_tree,
     topology_manifest,
 )
+from scripts.train_itop import _topology_graph
 
 
 def test_degree_matched_tree_preserves_true_skeleton_degree_sequence():
@@ -39,3 +44,24 @@ def test_topology_manifest_is_seeded_and_unfiltered():
 def test_degree_matched_tree_rejects_non_tree_reference():
     with pytest.raises(ValueError, match="tree"):
         generate_degree_matched_tree(((0, 1), (1, 2)), num_nodes=4, seed=3)
+
+
+def test_training_resolves_manifest_topology_without_outcome_selection(tmp_path):
+    records = topology_manifest(ITOP_SKELETON_EDGES, num_nodes=15, count=1, seed=2026)
+    manifest = {
+        "outcome_filtered": False,
+        "records": records,
+    }
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    graph = _topology_graph(
+        SimpleNamespace(
+            model="shuffled_graph_student_t",
+            topology_manifest=str(path),
+            topology_index=0,
+        )
+    )
+
+    assert graph.edges == tuple(tuple(edge) for edge in records[0]["edges"])
+    assert graph.edges != ITOP_OUTPUT_GRAPH.edges

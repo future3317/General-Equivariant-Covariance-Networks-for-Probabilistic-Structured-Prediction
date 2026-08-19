@@ -61,7 +61,7 @@ from models.fixed_coordinate_baseline import (
     FixedCoordinateDiagonalMap,
     FixedCoordinateDiagonalReadout,
 )
-from representations import O3IrrepsSpec, certify_numerical_spd
+from representations import EquivariantOutputGraph, O3IrrepsSpec, certify_numerical_spd
 from scripts._common import add_tensor_product_arguments, tensor_product_kwargs
 from scripts.itop_reproducibility import (
     atomic_write_json,
@@ -89,6 +89,28 @@ MODEL_KINDS = (
     "fixed_coordinate_cholesky_student_t",
 )
 PHASES = ("deterministic", "frozen_head", "joint_finetune", "end_to_end")
+
+
+def _topology_graph(args: argparse.Namespace) -> EquivariantOutputGraph:
+    """Resolve a declared shuffled topology from the fixed null manifest."""
+
+    topology_manifest = getattr(args, "topology_manifest", None)
+    if args.model != "shuffled_graph_student_t" or topology_manifest is None:
+        return ITOP_SHUFFLED_TREE_GRAPH
+    topology_index = getattr(args, "topology_index", 0)
+    manifest = json.loads(Path(topology_manifest).read_text(encoding="utf-8"))
+    if manifest.get("outcome_filtered", True):
+        raise ValueError("topology manifest must be outcome-unfiltered")
+    records = manifest.get("records", [])
+    if not 0 <= topology_index < len(records):
+        raise IndexError("topology_index is outside the manifest")
+    record = records[topology_index]
+    return EquivariantOutputGraph(
+        num_nodes=ITOP_OUTPUT_GRAPH.num_nodes,
+        edges=tuple(tuple(edge) for edge in record["edges"]),
+        node_irrep=ITOP_OUTPUT_GRAPH.node_irrep,
+        node_names=ITOP_OUTPUT_GRAPH.node_names,
+    )
 
 
 def _logger(run_dir: Path, *, continuing: bool) -> logging.Logger:
@@ -210,7 +232,7 @@ def _build_model(args: argparse.Namespace):
     elif args.model == "low_rank_student_t":
         covariance = LowRankCovariance(rank=4)
     elif args.model == "shuffled_graph_student_t":
-        covariance = GraphPrecision(ITOP_SHUFFLED_TREE_GRAPH)
+        covariance = GraphPrecision(_topology_graph(args))
     else:
         covariance = GraphPrecision(ITOP_OUTPUT_GRAPH)
     objective = "student_t" if is_student else "gaussian"
@@ -589,6 +611,7 @@ def _energy_and_bone_error(
     *,
     samples: int,
     student_t_dof: float | None,
+    graph_edges: tuple[tuple[int, int], ...] = ITOP_OUTPUT_GRAPH.edges,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     cholesky = torch.linalg.cholesky(scatter)
     noise = torch.randn(
@@ -608,7 +631,7 @@ def _energy_and_bone_error(
         draws[:, :, None, :] - draws[:, None, :, :], dim=-1
     ).mean(dim=(-2, -1))
     score = fit - 0.5 * diversity
-    bone = bone_length_error(draws, target, ITOP_OUTPUT_GRAPH.edges)
+    bone = bone_length_error(draws, target, graph_edges)
     return score.mean(), bone
 
 
@@ -745,6 +768,7 @@ def evaluate(
     detailed: bool,
     use_bf16: bool,
     split_name: str = "unknown",
+    graph_edges: tuple[tuple[int, int], ...] = ITOP_OUTPUT_GRAPH.edges,
 ) -> tuple[dict[str, Any], dict[str, torch.Tensor]]:
     model.eval()
     total_loss = 0.0
@@ -832,6 +856,7 @@ def evaluate(
                 target,
                 samples=32,
                 student_t_dof=student_t_dof if is_student else None,
+                graph_edges=graph_edges,
             )
             total_energy += float(energy) * batch_size
             total_bone += float(bone) * batch_size
@@ -858,9 +883,7 @@ def evaluate(
         }
     )
     correlation = joint_residual_correlation(mean, target)
-    distance_correlation = residual_correlation_by_graph_distance(
-        correlation, ITOP_OUTPUT_GRAPH.edges
-    )
+    distance_correlation = residual_correlation_by_graph_distance(correlation, graph_edges)
     metrics["adjacent_joint_residual_correlation"] = distance_correlation["1"]
     metrics["residual_correlation_by_skeleton_distance"] = distance_correlation
 
@@ -1058,6 +1081,8 @@ def _parse_args() -> argparse.Namespace:
         "--feature_cache",
         help="pooled frozen-backbone cache; valid only for phase=frozen_head",
     )
+    parser.add_argument("--topology_manifest")
+    parser.add_argument("--topology_index", type=int, default=0)
     parser.add_argument("--student_t_dof", type=float, default=5.0)
     parser.add_argument(
         "--representation_metric", choices=("none", "block_auto"), default="none",
@@ -1132,6 +1157,11 @@ def main() -> None:
         )
     logger = _logger(run_dir, continuing=args.continue_run)
     model, plan = _build_model(args)
+    evaluation_edges = (
+        _topology_graph(args).edges
+        if args.model == "shuffled_graph_student_t"
+        else ITOP_OUTPUT_GRAPH.edges
+    )
     frozen_backbone = _configure_initialization(model, args)
     freeze = _freeze_record(model, args)
     model = model.to(device)
@@ -1292,6 +1322,7 @@ def main() -> None:
             student_t_dof=args.student_t_dof,
             detailed=False,
             use_bf16=use_bf16,
+            graph_edges=evaluation_edges,
         )
         criterion = (
             validation["mpjpe_cm"]
@@ -1366,6 +1397,7 @@ def main() -> None:
             detailed=True,
             use_bf16=use_bf16,
             split_name="side",
+            graph_edges=evaluation_edges,
         )
         top_metrics, top_artifact = evaluate(
             model,
@@ -1376,6 +1408,7 @@ def main() -> None:
             detailed=True,
             use_bf16=use_bf16,
             split_name="top",
+            graph_edges=evaluation_edges,
         )
     except EvaluationSPDCertificateError as error:
         certificate = error.diagnostic["certificate"]
