@@ -6,6 +6,7 @@ import torch
 from compatibility.e3nn import o3
 from distributions import FiniteMixtureStudentTNLL, StudentTNLL
 from models.frozen_distribution_readout import (
+    FrozenIsospectralOrientationStudentT,
     FrozenMultimodalStudentTMixture,
     FrozenSharedMeanStudentTMixture,
     GlobalDegreesOfFreedomReadout,
@@ -137,6 +138,35 @@ def test_shared_mean_mixture_keeps_mean_and_has_finite_component_scatter():
     torch.testing.assert_close(result["component_means"], mean.unsqueeze(0).expand(2, -1, -1))
     assert bool((result["weights"] > 0).all())
     assert bool(torch.isfinite(result["component_scales"]).all())
+    assert bool(torch.isfinite(result["loss"]))
+
+
+def test_isospectral_orientation_keeps_eigenvalues_and_compiles_lambda2_target():
+    torch.manual_seed(14)
+    feature_irreps = o3.Irreps("2x0e + 2x1o + 2x2e")
+    model = FrozenIsospectralOrientationStudentT(
+        feature_irreps,
+        "0e + 2e",
+        MatrixExponentialMap(),
+    ).double()
+    features = torch.randn(5, feature_irreps.dim, dtype=torch.float64)
+    raw = torch.randn(5, 6, 6, dtype=torch.float64)
+    params = 0.2 * (raw + raw.transpose(-1, -2))
+    mean = torch.randn(5, 6, dtype=torch.float64)
+    target = torch.randn_like(mean)
+    base = model.spd_map(params)
+    with torch.no_grad():
+        for parameter in model.calibrator.coefficient_head.parameters():
+            parameter.normal_(std=0.02)
+    result = model(features, mean, params, target)
+    torch.testing.assert_close(
+        torch.linalg.eigvalsh(result["scale"]),
+        torch.linalg.eigvalsh(base),
+        atol=2e-5,
+        rtol=2e-5,
+    )
+    assert str(model.calibrator.generator_irreps) == "1x1e+1x2e+1x3e"
+    assert bool((torch.linalg.eigvalsh(result["scale"]) > 0).all())
     assert bool(torch.isfinite(result["loss"]))
 
 

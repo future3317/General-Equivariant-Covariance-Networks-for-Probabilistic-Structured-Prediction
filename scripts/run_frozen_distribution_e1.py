@@ -35,6 +35,7 @@ from evaluation import (
 from models.frozen_distribution_readout import (
     FrozenConditionalStudentT,
     FrozenGlobalStudentT,
+    FrozenIsospectralOrientationStudentT,
     FrozenMeanScatterStudentT,
     FrozenMultimodalStudentTMixture,
     FrozenOperatorProjection,
@@ -53,6 +54,7 @@ DISTRIBUTION_VARIANTS = (
     "fixed",
     "global_nu",
     "conditional_nu",
+    "orientation",
     "uncertainty_branch_conditional_nu",
     "shared_mean_mixture",
     "multimodal_mean_mixture",
@@ -151,6 +153,11 @@ def _build_model(metadata: dict, variant: str, spd_map, device: torch.device):
         return FrozenGlobalStudentT(spd_map).to(device)
     if variant == "conditional_nu":
         return FrozenConditionalStudentT(metadata["feature_irreps"], spd_map).to(device)
+    if variant == "orientation":
+        return FrozenIsospectralOrientationStudentT(
+            metadata["feature_irreps"], metadata["output_irreps"], spd_map,
+            student_t_dof=float(metadata["student_t_dof"]),
+        ).to(device)
     if variant == "uncertainty_branch_conditional_nu":
         return FrozenUncertaintyBranchConditionalStudentT(
             metadata["feature_irreps"], metadata["parameter_irreps"], spd_map
@@ -225,6 +232,7 @@ def _forward(
     if variant in {
         "global_nu",
         "conditional_nu",
+        "orientation",
         "uncertainty_branch_conditional_nu",
         "uncertainty_branch_conditional_nu",
         "shared_mean_mixture",
@@ -352,8 +360,12 @@ def _predict(
                 output["delta"] = result["delta"]
         else:
             params = result["params"]
-            output = {**common, "params": params, "scale": spd_map(params)}
-            if variant in {"conditional_nu", "uncertainty_branch_conditional_nu"}:
+            output = {
+                **common,
+                "params": params,
+                "scale": result.get("scale", spd_map(params)),
+            }
+            if variant in {"conditional_nu", "orientation", "uncertainty_branch_conditional_nu"}:
                 output["nu"] = result["nu"]
             if variant == "global_nu":
                 output["nu"] = result["nu"]
@@ -763,7 +775,7 @@ def main() -> None:
         "hypothesis": (
             "the centered spectral restriction is a principal cause of dielectric failure"
             if args.variant in SPECTRAL_VARIANTS
-            else "conditional radial flexibility or K=2 topology improves held-out proper scores "
+            else "typed radial/orientation refinement or K=2 topology improves held-out proper scores "
             "without changing frozen H, mean, or the first-stage shared scatter"
         ),
         "intervention": (
@@ -786,7 +798,7 @@ def main() -> None:
                 else str(args.fixed_operator_checkpoint.resolve())
             ),
             "shared_scatter": args.variant
-            in {"fixed", "global_nu", "conditional_nu", "symmetric_mixture"},
+            in {"fixed", "global_nu", "conditional_nu", "orientation", "symmetric_mixture"},
         },
         "splits": metadata["splits"],
         "selection": {

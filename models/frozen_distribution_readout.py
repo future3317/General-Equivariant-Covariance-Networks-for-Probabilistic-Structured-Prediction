@@ -10,7 +10,9 @@ import torch.nn.functional as F
 
 from compatibility.e3nn import o3
 from distributions import FiniteMixtureStudentTNLL, GaussianNLL, StudentTNLL
+from distributions.student_t import student_t_log_prob_from_statistics
 from evaluation.ensemble import finite_mixture_nll
+from models.orientation_calibrator import EquivariantIsospectralOrientationCalibrator
 from spd_maps.base import SPDMap
 
 
@@ -174,6 +176,68 @@ class FrozenConditionalStudentT(torch.nn.Module):
             "mean": "frozen_artifact",
             "scatter": "frozen_compiled_operator_artifact",
             "degrees_of_freedom": self.nu_readout.schema(),
+            "objective": "exact_student_t_log_likelihood",
+        }
+
+
+class FrozenIsospectralOrientationStudentT(torch.nn.Module):
+    """Freeze mean/eigenvalues and learn only an equivariant scatter orientation."""
+
+    def __init__(
+        self,
+        feature_irreps,
+        output_irreps,
+        spd_map: SPDMap,
+        *,
+        student_t_dof: float = 5.0,
+    ) -> None:
+        super().__init__()
+        self.spd_map = spd_map
+        self.student_t_dof = float(student_t_dof)
+        self.calibrator = EquivariantIsospectralOrientationCalibrator(
+            feature_irreps, output_irreps, zero_init=True
+        )
+
+    def forward(
+        self,
+        features: torch.Tensor,
+        mean: torch.Tensor,
+        params: torch.Tensor,
+        target: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        base_scale = self.spd_map(params).detach()
+        scale = self.calibrator(features, base_scale)
+        residual = target - mean.detach()
+        logdet = torch.linalg.slogdet(scale)[1]
+        solved = torch.linalg.solve(scale, residual.unsqueeze(-1)).squeeze(-1)
+        mahalanobis2 = (residual * solved).sum(-1)
+        log_prob = student_t_log_prob_from_statistics(
+            logdet, mahalanobis2, residual.shape[-1], self.student_t_dof
+        )
+        return {
+            "loss": -log_prob.mean(),
+            "log_prob": log_prob,
+            "mean": mean.detach(),
+            "target": target,
+            "params": params,
+            "scale": scale,
+            "nu": mean.new_tensor(self.student_t_dof),
+            "mahalanobis2": mahalanobis2,
+            "logdet": logdet,
+        }
+
+    def schema(self) -> dict[str, Any]:
+        return {
+            "kind": "isospectral_orientation_student_t",
+            "mean": "frozen_artifact_detached",
+            "base_scatter": "frozen_compiled_operator_artifact",
+            "eigenvalues": "preserved_by_orthogonal_conjugation",
+            "orientation_generator": {
+                "input": str(self.calibrator.hidden_irreps),
+                "target": str(self.calibrator.generator_irreps),
+                "construction": "Lambda^2(output_irreps)",
+                "initialization": "zero_identity",
+            },
             "objective": "exact_student_t_log_likelihood",
         }
 
