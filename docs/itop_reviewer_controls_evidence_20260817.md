@@ -91,3 +91,33 @@ The formal three-seed true-versus-shuffled audit is clean and paper-relevant;
 the paired contrast replaces the former split-42-only wording.  No new method,
 hyperparameter, or calibration claim is introduced from this audit, and
 Graph-$t$ Structured diagnostics, including panel (a), remain unchanged.
+
+## Preregistered degree-matched Prüfer topology null — 2026-08-20
+
+The follow-up campaign is stored at
+`/home/workspace/lrh/RESULTS/Tpami/ITOP/topology_null_prufer_20260820/` on
+`dbcloud`, with its audit at `audit.json`.  It contains 12 topology draws from
+the labeled degree-sequence-preserving Prüfer sampler, generated before model
+outcomes were observed.  Every null run has the frozen-head contract, complete
+artifacts, finite predictions, and positive FP64 minimum eigenvalues.  Side
+train/validation selected each checkpoint; Top was evaluation-only.
+
+The reference is the previously frozen official-skeleton `graph_student_t`
+run.  That historical reference predates the provenance artifact field, so the
+audit records its missing `provenance.json` explicitly; no provenance gap is
+accepted for the 12 new null runs.
+
+For the fixed seed-42 reference, null-minus-reference frame NLL effects are:
+
+| View | Mean ± sample SD | Median | IQR | Min / Max |
+| --- | ---: | ---: | ---: | ---: |
+| Side | $-6.110 \pm 2.976$ | $-6.141$ | $4.009$ | $-12.344 / -2.843$ |
+| Top | $-5.657 \pm 4.795$ | $-6.347$ | $3.579$ | $-13.783 / 2.947$ |
+
+Negative values mean that the sampled null has lower NLL than the official
+skeleton reference.  All 12 Side effects are negative; 11/12 Top effects are
+negative and one is positive.  These are descriptive topology-draw statistics,
+not independent subject-level replicates.  The result therefore qualifies the
+three-seed fixed-tree contrast: it supports topology sensitivity of the graph
+precision family, but does not support the stronger claim that the official
+skeleton is superior to every degree-matched tree.

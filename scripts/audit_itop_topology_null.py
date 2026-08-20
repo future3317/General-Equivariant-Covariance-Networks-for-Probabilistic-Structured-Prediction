@@ -75,6 +75,18 @@ def edge_overlap(reference: list[list[int]], candidate: list[list[int]]) -> int:
     return len(_edge_set(reference) & _edge_set(candidate))
 
 
+def _missing_required_files(
+    run: Path, *, allow_missing_provenance: bool = False
+) -> list[str]:
+    missing = [name for name in REQUIRED_FILES if not (run / name).is_file()]
+    if missing and (
+        not allow_missing_provenance
+        or any(name != "provenance.json" for name in missing)
+    ):
+        raise FileNotFoundError(f"{run}: missing {missing}")
+    return missing
+
+
 def _metric_row(run: Path, view: str) -> dict[str, float | None]:
     metrics = _json(run / "metrics.json")[view]
     coverage = metrics.get("per_joint_marginal_coverage", {})
@@ -91,10 +103,12 @@ def _metric_row(run: Path, view: str) -> dict[str, float | None]:
     }
 
 
-def _load_run(run: Path, *, topology_index: int | None) -> dict[str, Any]:
-    missing = [name for name in REQUIRED_FILES if not (run / name).is_file()]
-    if missing:
-        raise FileNotFoundError(f"{run}: missing {missing}")
+def _load_run(
+    run: Path, *, topology_index: int | None, allow_missing_provenance: bool = False
+) -> dict[str, Any]:
+    missing = _missing_required_files(
+        run, allow_missing_provenance=allow_missing_provenance
+    )
     args = _json(run / "args.json")
     if topology_index is not None and int(args.get("topology_index", -1)) != topology_index:
         raise ValueError(f"{run}: topology index does not match manifest")
@@ -117,7 +131,13 @@ def _load_run(run: Path, *, topology_index: int | None) -> dict[str, Any]:
     metrics = {view: _metric_row(run, view) for view in ("side", "top")}
     if any(metrics[view]["minimum_eigenvalue"] <= 0 for view in ("side", "top")):
         raise FloatingPointError(f"{run}: FP64 strict-SPD gate is not positive")
-    return {"path": str(run), "args": args, "predictions": predictions, "metrics": metrics}
+    return {
+        "path": str(run),
+        "args": args,
+        "predictions": predictions,
+        "metrics": metrics,
+        "missing_files": missing,
+    }
 
 
 def _protocol_mismatches(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
@@ -141,6 +161,21 @@ def _paired_row(true: dict[str, Any], null: dict[str, Any], view: str) -> dict[s
     }
 
 
+def _summarize_effects(values: np.ndarray) -> dict[str, float | bool]:
+    if values.size < 2:
+        raise ValueError("at least two topology effects are required")
+    quartiles = np.quantile(values, [0.25, 0.75])
+    return {
+        "null_minus_true_mean": float(values.mean()),
+        "null_minus_true_sample_std": float(values.std(ddof=1)),
+        "median": float(np.median(values)),
+        "iqr": float(quartiles[1] - quartiles[0]),
+        "minimum": float(values.min()),
+        "maximum": float(values.max()),
+        "all_positive": bool(np.all(values > 0)),
+    }
+
+
 def audit(root: Path, manifest_path: Path, true_run: Path) -> dict[str, Any]:
     manifest = _json(manifest_path)
     if manifest.get("outcome_filtered"):
@@ -148,7 +183,9 @@ def audit(root: Path, manifest_path: Path, true_run: Path) -> dict[str, Any]:
     records = manifest.get("records", [])
     if not records:
         raise ValueError("topology manifest has no records")
-    true = _load_run(true_run, topology_index=None)
+    true = _load_run(
+        true_run, topology_index=None, allow_missing_provenance=True
+    )
     results = []
     for record in records:
         index = int(record["index"])
@@ -177,13 +214,7 @@ def audit(root: Path, manifest_path: Path, true_run: Path) -> dict[str, Any]:
             [row["paired_nll"][view]["null_minus_true_mean"] for row in results],
             dtype=np.float64,
         )
-        summary[view] = {
-            "null_minus_true_mean": float(values.mean()),
-            "null_minus_true_sample_std": float(values.std(ddof=1)),
-            "minimum": float(values.min()),
-            "maximum": float(values.max()),
-            "all_positive": bool(np.all(values > 0)),
-        }
+        summary[view] = _summarize_effects(values)
     return {
         "schema_version": 1,
         "kind": "itop_degree_matched_topology_null_audit",
@@ -193,6 +224,7 @@ def audit(root: Path, manifest_path: Path, true_run: Path) -> dict[str, Any]:
         "model_seed": 42,
         "split_seed": 42,
         "true_run": str(true_run),
+        "true_run_missing_files": true["missing_files"],
         "topology_count": len(results),
         "per_topology": results,
         "summary": summary,
