@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,7 @@ from scripts.review_evidence_audit import (
     _load_prediction,
     validate_prediction_pair,
 )
+from scripts.train_itop import _build_model
 
 REQUIRED_FILES = (
     "args.json",
@@ -91,9 +93,21 @@ def _split_seed(args: dict[str, Any]) -> int:
     return int(args.get("split_seed", args.get("seed", -1)))
 
 
-def _metric_row(run: Path, view: str) -> dict[str, float | None]:
+def _metric_row(
+    run: Path,
+    view: str,
+    *,
+    legacy_minimum_eigenvalue: float | None = None,
+) -> dict[str, float | None]:
     metrics = _json(run / "metrics.json")[view]
     coverage = metrics.get("per_joint_marginal_coverage", {})
+    minimum_eigenvalue = (
+        float(metrics["scale_materialization"]["minimum_eigenvalue"])
+        if "scale_materialization" in metrics
+        else legacy_minimum_eigenvalue
+    )
+    if minimum_eigenvalue is None:
+        raise KeyError(f"{run}/{view}: missing scale_materialization")
     return {
         "nll": float(metrics["nll"]),
         "energy_score": float(metrics["energy_score_m"]),
@@ -101,10 +115,26 @@ def _metric_row(run: Path, view: str) -> dict[str, float | None]:
         "coverage90": _coverage_level(coverage, 0.9),
         "coverage95": _coverage_level(coverage, 0.95),
         "risk_coverage_auc_cm": float(metrics["frame_risk_coverage_auc_cm"]),
-        "minimum_eigenvalue": float(
-            metrics["scale_materialization"]["minimum_eigenvalue"]
-        ),
+        "minimum_eigenvalue": minimum_eigenvalue,
     }
+
+
+def _legacy_minimum_eigenvalue(
+    args: dict[str, Any], prediction: dict[str, Any]
+) -> float:
+    model, _ = _build_model(argparse.Namespace(**args))
+    if model.spd_map is None:
+        raise ValueError("legacy ITOP prediction has no SPD map")
+    model.spd_map = model.spd_map.to(torch.float64)
+    minimum = math.inf
+    params = prediction["params"].to(torch.float64)
+    for chunk in params.split(64):
+        precision = model.spd_map.precision(chunk)
+        minimum = min(
+            minimum,
+            float(torch.linalg.eigvalsh(precision).amax().reciprocal()),
+        )
+    return minimum
 
 
 def _load_run(
@@ -132,7 +162,23 @@ def _load_run(
     )
     if not finite:
         raise FloatingPointError(f"{run}: prediction artifact is non-finite")
-    metrics = {view: _metric_row(run, view) for view in ("side", "top")}
+    raw_metrics = _json(run / "metrics.json")
+    legacy_fields = []
+    legacy_minimums = {}
+    if any("scale_materialization" not in raw_metrics[view] for view in ("side", "top")):
+        if not allow_missing_provenance:
+            raise KeyError(f"{run}: missing scale_materialization")
+        legacy_fields.append("metrics.scale_materialization")
+        legacy_minimums = {
+            view: _legacy_minimum_eigenvalue(args, predictions[view])
+            for view in ("side", "top")
+        }
+    metrics = {
+        view: _metric_row(
+            run, view, legacy_minimum_eigenvalue=legacy_minimums.get(view)
+        )
+        for view in ("side", "top")
+    }
     if any(metrics[view]["minimum_eigenvalue"] <= 0 for view in ("side", "top")):
         raise FloatingPointError(f"{run}: FP64 strict-SPD gate is not positive")
     return {
@@ -141,6 +187,7 @@ def _load_run(
         "predictions": predictions,
         "metrics": metrics,
         "missing_files": missing,
+        "legacy_fields": legacy_fields,
     }
 
 
@@ -229,6 +276,7 @@ def audit(root: Path, manifest_path: Path, true_run: Path) -> dict[str, Any]:
         "split_seed": 42,
         "true_run": str(true_run),
         "true_run_missing_files": true["missing_files"],
+        "true_run_legacy_fields": true["legacy_fields"],
         "topology_count": len(results),
         "per_topology": results,
         "summary": summary,
