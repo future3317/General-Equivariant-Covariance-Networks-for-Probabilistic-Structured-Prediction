@@ -103,21 +103,22 @@ artifacts, finite predictions, and positive FP64 minimum eigenvalues.  Side
 train/validation selected each checkpoint; Top was evaluation-only.
 
 The reference is the previously frozen official-skeleton `graph_student_t`
-run.  That historical reference predates the provenance artifact field, so the
-audit records its missing `provenance.json` explicitly; no provenance gap is
-accepted for the 12 new null runs.
+run.  That historical reference predates the provenance and strict-SPD metric
+fields, so the audit records its missing `provenance.json` and
+`metrics.scale_materialization` explicitly and recomputes its FP64 minimum
+eigenvalue from saved parameters; no such gap is accepted for the 12 new null
+runs.
 
 For the fixed seed-42 reference, null-minus-reference frame NLL effects are:
 
 | View | Mean ± sample SD | Median | IQR | Min / Max |
 | --- | ---: | ---: | ---: | ---: |
-| Side | $-6.110 \pm 2.976$ | $-6.141$ | $4.009$ | $-12.344 / -2.843$ |
-| Top | $-5.657 \pm 4.795$ | $-6.347$ | $3.579$ | $-13.783 / 2.947$ |
+| Side | $14.791 \pm 2.976$ | $14.760$ | $4.009$ | $8.557 / 18.058$ |
+| Top | $23.339 \pm 4.795$ | $22.649$ | $3.579$ | $15.213 / 31.943$ |
 
-Negative values mean that the sampled null has lower NLL than the official
-skeleton reference.  All 12 Side effects are negative; 11/12 Top effects are
-negative and one is positive.  These are descriptive topology-draw statistics,
-not independent subject-level replicates.  The result therefore qualifies the
-three-seed fixed-tree contrast: it supports topology sensitivity of the graph
-precision family, but does not support the stronger claim that the official
-skeleton is superior to every degree-matched tree.
+Positive values mean that the sampled null has higher NLL than the official
+skeleton reference.  All 12 Side and all 12 Top effects are positive.  These
+are descriptive topology-draw statistics, not independent subject-level
+replicates.  The result strengthens the three-seed fixed-tree contrast and
+supports the official skeleton over this preregistered degree-matched null,
+without making a full claim about every possible topology.
