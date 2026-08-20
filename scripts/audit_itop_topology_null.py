@@ -87,6 +87,10 @@ def _missing_required_files(
     return missing
 
 
+def _split_seed(args: dict[str, Any]) -> int:
+    return int(args.get("split_seed", args.get("seed", -1)))
+
+
 def _metric_row(run: Path, view: str) -> dict[str, float | None]:
     metrics = _json(run / "metrics.json")[view]
     coverage = metrics.get("per_joint_marginal_coverage", {})
@@ -112,7 +116,7 @@ def _load_run(
     args = _json(run / "args.json")
     if topology_index is not None and int(args.get("topology_index", -1)) != topology_index:
         raise ValueError(f"{run}: topology index does not match manifest")
-    if int(args.get("seed", -1)) != 42 or int(args.get("split_seed", -1)) != 42:
+    if int(args.get("seed", -1)) != 42 or _split_seed(args) != 42:
         raise ValueError(f"{run}: expected model and split seed 42")
     if args.get("phase") != "frozen_head":
         raise ValueError(f"{run}: expected frozen_head phase")

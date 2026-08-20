@@ -2,6 +2,7 @@ import numpy as np
 
 from scripts.audit_itop_topology_null import (
     _missing_required_files,
+    _split_seed,
     _summarize_effects,
 )
 
@@ -25,6 +26,10 @@ def test_legacy_true_run_only_allows_missing_provenance(tmp_path) -> None:
     assert _missing_required_files(tmp_path, allow_missing_provenance=True) == [
         "provenance.json"
     ]
+
+
+def test_legacy_args_default_split_seed_to_model_seed() -> None:
+    assert _split_seed({"seed": 42}) == 42
 
 
 def test_summarize_effects_reports_descriptive_topology_spread() -> None:
